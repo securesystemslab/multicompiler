@@ -39,6 +39,7 @@
 #include "llvm/Support/FormattedStream.h"
 #include "llvm/Support/Host.h"
 #include "llvm/Support/MemoryBuffer.h"
+#include "llvm/Support/RandomNumberGenerator.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Support/Signals.h"
 #include "llvm/Support/TargetRegistry.h"
@@ -143,6 +144,7 @@ void LTOCodeGenerator::setTargetOptions(TargetOptions options) {
   Options.PositionIndependentExecutable = options.PositionIndependentExecutable;
   Options.EnableSegmentedStacks = options.EnableSegmentedStacks;
   Options.UseInitArray = options.UseInitArray;
+  Options.NOPInsertion = options.NOPInsertion;
 }
 
 void LTOCodeGenerator::setDebugInfo(lto_debug_model debug) {
@@ -466,7 +468,12 @@ bool LTOCodeGenerator::generateObjectFile(raw_ostream &out,
 
   Module *mergedModule = Linker.getModule();
 
-  // Mark which symbols can not be internalized
+  // if options were requested, set them
+  if ( !CodegenOptions.empty() )
+    cl::ParseCommandLineOptions(CodegenOptions.size(),
+                                const_cast<char **>(&CodegenOptions[0]));
+
+  // mark which symbols can not be internalized
   this->applyScopeRestrictions();
 
   // Instantiate the pass manager to organize the passes.

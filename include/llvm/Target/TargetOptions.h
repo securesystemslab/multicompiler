@@ -50,8 +50,9 @@ namespace llvm {
           GuaranteedTailCallOpt(false), DisableTailCalls(false),
           StackAlignmentOverride(0),
           EnableFastISel(false), PositionIndependentExecutable(false),
-          EnableSegmentedStacks(false), UseInitArray(false), TrapFuncName(""),
-          FloatABIType(FloatABI::Default), AllowFPOpFusion(FPOpFusion::Standard)
+          EnableSegmentedStacks(false), NOPInsertion(false), UseInitArray(false),
+          TrapFuncName(""), FloatABIType(FloatABI::Default),
+          AllowFPOpFusion(FPOpFusion::Standard)
     {}
 
     /// PrintMachineCode - This flag is enabled when the -print-machineinstrs
@@ -153,6 +154,9 @@ namespace llvm {
     unsigned PositionIndependentExecutable : 1;
 
     unsigned EnableSegmentedStacks : 1;
+
+    /// Attempt to insert NOPs
+    unsigned NOPInsertion : 1;
 
     /// UseInitArray - Use .init_array instead of .ctors for static
     /// constructors.

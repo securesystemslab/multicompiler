@@ -210,4 +210,9 @@ cl::opt<std::string> StartAfter("start-after",
                           cl::value_desc("pass-name"),
                           cl::init(""));
 
+cl::opt<bool>
+NOPInsertion("nop-insertion",
+             cl::desc("Randomly add NOPs."),
+             cl::init(false));
+
 #endif

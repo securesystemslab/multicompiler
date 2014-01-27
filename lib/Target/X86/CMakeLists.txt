@@ -13,6 +13,7 @@ tablegen(LLVM X86GenSubtargetInfo.inc -gen-subtarget)
 add_public_tablegen_target(X86CommonTableGen)
 
 set(sources
+  NOPInsertion.cpp
   X86AsmPrinter.cpp
   X86COFFMachineModuleInfo.cpp
   X86CodeEmitter.cpp

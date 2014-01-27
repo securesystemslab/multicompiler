@@ -28,6 +28,7 @@
 #include "llvm/IR/InlineAsm.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
+#include "llvm/Support/RandomNumberGenerator.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Target/TargetInstrInfo.h"
 #include "llvm/Target/TargetLowering.h"
@@ -102,6 +103,17 @@ static cl::opt<int> MaxReorderWindow(
 static cl::opt<unsigned> AvgIPC(
   "sched-avg-ipc", cl::Hidden, cl::init(1),
   cl::desc("Average inst/cycle whan no target itinerary exists."));
+
+static cl::opt<bool> RandomizeSchedule(
+  "sched-randomize",
+  cl::desc("Enable randomization of scheduling"),
+  cl::init(false));
+
+static cl::opt<unsigned> SchedRandPercentage(
+  "sched-randomize-percentage",
+  cl::desc("Percentage of instructions where schedule is randomized"),
+  cl::init(50));
+
 
 namespace {
 //===----------------------------------------------------------------------===//
@@ -1765,6 +1777,17 @@ template<class SF>
 class RegReductionPriorityQueue : public RegReductionPQBase {
   SF Picker;
 
+  static SUnit *popRandom(std::vector<SUnit*> &Q) {
+    RandomNumberGenerator *randGen =
+      RandomNumberGenerator::Generator();
+    size_t randIndex = randGen->Random(Q.size());
+    SUnit *V = Q[randIndex];
+    if (randIndex < Q.size() - 1)
+      std::swap(Q[randIndex], Q.back());
+    Q.pop_back();
+    return V;
+  }
+
 public:
   RegReductionPriorityQueue(MachineFunction &mf,
                             bool tracksrp,
@@ -1785,7 +1808,19 @@ public:
   SUnit *pop() {
     if (Queue.empty()) return NULL;
 
-    SUnit *V = popFromQueue(Queue, Picker, scheduleDAG);
+    SUnit *V;
+    if (RandomizeSchedule) {
+      RandomNumberGenerator *randGen =
+        RandomNumberGenerator::Generator();
+      unsigned int Roll = randGen->Random(100);
+      if (Roll < SchedRandPercentage) {
+        V = popRandom(Queue);
+      } else {
+        V = popFromQueue(Queue, Picker, scheduleDAG);
+      }
+    } else {
+      V = popFromQueue(Queue, Picker, scheduleDAG);
+    }
     V->NodeQueueId = 0;
     return V;
   }

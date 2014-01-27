@@ -75,6 +75,7 @@ static void lto_set_target_options(llvm::TargetOptions &Options) {
   Options.TrapFuncName = TrapFuncName;
   Options.PositionIndependentExecutable = EnablePIE;
   Options.EnableSegmentedStacks = SegmentedStacks;
+  Options.NOPInsertion = NOPInsertion;
   Options.UseInitArray = UseInitArray;
 }
 

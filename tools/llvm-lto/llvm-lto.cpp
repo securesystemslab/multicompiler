@@ -97,6 +97,7 @@ int main(int argc, char **argv) {
   Options.PositionIndependentExecutable = EnablePIE;
   Options.EnableSegmentedStacks = SegmentedStacks;
   Options.UseInitArray = UseInitArray;
+  Options.NOPInsertion = NOPInsertion;
 
   unsigned BaseArg = 0;
 
