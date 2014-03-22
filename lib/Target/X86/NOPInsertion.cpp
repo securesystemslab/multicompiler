@@ -89,7 +89,7 @@ bool NOPInsertionPass::runOnMachineFunction(MachineFunction &Fn) {
     MachineBasicBlock::iterator FirstTerm = BB->getFirstTerminator();
     // Insert NOPs before instruction.
     for (MachineBasicBlock::iterator I = BB->begin(); I != BB->end(); ) {
-      MachineBasicBlock::iterator NextI = llvm::next(I);
+      MachineBasicBlock::iterator NextI = std::next(I);
       if (I->isPseudo()) {
         I = NextI;
         continue;
@@ -139,6 +139,8 @@ bool NOPInsertionPass::runOnMachineFunction(MachineFunction &Fn) {
   return true;
 }
 
-FunctionPass *llvm::createNOPInsertionPass(bool is64Bit) {
-  return new NOPInsertionPass(is64Bit);
+namespace llvm {
+  FunctionPass *createNOPInsertionPass(bool is64Bit) {
+    return new NOPInsertionPass(is64Bit);
+  }
 }
