@@ -26,7 +26,7 @@ using namespace llvm;
 // command-line, so must be public
 std::string RandomNumberGenerator::SaltData;
 
-static cl::opt<unsigned long long>
+static cl::opt<uint64_t>
 RandomSeed("rng-seed", cl::value_desc("seed"),
            cl::desc("Seed for the random number generator"), cl::init(0));
 
@@ -37,22 +37,25 @@ SaltDataOpt("entropy-data",
             cl::Hidden, cl::location(RandomNumberGenerator::SaltData));
 
 static ManagedStatic<sys::ThreadLocal<const RandomNumberGenerator> > Instance;
-static unsigned InstanceCount = 0;
+static uint32_t InstanceCount = 0;
 
 RandomNumberGenerator::RandomNumberGenerator() {
   // Make sure each thread is seeded with a different seed
-  unsigned InstanceID = sys::AtomicIncrement(&InstanceCount);
+  uint32_t InstanceID = sys::AtomicIncrement(&InstanceCount);
 
   if (RandomSeed == 0 && SaltData.empty())
-    DEBUG(errs() << "Warning! Using unseeded random number generator\n");
+    DEBUG(errs()
+          << "Warning! Using unseeded and unsalted random number generator\n");
 
-  Seed(SaltData, RandomSeed + InstanceID);
+  Seed(SaltData, RandomSeed, InstanceID);
 }
 
-void RandomNumberGenerator::Seed(StringRef Salt, uint64_t Seed) {
+void RandomNumberGenerator::Seed(StringRef Salt, uint64_t Seed,
+                                 uint32_t InstanceID) {
   DEBUG(dbgs() << "Re-Seeding RNG from salt and seed\n");
   DEBUG(dbgs() << "Salt: " << Salt << "\n");
   DEBUG(dbgs() << "Seed: " << Seed << "\n");
+  DEBUG(dbgs() << "InstanceID: " << InstanceID << "\n");
 
   generator.seed(Seed);
   // TODO: How to incorporate Salt into seed?

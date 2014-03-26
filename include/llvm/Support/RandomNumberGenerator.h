@@ -50,12 +50,11 @@ private:
   RandomNumberGenerator();
 
   // Noncopyable.
-  RandomNumberGenerator(
-      const RandomNumberGenerator &other) LLVM_DELETED_FUNCTION;
+  RandomNumberGenerator(const RandomNumberGenerator &other) = delete;
   RandomNumberGenerator &
-  operator=(const RandomNumberGenerator &other) LLVM_DELETED_FUNCTION;
+  operator=(const RandomNumberGenerator &other) = delete;
 
-  void Seed(StringRef Salt, uint64_t Seed);
+  void Seed(StringRef Salt, uint64_t Seed, uint32_t InstanceID);
 };
 }
 
