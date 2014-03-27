@@ -54,7 +54,7 @@ private:
   RandomNumberGenerator &
   operator=(const RandomNumberGenerator &other) = delete;
 
-  void Seed(StringRef Salt, uint64_t Seed, uint32_t InstanceID);
+  void Seed(StringRef Salt, uint64_t Seed, unsigned InstanceID);
 };
 }
 

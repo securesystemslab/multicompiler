@@ -37,11 +37,11 @@ SaltDataOpt("entropy-data",
             cl::Hidden, cl::location(RandomNumberGenerator::SaltData));
 
 static ManagedStatic<sys::ThreadLocal<const RandomNumberGenerator> > Instance;
-static uint32_t InstanceCount = 0;
+static unsigned InstanceCount = 0;
 
 RandomNumberGenerator::RandomNumberGenerator() {
   // Make sure each thread is seeded with a different seed
-  uint32_t InstanceID = sys::AtomicIncrement(&InstanceCount);
+  unsigned InstanceID = sys::AtomicIncrement(&InstanceCount);
 
   if (RandomSeed == 0 && SaltData.empty())
     DEBUG(errs()
@@ -51,18 +51,27 @@ RandomNumberGenerator::RandomNumberGenerator() {
 }
 
 void RandomNumberGenerator::Seed(StringRef Salt, uint64_t Seed,
-                                 uint32_t InstanceID) {
+                                 unsigned InstanceID) {
   DEBUG(dbgs() << "Re-Seeding RNG from salt and seed\n");
   DEBUG(dbgs() << "Salt: " << Salt << "\n");
   DEBUG(dbgs() << "Seed: " << Seed << "\n");
   DEBUG(dbgs() << "InstanceID: " << InstanceID << "\n");
 
-  generator.seed(Seed);
-  // TODO: How to incorporate Salt into seed?
+  // Sequence: Seed-low, Seed-high, InstanceId, Salt...
+  unsigned SeedSize = Salt.size() + 3;
+  unsigned Seeds[SeedSize];
+  Seeds[0] = Seed;
+  Seeds[1] = Seed >> 32;
+  Seeds[2] = InstanceID;
+  for (unsigned i = 0; i < Salt.size(); ++i)
+    Seeds[3 + i] = Salt[i];
+
+  std::seed_seq SeedSeq(Seeds, Seeds + SeedSize);
+  generator.seed(SeedSeq);
 }
 
 uint64_t RandomNumberGenerator::Random(uint64_t Max) {
-  std::uniform_int_distribution<int> distribution(0, Max - 1);
+  std::uniform_int_distribution<uint64_t> distribution(0, Max - 1);
   return distribution(generator);
 }
 
