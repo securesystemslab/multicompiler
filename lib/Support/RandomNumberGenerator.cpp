@@ -7,7 +7,8 @@
 //
 //===----------------------------------------------------------------------===//
 //
-//  This file implements cryptographically secure random number generation
+//  This file implements cryptographically secure random number generation.
+//  TODO: not secure! cryptographically secure
 //
 //===----------------------------------------------------------------------===//
 
@@ -21,10 +22,8 @@
 
 using namespace llvm;
 
-// Only read by threads, so no locking
-// Needs to be available for SaltDataOpt to set by testing
-// command-line, so must be public
-std::string RandomNumberGenerator::SaltData;
+// Only read by threads, so no locking required.
+static std::string SaltData;
 
 static cl::opt<uint64_t>
 RandomSeed("rng-seed", cl::value_desc("seed"),
@@ -34,10 +33,26 @@ static cl::opt<std::string, true>
 SaltDataOpt("entropy-data",
             cl::desc("Entropy data for the RNG (testing only, should be set "
                      "by command line options"),
-            cl::Hidden, cl::location(RandomNumberGenerator::SaltData));
+            cl::Hidden, cl::location(SaltData));
 
 static ManagedStatic<sys::ThreadLocal<const RandomNumberGenerator> > Instance;
 static unsigned InstanceCount = 0;
+
+void RandomNumberGenerator::SetSalt(const StringRef &Salt) {
+  SaltData = Salt;
+}
+
+RandomNumberGenerator *RandomNumberGenerator::Generator() {
+  RandomNumberGenerator *RNG =
+      const_cast<RandomNumberGenerator *>(Instance->get());
+
+  if (RNG == 0) {
+    RNG = new RandomNumberGenerator;
+    Instance->set(RNG);
+  }
+
+  return RNG;
+}
 
 RandomNumberGenerator::RandomNumberGenerator() {
   // Make sure each thread is seeded with a different seed
@@ -48,6 +63,11 @@ RandomNumberGenerator::RandomNumberGenerator() {
           << "Warning! Using unseeded and unsalted random number generator\n");
 
   Seed(SaltData, RandomSeed, InstanceID);
+}
+
+uint64_t RandomNumberGenerator::Random(uint64_t Max) {
+  std::uniform_int_distribution<uint64_t> distribution(0, Max - 1);
+  return distribution(generator);
 }
 
 void RandomNumberGenerator::Seed(StringRef Salt, uint64_t Seed,
@@ -68,21 +88,4 @@ void RandomNumberGenerator::Seed(StringRef Salt, uint64_t Seed,
 
   std::seed_seq SeedSeq(Seeds, Seeds + SeedSize);
   generator.seed(SeedSeq);
-}
-
-uint64_t RandomNumberGenerator::Random(uint64_t Max) {
-  std::uniform_int_distribution<uint64_t> distribution(0, Max - 1);
-  return distribution(generator);
-}
-
-RandomNumberGenerator *RandomNumberGenerator::Generator() {
-  RandomNumberGenerator *RNG =
-      const_cast<RandomNumberGenerator *>(Instance->get());
-
-  if (RNG == 0) {
-    RNG = new RandomNumberGenerator;
-    Instance->set(RNG);
-  }
-
-  return RNG;
 }
