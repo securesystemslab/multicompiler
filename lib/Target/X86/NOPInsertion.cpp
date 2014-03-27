@@ -95,12 +95,12 @@ bool NOPInsertionPass::runOnMachineFunction(MachineFunction &Fn) {
         continue;
       }
       // Insert random number of NOP-like instructions.
-      for (unsigned int i = 0; i < MaxNOPsPerInstruction; i++) {
-        unsigned int Roll = RandomNumberGenerator::Generator()->Random(100);
+      for (unsigned i = 0; i < MaxNOPsPerInstruction; i++) {
+        unsigned Roll = RandomNumberGenerator::Get()->Random(100);
         if (Roll >= NOPInsertionPercentage)
           continue;
 
-        int NOPCode = RandomNumberGenerator::Generator()->Random(MAX_NOPS);
+        unsigned NOPCode = RandomNumberGenerator::Get()->Random(MAX_NOPS);
 
         MachineInstr *NewMI = NULL;
         unsigned reg = nopRegs[NOPCode][is64Bit];

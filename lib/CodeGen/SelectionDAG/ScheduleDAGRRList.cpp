@@ -1770,8 +1770,7 @@ class RegReductionPriorityQueue : public RegReductionPQBase {
   SF Picker;
 
   static SUnit *popRandom(std::vector<SUnit*> &Q) {
-    RandomNumberGenerator *randGen =
-      RandomNumberGenerator::Generator();
+    RandomNumberGenerator *randGen = RandomNumberGenerator::Get();
     size_t randIndex = randGen->Random(Q.size());
     SUnit *V = Q[randIndex];
     if (randIndex < Q.size() - 1)
@@ -1802,8 +1801,7 @@ public:
 
     SUnit *V;
     if (RandomizeSchedule) {
-      RandomNumberGenerator *randGen =
-        RandomNumberGenerator::Generator();
+      RandomNumberGenerator *randGen = RandomNumberGenerator::Get();
       unsigned int Roll = randGen->Random(100);
       if (Roll < SchedRandPercentage) {
         V = popRandom(Queue);

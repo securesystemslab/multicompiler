@@ -42,7 +42,7 @@ void RandomNumberGenerator::SetSalt(const StringRef &Salt) {
   SaltData = Salt;
 }
 
-RandomNumberGenerator *RandomNumberGenerator::Generator() {
+RandomNumberGenerator *RandomNumberGenerator::Get() {
   RandomNumberGenerator *RNG =
       const_cast<RandomNumberGenerator *>(Instance->get());
 

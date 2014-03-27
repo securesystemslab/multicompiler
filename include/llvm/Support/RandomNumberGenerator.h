@@ -33,7 +33,7 @@ public:
   /// compilation unit.
   static void SetSalt(const StringRef &Salt);
 
-  static RandomNumberGenerator *Generator();
+  static RandomNumberGenerator *Get();
 
   /// \brief Returns a random number in the range [0, Max).
   uint64_t Random(uint64_t Max);
