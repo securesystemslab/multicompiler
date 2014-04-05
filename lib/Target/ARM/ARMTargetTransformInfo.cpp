@@ -32,7 +32,7 @@ void initializeARMTTIPass(PassRegistry &);
 
 namespace {
 
-class ARMTTI LLVM_FINAL : public ImmutablePass, public TargetTransformInfo {
+class ARMTTI final : public ImmutablePass, public TargetTransformInfo {
   const ARMBaseTargetMachine *TM;
   const ARMSubtarget *ST;
   const ARMTargetLowering *TLI;
@@ -52,15 +52,11 @@ public:
     initializeARMTTIPass(*PassRegistry::getPassRegistry());
   }
 
-  virtual void initializePass() LLVM_OVERRIDE {
+  void initializePass() override {
     pushTTIStack(this);
   }
 
-  virtual void finalizePass() {
-    popTTIStack();
-  }
-
-  virtual void getAnalysisUsage(AnalysisUsage &AU) const LLVM_OVERRIDE {
+  void getAnalysisUsage(AnalysisUsage &AU) const override {
     TargetTransformInfo::getAnalysisUsage(AU);
   }
 
@@ -68,7 +64,7 @@ public:
   static char ID;
 
   /// Provide necessary pointer adjustments for the two base classes.
-  virtual void *getAdjustedAnalysisPointer(const void *ID) LLVM_OVERRIDE {
+  void *getAdjustedAnalysisPointer(const void *ID) override {
     if (ID == &TargetTransformInfo::ID)
       return (TargetTransformInfo*)this;
     return this;
@@ -77,8 +73,7 @@ public:
   /// \name Scalar TTI Implementations
   /// @{
   using TargetTransformInfo::getIntImmCost;
-  virtual unsigned
-  getIntImmCost(const APInt &Imm, Type *Ty) const LLVM_OVERRIDE;
+  unsigned getIntImmCost(const APInt &Imm, Type *Ty) const override;
 
   /// @}
 
@@ -86,7 +81,7 @@ public:
   /// \name Vector TTI Implementations
   /// @{
 
-  unsigned getNumberOfRegisters(bool Vector) const {
+  unsigned getNumberOfRegisters(bool Vector) const override {
     if (Vector) {
       if (ST->hasNEON())
         return 16;
@@ -95,10 +90,10 @@ public:
 
     if (ST->isThumb1Only())
       return 8;
-    return 16;
+    return 13;
   }
 
-  unsigned getRegisterBitWidth(bool Vector) const {
+  unsigned getRegisterBitWidth(bool Vector) const override {
     if (Vector) {
       if (ST->hasNEON())
         return 128;
@@ -108,7 +103,7 @@ public:
     return 32;
   }
 
-  unsigned getMaximumUnrollFactor() const {
+  unsigned getMaximumUnrollFactor() const override {
     // These are out of order CPUs:
     if (ST->isCortexA15() || ST->isSwift())
       return 2;
@@ -116,23 +111,27 @@ public:
   }
 
   unsigned getShuffleCost(ShuffleKind Kind, Type *Tp,
-                          int Index, Type *SubTp) const;
+                          int Index, Type *SubTp) const override;
 
   unsigned getCastInstrCost(unsigned Opcode, Type *Dst,
-                                      Type *Src) const;
+                            Type *Src) const override;
 
-  unsigned getCmpSelInstrCost(unsigned Opcode, Type *ValTy, Type *CondTy) const;
+  unsigned getCmpSelInstrCost(unsigned Opcode, Type *ValTy,
+                              Type *CondTy) const override;
 
-  unsigned getVectorInstrCost(unsigned Opcode, Type *Val, unsigned Index) const;
+  unsigned getVectorInstrCost(unsigned Opcode, Type *Val,
+                              unsigned Index) const override;
 
-  unsigned getAddressComputationCost(Type *Val, bool IsComplex) const;
+  unsigned getAddressComputationCost(Type *Val,
+                                     bool IsComplex) const override;
 
-  unsigned getArithmeticInstrCost(unsigned Opcode, Type *Ty,
-                                  OperandValueKind Op1Info = OK_AnyValue,
-                                  OperandValueKind Op2Info = OK_AnyValue) const;
+  unsigned
+  getArithmeticInstrCost(unsigned Opcode, Type *Ty,
+                         OperandValueKind Op1Info = OK_AnyValue,
+                         OperandValueKind Op2Info = OK_AnyValue) const override;
 
   unsigned getMemoryOpCost(unsigned Opcode, Type *Src, unsigned Alignment,
-                           unsigned AddressSpace) const;
+                           unsigned AddressSpace) const override;
   /// @}
 };
 
@@ -163,21 +162,21 @@ unsigned ARMTTI::getIntImmCost(const APInt &Imm, Type *Ty) const {
         (ARM_AM::getSOImmVal(~ZImmVal) != -1))
       return 1;
     return ST->hasV6T2Ops() ? 2 : 3;
-  } else if (ST->isThumb2()) {
+  }
+  if (ST->isThumb2()) {
     if ((SImmVal >= 0 && SImmVal < 65536) ||
         (ARM_AM::getT2SOImmVal(ZImmVal) != -1) ||
         (ARM_AM::getT2SOImmVal(~ZImmVal) != -1))
       return 1;
     return ST->hasV6T2Ops() ? 2 : 3;
-  } else /*Thumb1*/ {
-    if (SImmVal >= 0 && SImmVal < 256)
-      return 1;
-    if ((~ZImmVal < 256) || ARM_AM::isThumbImmShiftedVal(ZImmVal))
-      return 2;
-    // Load from constantpool.
-    return 3;
   }
-  return 2;
+  // Thumb1.
+  if (SImmVal >= 0 && SImmVal < 256)
+    return 1;
+  if ((~ZImmVal < 256) || ARM_AM::isThumbImmShiftedVal(ZImmVal))
+    return 2;
+  // Load from constantpool.
+  return 3;
 }
 
 unsigned ARMTTI::getCastInstrCost(unsigned Opcode, Type *Dst,

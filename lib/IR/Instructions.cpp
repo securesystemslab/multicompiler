@@ -14,14 +14,14 @@
 
 #include "llvm/IR/Instructions.h"
 #include "LLVMContextImpl.h"
+#include "llvm/IR/CallSite.h"
+#include "llvm/IR/ConstantRange.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Operator.h"
-#include "llvm/Support/CallSite.h"
-#include "llvm/Support/ConstantRange.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/MathExtras.h"
 using namespace llvm;
@@ -1216,12 +1216,14 @@ void StoreInst::setAlignment(unsigned Align) {
 //===----------------------------------------------------------------------===//
 
 void AtomicCmpXchgInst::Init(Value *Ptr, Value *Cmp, Value *NewVal,
-                             AtomicOrdering Ordering,
+                             AtomicOrdering SuccessOrdering,
+                             AtomicOrdering FailureOrdering,
                              SynchronizationScope SynchScope) {
   Op<0>() = Ptr;
   Op<1>() = Cmp;
   Op<2>() = NewVal;
-  setOrdering(Ordering);
+  setSuccessOrdering(SuccessOrdering);
+  setFailureOrdering(FailureOrdering);
   setSynchScope(SynchScope);
 
   assert(getOperand(0) && getOperand(1) && getOperand(2) &&
@@ -1234,30 +1236,38 @@ void AtomicCmpXchgInst::Init(Value *Ptr, Value *Cmp, Value *NewVal,
   assert(getOperand(2)->getType() ==
                  cast<PointerType>(getOperand(0)->getType())->getElementType()
          && "Ptr must be a pointer to NewVal type!");
-  assert(Ordering != NotAtomic &&
+  assert(SuccessOrdering != NotAtomic &&
          "AtomicCmpXchg instructions must be atomic!");
+  assert(FailureOrdering != NotAtomic &&
+         "AtomicCmpXchg instructions must be atomic!");
+  assert(SuccessOrdering >= FailureOrdering &&
+         "AtomicCmpXchg success ordering must be at least as strong as fail");
+  assert(FailureOrdering != Release && FailureOrdering != AcquireRelease &&
+         "AtomicCmpXchg failure ordering cannot include release semantics");
 }
 
 AtomicCmpXchgInst::AtomicCmpXchgInst(Value *Ptr, Value *Cmp, Value *NewVal,
-                                     AtomicOrdering Ordering,
+                                     AtomicOrdering SuccessOrdering,
+                                     AtomicOrdering FailureOrdering,
                                      SynchronizationScope SynchScope,
                                      Instruction *InsertBefore)
   : Instruction(Cmp->getType(), AtomicCmpXchg,
                 OperandTraits<AtomicCmpXchgInst>::op_begin(this),
                 OperandTraits<AtomicCmpXchgInst>::operands(this),
                 InsertBefore) {
-  Init(Ptr, Cmp, NewVal, Ordering, SynchScope);
+  Init(Ptr, Cmp, NewVal, SuccessOrdering, FailureOrdering, SynchScope);
 }
 
 AtomicCmpXchgInst::AtomicCmpXchgInst(Value *Ptr, Value *Cmp, Value *NewVal,
-                                     AtomicOrdering Ordering,
+                                     AtomicOrdering SuccessOrdering,
+                                     AtomicOrdering FailureOrdering,
                                      SynchronizationScope SynchScope,
                                      BasicBlock *InsertAtEnd)
   : Instruction(Cmp->getType(), AtomicCmpXchg,
                 OperandTraits<AtomicCmpXchgInst>::op_begin(this),
                 OperandTraits<AtomicCmpXchgInst>::operands(this),
                 InsertAtEnd) {
-  Init(Ptr, Cmp, NewVal, Ordering, SynchScope);
+  Init(Ptr, Cmp, NewVal, SuccessOrdering, FailureOrdering, SynchScope);
 }
  
 //===----------------------------------------------------------------------===//
@@ -1578,11 +1588,11 @@ bool ShuffleVectorInst::isValidOperands(const Value *V1, const Value *V2,
 
   if (const ConstantVector *MV = dyn_cast<ConstantVector>(Mask)) {
     unsigned V1Size = cast<VectorType>(V1->getType())->getNumElements();
-    for (unsigned i = 0, e = MV->getNumOperands(); i != e; ++i) {
-      if (ConstantInt *CI = dyn_cast<ConstantInt>(MV->getOperand(i))) {
+    for (Value *Op : MV->operands()) {
+      if (ConstantInt *CI = dyn_cast<ConstantInt>(Op)) {
         if (CI->uge(V1Size*2))
           return false;
-      } else if (!isa<UndefValue>(MV->getOperand(i))) {
+      } else if (!isa<UndefValue>(Op)) {
         return false;
       }
     }
@@ -1702,8 +1712,7 @@ ExtractValueInst::ExtractValueInst(const ExtractValueInst &EVI)
 //
 Type *ExtractValueInst::getIndexedType(Type *Agg,
                                        ArrayRef<unsigned> Idxs) {
-  for (unsigned CurIdx = 0; CurIdx != Idxs.size(); ++CurIdx) {
-    unsigned Index = Idxs[CurIdx];
+  for (unsigned Index : Idxs) {
     // We can't use CompositeType::indexValid(Index) here.
     // indexValid() always returns true for arrays because getelementptr allows
     // out-of-bounds indices. Since we don't allow those for extractvalue and
@@ -2115,8 +2124,27 @@ bool CastInst::isNoopCast(Type *IntPtrTy) const {
   return isNoopCast(getOpcode(), getOperand(0)->getType(), getType(), IntPtrTy);
 }
 
-/// This function determines if a pair of casts can be eliminated and what 
-/// opcode should be used in the elimination. This assumes that there are two 
+bool CastInst::isNoopCast(const DataLayout *DL) const {
+  if (!DL) {
+    // Assume maximum pointer size.
+    return isNoopCast(Type::getInt64Ty(getContext()));
+  }
+
+  Type *PtrOpTy = 0;
+  if (getOpcode() == Instruction::PtrToInt)
+    PtrOpTy = getOperand(0)->getType();
+  else if (getOpcode() == Instruction::IntToPtr)
+    PtrOpTy = getType();
+
+  Type *IntPtrTy = PtrOpTy
+                 ? DL->getIntPtrType(PtrOpTy)
+                 : DL->getIntPtrType(getContext(), 0);
+
+  return isNoopCast(getOpcode(), getOperand(0)->getType(), getType(), IntPtrTy);
+}
+
+/// This function determines if a pair of casts can be eliminated and what
+/// opcode should be used in the elimination. This assumes that there are two
 /// instructions like this:
 /// *  %F = firstOpcode SrcTy %x to MidTy
 /// *  %S = secondOpcode MidTy %F to DstTy
@@ -3578,7 +3606,8 @@ StoreInst *StoreInst::clone_impl() const {
 AtomicCmpXchgInst *AtomicCmpXchgInst::clone_impl() const {
   AtomicCmpXchgInst *Result =
     new AtomicCmpXchgInst(getOperand(0), getOperand(1), getOperand(2),
-                          getOrdering(), getSynchScope());
+                          getSuccessOrdering(), getFailureOrdering(),
+                          getSynchScope());
   Result->setVolatile(isVolatile());
   return Result;
 }

@@ -20,19 +20,21 @@ static const unsigned CodeModelLargeSize = 256;
    const MCSection *BSSSectionLarge;
    const MCSection *DataSectionLarge;
    const MCSection *ReadOnlySectionLarge;
+   const MCSection *DataRelROSectionLarge;
   public:
     void Initialize(MCContext &Ctx, const TargetMachine &TM);
 
-    virtual const MCSection *
-    getExplicitSectionGlobal(const GlobalValue *GV, SectionKind Kind,
-                             Mangler *Mang, const TargetMachine &TM) const;
+    const MCSection *
+      getExplicitSectionGlobal(const GlobalValue *GV,
+                               SectionKind Kind, Mangler &Mang,
+                               const TargetMachine &TM) const override;
 
-    virtual const MCSection *SelectSectionForGlobal(const GlobalValue *GV,
-                                                    SectionKind Kind,
-                                                    Mangler *Mang,
-                                                    TargetMachine &TM) const;
+    const MCSection *
+      SelectSectionForGlobal(const GlobalValue *GV, SectionKind Kind,
+                             Mangler &Mang,
+                             const TargetMachine &TM) const override;
 
-    virtual const MCSection *getSectionForConstant(SectionKind Kind) const;
+    const MCSection *getSectionForConstant(SectionKind Kind) const override;
   };
 } // end namespace llvm
 

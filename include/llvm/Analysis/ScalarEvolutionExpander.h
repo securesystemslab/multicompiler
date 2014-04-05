@@ -16,9 +16,9 @@
 
 #include "llvm/Analysis/ScalarEvolutionExpressions.h"
 #include "llvm/Analysis/ScalarEvolutionNormalization.h"
+#include "llvm/Analysis/TargetFolder.h"
 #include "llvm/IR/IRBuilder.h"
-#include "llvm/Support/TargetFolder.h"
-#include "llvm/Support/ValueHandle.h"
+#include "llvm/IR/ValueHandle.h"
 #include <set>
 
 namespace llvm {
@@ -94,7 +94,7 @@ namespace llvm {
     explicit SCEVExpander(ScalarEvolution &se, const char *name)
       : SE(se), IVName(name), IVIncInsertLoop(0), IVIncInsertPos(0),
         CanonicalMode(true), LSRMode(false),
-        Builder(se.getContext(), TargetFolder(se.TD)) {
+        Builder(se.getContext(), TargetFolder(se.DL)) {
 #ifndef NDEBUG
       DebugType = "";
 #endif
@@ -260,7 +260,9 @@ namespace llvm {
     PHINode *getAddRecExprPHILiterally(const SCEVAddRecExpr *Normalized,
                                        const Loop *L,
                                        Type *ExpandTy,
-                                       Type *IntTy);
+                                       Type *IntTy,
+                                       Type *&TruncTy,
+                                       bool &InvertStep);
     Value *expandIVInc(PHINode *PN, Value *StepV, const Loop *L,
                        Type *ExpandTy, Type *IntTy, bool useSubtract);
   };

@@ -23,14 +23,14 @@
 
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/FoldingSet.h"
+#include "llvm/IR/ConstantRange.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Operator.h"
+#include "llvm/IR/ValueHandle.h"
 #include "llvm/Pass.h"
 #include "llvm/Support/Allocator.h"
-#include "llvm/Support/ConstantRange.h"
 #include "llvm/Support/DataTypes.h"
-#include "llvm/Support/ValueHandle.h"
 #include <map>
 
 namespace llvm {
@@ -207,8 +207,8 @@ namespace llvm {
     /// notified whenever a Value is deleted.
     class SCEVCallbackVH : public CallbackVH {
       ScalarEvolution *SE;
-      virtual void deleted();
-      virtual void allUsesReplacedWith(Value *New);
+      void deleted() override;
+      void allUsesReplacedWith(Value *New) override;
     public:
       SCEVCallbackVH(Value *V, ScalarEvolution *SE = 0);
     };
@@ -225,9 +225,9 @@ namespace llvm {
     ///
     LoopInfo *LI;
 
-    /// TD - The target data information for the target we are targeting.
+    /// The DataLayout information for the target we are targeting.
     ///
-    DataLayout *TD;
+    const DataLayout *DL;
 
     /// TLI - The target library information for the target we are targeting.
     ///
@@ -468,6 +468,13 @@ namespace llvm {
                                        BasicBlock *TBB,
                                        BasicBlock *FBB,
                                        bool IsSubExpr);
+
+    /// ComputeExitLimitFromSingleExitSwitch - Compute the number of times the
+    /// backedge of the specified loop will execute if its exit condition were a
+    /// switch with a single exiting case to ExitingBB.
+    ExitLimit
+    ComputeExitLimitFromSingleExitSwitch(const Loop *L, SwitchInst *Switch,
+                               BasicBlock *ExitingBB, bool IsSubExpr);
 
     /// ComputeLoadConstantCompareExitLimit - Given an exit condition
     /// of 'icmp op load X, cst', try to see if we can compute the
@@ -887,11 +894,11 @@ namespace llvm {
     /// indirect operand.
     bool hasOperand(const SCEV *S, const SCEV *Op) const;
 
-    virtual bool runOnFunction(Function &F);
-    virtual void releaseMemory();
-    virtual void getAnalysisUsage(AnalysisUsage &AU) const;
-    virtual void print(raw_ostream &OS, const Module* = 0) const;
-    virtual void verifyAnalysis() const;
+    bool runOnFunction(Function &F) override;
+    void releaseMemory() override;
+    void getAnalysisUsage(AnalysisUsage &AU) const override;
+    void print(raw_ostream &OS, const Module* = 0) const override;
+    void verifyAnalysis() const override;
 
   private:
     /// Compute the backedge taken count knowing the interval difference, the

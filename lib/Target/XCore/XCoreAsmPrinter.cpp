@@ -14,12 +14,12 @@
 
 #define DEBUG_TYPE "asm-printer"
 #include "XCore.h"
-#include "XCoreTargetStreamer.h"
 #include "InstPrinter/XCoreInstPrinter.h"
 #include "XCoreInstrInfo.h"
 #include "XCoreMCInstLower.h"
 #include "XCoreSubtarget.h"
 #include "XCoreTargetMachine.h"
+#include "XCoreTargetStreamer.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/CodeGen/AsmPrinter.h"
@@ -28,9 +28,9 @@
 #include "llvm/CodeGen/MachineInstr.h"
 #include "llvm/CodeGen/MachineJumpTableInfo.h"
 #include "llvm/CodeGen/MachineModuleInfo.h"
-#include "llvm/DebugInfo.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DataLayout.h"
+#include "llvm/IR/DebugInfo.h"
 #include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/Mangler.h"
 #include "llvm/IR/Module.h"
@@ -71,6 +71,9 @@ namespace {
     bool PrintAsmOperand(const MachineInstr *MI, unsigned OpNo,
                          unsigned AsmVariant, const char *ExtraCode,
                          raw_ostream &O);
+    bool PrintAsmMemoryOperand(const MachineInstr *MI, unsigned OpNum,
+                               unsigned AsmVariant, const char *ExtraCode,
+                               raw_ostream &O) override;
 
     void emitArrayBound(MCSymbol *Sym, const GlobalVariable *GV);
     virtual void EmitGlobalVariable(const GlobalVariable *GV);
@@ -87,9 +90,9 @@ XCoreTargetStreamer &XCoreAsmPrinter::getTargetStreamer() {
 }
 
 void XCoreAsmPrinter::emitArrayBound(MCSymbol *Sym, const GlobalVariable *GV) {
-  assert(((GV->hasExternalLinkage() ||
-    GV->hasWeakLinkage()) ||
-    GV->hasLinkOnceLinkage()) && "Unexpected linkage");
+  assert( ( GV->hasExternalLinkage() || GV->hasWeakLinkage() ||
+            GV->hasLinkOnceLinkage() || GV->hasCommonLinkage() ) &&
+          "Unexpected linkage");
   if (ArrayType *ATy = dyn_cast<ArrayType>(
                         cast<PointerType>(GV->getType())->getElementType())) {
 
@@ -99,7 +102,8 @@ void XCoreAsmPrinter::emitArrayBound(MCSymbol *Sym, const GlobalVariable *GV) {
     OutStreamer.EmitAssignment(SymGlob,
                                MCConstantExpr::Create(ATy->getNumElements(),
                                                       OutContext));
-    if (GV->hasWeakLinkage() || GV->hasLinkOnceLinkage()) {
+    if (GV->hasWeakLinkage() || GV->hasLinkOnceLinkage() ||
+        GV->hasCommonLinkage()) {
       // TODO Use COMDAT groups for LinkOnceLinkage
       OutStreamer.EmitSymbolAttribute(SymGlob, MCSA_Weak);
     }
@@ -113,9 +117,9 @@ void XCoreAsmPrinter::EmitGlobalVariable(const GlobalVariable *GV) {
     return;
 
   const DataLayout *TD = TM.getDataLayout();
-  OutStreamer.SwitchSection(getObjFileLowering().SectionForGlobal(GV, Mang,TM));
+  OutStreamer.SwitchSection(
+      getObjFileLowering().SectionForGlobal(GV, *Mang, TM));
 
-  
   MCSymbol *GVSym = getSymbol(GV);
   const Constant *C = GV->getInitializer();
   unsigned Align = (unsigned)TD->getPreferredTypeAlignmentShift(C->getType());
@@ -131,11 +135,13 @@ void XCoreAsmPrinter::EmitGlobalVariable(const GlobalVariable *GV) {
   case GlobalValue::WeakAnyLinkage:
   case GlobalValue::WeakODRLinkage:
   case GlobalValue::ExternalLinkage:
+  case GlobalValue::CommonLinkage:
     emitArrayBound(GVSym, GV);
     OutStreamer.EmitSymbolAttribute(GVSym, MCSA_Global);
 
     // TODO Use COMDAT groups for LinkOnceLinkage
-    if (GV->hasWeakLinkage() || GV->hasLinkOnceLinkage())
+    if (GV->hasWeakLinkage() || GV->hasLinkOnceLinkage() ||
+        GV->hasCommonLinkage())
       OutStreamer.EmitSymbolAttribute(GVSym, MCSA_Weak);
     // FALL THROUGH
   case GlobalValue::InternalLinkage:
@@ -245,6 +251,20 @@ bool XCoreAsmPrinter::PrintAsmOperand(const MachineInstr *MI, unsigned OpNo,
   return AsmPrinter::PrintAsmOperand(MI, OpNo, AsmVariant, ExtraCode, O);
 }
 
+bool XCoreAsmPrinter::
+PrintAsmMemoryOperand(const MachineInstr *MI, unsigned OpNum,
+                      unsigned AsmVariant, const char *ExtraCode,
+                      raw_ostream &O) {
+  if (ExtraCode && ExtraCode[0]) {
+    return true; // Unknown modifier.
+  }
+  printOperand(MI, OpNum, O);
+  O << '[';
+  printOperand(MI, OpNum + 1, O);
+  O << ']';
+  return false;
+}
+
 void XCoreAsmPrinter::EmitInstruction(const MachineInstr *MI) {
   SmallString<128> Str;
   raw_svector_ostream O(Str);
@@ -277,7 +297,7 @@ void XCoreAsmPrinter::EmitInstruction(const MachineInstr *MI) {
   MCInst TmpInst;
   MCInstLowering.Lower(MI, TmpInst);
 
-  OutStreamer.EmitInstruction(TmpInst);
+  EmitToStreamer(OutStreamer, TmpInst);
 }
 
 // Force static initialization.

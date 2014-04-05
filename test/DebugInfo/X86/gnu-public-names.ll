@@ -47,8 +47,8 @@
 
 ; CHECK: .debug_info contents:
 ; CHECK: Compile Unit: length = [[UNIT_SIZE:[0-9a-f]+]]
-; CHECK: DW_AT_GNU_pubnames [DW_FORM_sec_offset]   (0x00000000)
-; CHECK: DW_AT_GNU_pubtypes [DW_FORM_sec_offset]   (0x00000000)
+; CHECK: DW_AT_GNU_pubnames [DW_FORM_flag_present]   (true)
+; CHECK-NOT: DW_AT_GNU_pubtypes [
 
 ; CHECK: [[C:[0-9a-f]+]]: DW_TAG_structure_type
 ; CHECK-NEXT: DW_AT_name {{.*}} "C"
@@ -127,8 +127,8 @@
 
 ; DWARF3: .debug_info contents:
 ; DWARF3: Compile Unit: length = [[UNIT_SIZE:[0-9a-f]+]]
-; DWARF3: DW_AT_GNU_pubnames [DW_FORM_data4]   (0x00000000)
-; DWARF3: DW_AT_GNU_pubtypes [DW_FORM_data4]   (0x00000000)
+; DWARF3: DW_AT_GNU_pubnames [DW_FORM_flag]   (0x01)
+; DWARF3-NOT: DW_AT_GNU_pubtypes [
 
 ; DWARF3: [[C:[0-9a-f]+]]: DW_TAG_structure_type
 ; DWARF3-NEXT: DW_AT_name {{.*}} "C"
@@ -256,7 +256,7 @@ attributes #1 = { nounwind readnone }
 
 !0 = metadata !{i32 786449, metadata !1, i32 4, metadata !"clang version 3.4 (trunk 192862) (llvm/trunk 192861)", i1 false, metadata !"", i32 0, metadata !2, metadata !3, metadata !21, metadata !29, metadata !2, metadata !""} ; [ DW_TAG_compile_unit ] [/usr/local/google/home/echristo/tmp/pubnames.cpp] [DW_LANG_C_plus_plus]
 !1 = metadata !{metadata !"pubnames.cpp", metadata !"/usr/local/google/home/echristo/tmp"}
-!2 = metadata !{i32 0}
+!2 = metadata !{}
 !3 = metadata !{metadata !4, metadata !17}
 !4 = metadata !{i32 786451, metadata !1, null, metadata !"C", i32 1, i64 8, i64 8, i32 0, i32 0, null, metadata !5, i32 0, null, null, metadata !"_ZTS1C"} ; [ DW_TAG_structure_type ] [C] [line 1, size 8, align 8, offset 0] [def] [from ]
 !5 = metadata !{metadata !6, metadata !8, metadata !13}

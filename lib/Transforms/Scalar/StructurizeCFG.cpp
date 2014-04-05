@@ -15,7 +15,7 @@
 #include "llvm/Analysis/RegionIterator.h"
 #include "llvm/Analysis/RegionPass.h"
 #include "llvm/IR/Module.h"
-#include "llvm/Support/PatternMatch.h"
+#include "llvm/IR/PatternMatch.h"
 #include "llvm/Transforms/Utils/SSAUpdater.h"
 
 using namespace llvm;
@@ -235,15 +235,15 @@ public:
   }
 
   using Pass::doInitialization;
-  virtual bool doInitialization(Region *R, RGPassManager &RGM);
+  bool doInitialization(Region *R, RGPassManager &RGM) override;
 
-  virtual bool runOnRegion(Region *R, RGPassManager &RGM);
+  bool runOnRegion(Region *R, RGPassManager &RGM) override;
 
-  virtual const char *getPassName() const {
+  const char *getPassName() const override {
     return "Structurize control flow";
   }
 
-  void getAnalysisUsage(AnalysisUsage &AU) const {
+  void getAnalysisUsage(AnalysisUsage &AU) const override {
     AU.addRequiredID(LowerSwitchID);
     AU.addRequired<DominatorTreeWrapperPass>();
     AU.addPreserved<DominatorTreeWrapperPass>();
@@ -277,9 +277,8 @@ bool StructurizeCFG::doInitialization(Region *R, RGPassManager &RGM) {
 
 /// \brief Build up the general order of nodes
 void StructurizeCFG::orderNodes() {
-  scc_iterator<Region *> I = scc_begin(ParentRegion),
-                         E = scc_end(ParentRegion);
-  for (Order.clear(); I != E; ++I) {
+  scc_iterator<Region *> I = scc_begin(ParentRegion);
+  for (Order.clear(); !I.isAtEnd(); ++I) {
     std::vector<RegionNode *> &Nodes = *I;
     Order.append(Nodes.begin(), Nodes.end());
   }
@@ -326,16 +325,10 @@ Value *StructurizeCFG::invert(Value *Condition) {
   if (Instruction *Inst = dyn_cast<Instruction>(Condition)) {
     // Third: Check all the users for an invert
     BasicBlock *Parent = Inst->getParent();
-    for (Value::use_iterator I = Condition->use_begin(),
-           E = Condition->use_end(); I != E; ++I) {
-
-      Instruction *User = dyn_cast<Instruction>(*I);
-      if (!User || User->getParent() != Parent)
-        continue;
-
-      if (match(*I, m_Not(m_Specific(Condition))))
-        return *I;
-    }
+    for (User *U : Condition->users())
+      if (Instruction *I = dyn_cast<Instruction>(U))
+        if (I->getParent() == Parent && match(I, m_Not(m_Specific(Condition))))
+          return I;
 
     // Last option: Create a new instruction
     return BinaryOperator::CreateNot(Condition, "", Parent->getTerminator());
@@ -830,25 +823,19 @@ void StructurizeCFG::createFlow() {
 /// no longer dominate all their uses. Not sure if this is really nessasary
 void StructurizeCFG::rebuildSSA() {
   SSAUpdater Updater;
-  for (Region::block_iterator I = ParentRegion->block_begin(),
-                              E = ParentRegion->block_end();
-       I != E; ++I) {
-
-    BasicBlock *BB = *I;
+  for (const auto &BB : ParentRegion->blocks())
     for (BasicBlock::iterator II = BB->begin(), IE = BB->end();
          II != IE; ++II) {
 
       bool Initialized = false;
-      for (Use *I = &II->use_begin().getUse(), *Next; I; I = Next) {
-
-        Next = I->getNext();
-
-        Instruction *User = cast<Instruction>(I->getUser());
+      for (auto I = II->use_begin(), E = II->use_end(); I != E;) {
+        Use &U = *I++;
+        Instruction *User = cast<Instruction>(U.getUser());
         if (User->getParent() == BB) {
           continue;
 
         } else if (PHINode *UserPN = dyn_cast<PHINode>(User)) {
-          if (UserPN->getIncomingBlock(*I) == BB)
+          if (UserPN->getIncomingBlock(U) == BB)
             continue;
         }
 
@@ -862,10 +849,9 @@ void StructurizeCFG::rebuildSSA() {
           Updater.AddAvailableValue(BB, II);
           Initialized = true;
         }
-        Updater.RewriteUseAfterInsertions(*I);
+        Updater.RewriteUseAfterInsertions(U);
       }
     }
-  }
 }
 
 /// \brief Run the transformation for each region found

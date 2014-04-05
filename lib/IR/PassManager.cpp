@@ -1,4 +1,4 @@
-//===- PassManager.h - Infrastructure for managing & running IR passes ----===//
+//===- PassManager.cpp - Infrastructure for managing & running IR passes --===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -31,7 +31,7 @@ PreservedAnalyses ModulePassManager::run(Module *M, ModuleAnalysisManager *AM) {
     PreservedAnalyses PassPA = Passes[Idx]->run(M, AM);
     if (AM)
       AM->invalidate(M, PassPA);
-    PA.intersect(llvm_move(PassPA));
+    PA.intersect(std::move(PassPA));
   }
 
   if (DebugPM)
@@ -40,24 +40,25 @@ PreservedAnalyses ModulePassManager::run(Module *M, ModuleAnalysisManager *AM) {
   return PA;
 }
 
-const ModuleAnalysisManager::ResultConceptT &
+ModuleAnalysisManager::ResultConceptT &
 ModuleAnalysisManager::getResultImpl(void *PassID, Module *M) {
   ModuleAnalysisResultMapT::iterator RI;
   bool Inserted;
-  llvm::tie(RI, Inserted) = ModuleAnalysisResults.insert(std::make_pair(
-      PassID, polymorphic_ptr<detail::AnalysisResultConcept<Module *> >()));
+  std::tie(RI, Inserted) = ModuleAnalysisResults.insert(std::make_pair(
+      PassID, std::unique_ptr<detail::AnalysisResultConcept<Module *>>()));
 
   // If we don't have a cached result for this module, look up the pass and run
   // it to produce a result, which we then add to the cache.
   if (Inserted)
-    RI->second = lookupPass(PassID).run(M, this);
+    RI->second = std::move(lookupPass(PassID).run(M, this));
 
   return *RI->second;
 }
 
-const ModuleAnalysisManager::ResultConceptT *
+ModuleAnalysisManager::ResultConceptT *
 ModuleAnalysisManager::getCachedResultImpl(void *PassID, Module *M) const {
-  ModuleAnalysisResultMapT::const_iterator RI = ModuleAnalysisResults.find(PassID);
+  ModuleAnalysisResultMapT::const_iterator RI =
+      ModuleAnalysisResults.find(PassID);
   return RI == ModuleAnalysisResults.end() ? 0 : &*RI->second;
 }
 
@@ -76,7 +77,8 @@ void ModuleAnalysisManager::invalidateImpl(Module *M,
       ModuleAnalysisResults.erase(I);
 }
 
-PreservedAnalyses FunctionPassManager::run(Function *F, FunctionAnalysisManager *AM) {
+PreservedAnalyses FunctionPassManager::run(Function *F,
+                                           FunctionAnalysisManager *AM) {
   PreservedAnalyses PA = PreservedAnalyses::all();
 
   if (DebugPM)
@@ -89,7 +91,7 @@ PreservedAnalyses FunctionPassManager::run(Function *F, FunctionAnalysisManager 
     PreservedAnalyses PassPA = Passes[Idx]->run(F, AM);
     if (AM)
       AM->invalidate(F, PassPA);
-    PA.intersect(llvm_move(PassPA));
+    PA.intersect(std::move(PassPA));
   }
 
   if (DebugPM)
@@ -111,25 +113,25 @@ void FunctionAnalysisManager::clear() {
   FunctionAnalysisResultLists.clear();
 }
 
-const FunctionAnalysisManager::ResultConceptT &
+FunctionAnalysisManager::ResultConceptT &
 FunctionAnalysisManager::getResultImpl(void *PassID, Function *F) {
   FunctionAnalysisResultMapT::iterator RI;
   bool Inserted;
-  llvm::tie(RI, Inserted) = FunctionAnalysisResults.insert(std::make_pair(
+  std::tie(RI, Inserted) = FunctionAnalysisResults.insert(std::make_pair(
       std::make_pair(PassID, F), FunctionAnalysisResultListT::iterator()));
 
   // If we don't have a cached result for this function, look up the pass and
   // run it to produce a result, which we then add to the cache.
   if (Inserted) {
     FunctionAnalysisResultListT &ResultList = FunctionAnalysisResultLists[F];
-    ResultList.push_back(std::make_pair(PassID, lookupPass(PassID).run(F, this)));
-    RI->second = llvm::prior(ResultList.end());
+    ResultList.emplace_back(PassID, lookupPass(PassID).run(F, this));
+    RI->second = std::prev(ResultList.end());
   }
 
   return *RI->second->second;
 }
 
-const FunctionAnalysisManager::ResultConceptT *
+FunctionAnalysisManager::ResultConceptT *
 FunctionAnalysisManager::getCachedResultImpl(void *PassID, Function *F) const {
   FunctionAnalysisResultMapT::const_iterator RI =
       FunctionAnalysisResults.find(std::make_pair(PassID, F));
@@ -169,14 +171,14 @@ char FunctionAnalysisManagerModuleProxy::PassID;
 
 FunctionAnalysisManagerModuleProxy::Result
 FunctionAnalysisManagerModuleProxy::run(Module *M) {
-  assert(FAM.empty() && "Function analyses ran prior to the module proxy!");
-  return Result(FAM);
+  assert(FAM->empty() && "Function analyses ran prior to the module proxy!");
+  return Result(*FAM);
 }
 
 FunctionAnalysisManagerModuleProxy::Result::~Result() {
   // Clear out the analysis manager if we're being destroyed -- it means we
   // didn't even see an invalidate call when we got invalidated.
-  FAM.clear();
+  FAM->clear();
 }
 
 bool FunctionAnalysisManagerModuleProxy::Result::invalidate(
@@ -186,7 +188,7 @@ bool FunctionAnalysisManagerModuleProxy::Result::invalidate(
   // objects in the cache making it impossible to incrementally preserve them.
   // Just clear the entire manager.
   if (!PA.preserved(ID()))
-    FAM.clear();
+    FAM->clear();
 
   // Return false to indicate that this result is still a valid proxy.
   return false;

@@ -227,7 +227,7 @@ def : ProcessorModel<"slm",  SLMModel, [ProcIntelSLM,
                                FeaturePCLMUL, FeatureAES,
                                FeatureCallRegIndirect,
                                FeaturePRFCHW,
-                               FeatureSlowBTMem]>;
+                               FeatureSlowBTMem, FeatureFastUAMem]>;
 // "Arrandale" along with corei3 and corei5
 def : ProcessorModel<"corei7", SandyBridgeModel,
                      [FeatureSSE42, FeatureCMPXCHG16B, FeatureSlowBTMem,
@@ -274,7 +274,7 @@ def : ProcessorModel<"knl", HaswellModel,
 def : Proc<"k6",              [FeatureMMX]>;
 def : Proc<"k6-2",            [Feature3DNow]>;
 def : Proc<"k6-3",            [Feature3DNow]>;
-def : Proc<"athlon",          [Feature3DNowA, FeatureSlowBTMem, 
+def : Proc<"athlon",          [Feature3DNowA, FeatureSlowBTMem,
                                FeatureSlowSHLD]>;
 def : Proc<"athlon-tbird",    [Feature3DNowA, FeatureSlowBTMem,
                                FeatureSlowSHLD]>;

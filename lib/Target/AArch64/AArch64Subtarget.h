@@ -29,6 +29,11 @@ class GlobalValue;
 class AArch64Subtarget : public AArch64GenSubtargetInfo {
   virtual void anchor();
 protected:
+  enum ARMProcFamilyEnum {Others, CortexA53, CortexA57};
+
+  /// ARMProcFamily - ARM processor family: Cortex-A53, Cortex-A57, and others.
+  ARMProcFamilyEnum ARMProcFamily;
+
   bool HasFPARMv8;
   bool HasNEON;
   bool HasCrypto;
@@ -39,6 +44,9 @@ protected:
   /// CPUString - String name of used CPU.
   std::string CPUString;
 
+  /// IsLittleEndian - The target is Little Endian
+  bool IsLittleEndian;
+
 private:
   void initializeSubtargetFeatures(StringRef CPU, StringRef FS);
 
@@ -46,7 +54,8 @@ public:
   /// This constructor initializes the data members to match that
   /// of the specified triple.
   ///
-  AArch64Subtarget(StringRef TT, StringRef CPU, StringRef FS);
+  AArch64Subtarget(StringRef TT, StringRef CPU, StringRef FS,
+                   bool LittleEndian);
 
   virtual bool enableMachineScheduler() const {
     return true;
@@ -64,6 +73,8 @@ public:
   bool hasFPARMv8() const { return HasFPARMv8; }
   bool hasNEON() const { return HasNEON; }
   bool hasCrypto() const { return HasCrypto; }
+
+  bool isLittle() const { return IsLittleEndian; }
 
   const std::string & getCPUString() const { return CPUString; }
 };

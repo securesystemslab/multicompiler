@@ -67,7 +67,7 @@
 
 // Symbol 4 is zed
 // CHECK:        Symbol {
-// CHECK:          Name: zed (53)
+// CHECK:          Name: zed
 // CHECK-NEXT:     Value: 0x0
 // CHECK-NEXT:     Size: 0
 // CHECK-NEXT:     Binding: Local

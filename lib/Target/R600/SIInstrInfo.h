@@ -25,18 +25,35 @@ class SIInstrInfo : public AMDGPUInstrInfo {
 private:
   const SIRegisterInfo RI;
 
-  MachineInstrBuilder buildIndirectIndexLoop(MachineBasicBlock &MBB,
-                                             MachineBasicBlock::iterator I,
-                                             unsigned OffsetVGPR,
-                                             unsigned MovRelOp,
-                                             unsigned Dst,
-                                             unsigned Src0) const;
-  // If you add or remove instructions from this function, you will
+  unsigned buildExtractSubReg(MachineBasicBlock::iterator MI,
+                              MachineRegisterInfo &MRI,
+                              MachineOperand &SuperReg,
+                              const TargetRegisterClass *SuperRC,
+                              unsigned SubIdx,
+                              const TargetRegisterClass *SubRC) const;
+  MachineOperand buildExtractSubRegOrImm(MachineBasicBlock::iterator MI,
+                                         MachineRegisterInfo &MRI,
+                                         MachineOperand &SuperReg,
+                                         const TargetRegisterClass *SuperRC,
+                                         unsigned SubIdx,
+                                         const TargetRegisterClass *SubRC) const;
+
+  unsigned split64BitImm(SmallVectorImpl<MachineInstr *> &Worklist,
+                         MachineBasicBlock::iterator MI,
+                         MachineRegisterInfo &MRI,
+                         const TargetRegisterClass *RC,
+                         const MachineOperand &Op) const;
+
+  void splitScalar64BitOp(SmallVectorImpl<MachineInstr *> & Worklist,
+                          MachineInstr *Inst, unsigned Opcode) const;
+
 
 public:
   explicit SIInstrInfo(AMDGPUTargetMachine &tm);
 
-  const SIRegisterInfo &getRegisterInfo() const;
+  const SIRegisterInfo &getRegisterInfo() const {
+    return RI;
+  }
 
   virtual void copyPhysReg(MachineBasicBlock &MBB,
                            MachineBasicBlock::iterator MI, DebugLoc DL,
@@ -60,6 +77,9 @@ public:
   virtual MachineInstr *commuteInstruction(MachineInstr *MI,
                                            bool NewMI=false) const;
 
+  bool isTriviallyReMaterializable(const MachineInstr *MI,
+                                   AliasAnalysis *AA = 0) const;
+
   virtual unsigned getIEQOpcode() const {
     llvm_unreachable("Unimplemented");
   }
@@ -70,12 +90,14 @@ public:
   virtual bool isMov(unsigned Opcode) const;
 
   virtual bool isSafeToMoveRegClassDefs(const TargetRegisterClass *RC) const;
+  bool isDS(uint16_t Opcode) const;
   int isMIMG(uint16_t Opcode) const;
   int isSMRD(uint16_t Opcode) const;
   bool isVOP1(uint16_t Opcode) const;
   bool isVOP2(uint16_t Opcode) const;
   bool isVOP3(uint16_t Opcode) const;
   bool isVOPC(uint16_t Opcode) const;
+  bool isInlineConstant(const APInt &Imm) const;
   bool isInlineConstant(const MachineOperand &MO) const;
   bool isLiteralConstant(const MachineOperand &MO) const;
 
@@ -84,6 +106,7 @@ public:
 
   bool isSALUInstr(const MachineInstr &MI) const;
   static unsigned getVALUOp(const MachineInstr &MI);
+
   bool isSALUOpSupportedOnVALU(const MachineInstr &MI) const;
 
   /// \brief Return the correct register class for \p OpNo.  For target-specific
@@ -146,6 +169,9 @@ namespace AMDGPU {
   int getVOPe64(uint16_t Opcode);
   int getCommuteRev(uint16_t Opcode);
   int getCommuteOrig(uint16_t Opcode);
+
+  const uint64_t RSRC_DATA_FORMAT = 0xf00000000000LL;
+
 
 } // End namespace AMDGPU
 

@@ -39,8 +39,8 @@ static void dumpIdxVec(const SmallVectorImpl<unsigned> &V) {
 namespace {
 // (instrs a, b, ...) Evaluate and union all arguments. Identical to AddOp.
 struct InstrsOp : public SetTheory::Operator {
-  virtual void apply(SetTheory &ST, DagInit *Expr, SetTheory::RecSet &Elts,
-                     ArrayRef<SMLoc> Loc) {
+  void apply(SetTheory &ST, DagInit *Expr, SetTheory::RecSet &Elts,
+             ArrayRef<SMLoc> Loc) override {
     ST.evaluate(Expr->arg_begin(), Expr->arg_end(), Elts, Loc);
   }
 };
@@ -58,7 +58,7 @@ struct InstRegexOp : public SetTheory::Operator {
   InstRegexOp(const CodeGenTarget &t): Target(t) {}
 
   void apply(SetTheory &ST, DagInit *Expr, SetTheory::RecSet &Elts,
-             ArrayRef<SMLoc> Loc) {
+             ArrayRef<SMLoc> Loc) override {
     SmallVector<Regex*, 4> RegexList;
     for (DagInit::const_arg_iterator
            AI = Expr->arg_begin(), AE = Expr->arg_end(); AI != AE; ++AI) {
@@ -1473,10 +1473,22 @@ void CodeGenSchedModels::collectProcResources() {
     Record *ModelDef = (*WRI)->getValueAsDef("SchedModel");
     addWriteRes(*WRI, getProcModel(ModelDef).Index);
   }
+  RecVec SWRDefs = Records.getAllDerivedDefinitions("SchedWriteRes");
+  for (RecIter WRI = SWRDefs.begin(), WRE = SWRDefs.end(); WRI != WRE; ++WRI) {
+    Record *ModelDef = (*WRI)->getValueAsDef("SchedModel");
+    addWriteRes(*WRI, getProcModel(ModelDef).Index);
+  }
   RecVec RADefs = Records.getAllDerivedDefinitions("ReadAdvance");
   for (RecIter RAI = RADefs.begin(), RAE = RADefs.end(); RAI != RAE; ++RAI) {
     Record *ModelDef = (*RAI)->getValueAsDef("SchedModel");
     addReadAdvance(*RAI, getProcModel(ModelDef).Index);
+  }
+  RecVec SRADefs = Records.getAllDerivedDefinitions("SchedReadAdvance");
+  for (RecIter RAI = SRADefs.begin(), RAE = SRADefs.end(); RAI != RAE; ++RAI) {
+    if ((*RAI)->getValueInit("SchedModel")->isComplete()) {
+      Record *ModelDef = (*RAI)->getValueAsDef("SchedModel");
+      addReadAdvance(*RAI, getProcModel(ModelDef).Index);
+    }
   }
   // Add ProcResGroups that are defined within this processor model, which may
   // not be directly referenced but may directly specify a buffer size.

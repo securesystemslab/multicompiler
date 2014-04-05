@@ -14,7 +14,6 @@
 
 #include "llvm/Config/config.h" // plugin-api.h requires HAVE_STDINT_H
 #include "llvm-c/lto.h"
-#include "llvm/ADT/OwningPtr.h"
 #include "llvm/ADT/StringSet.h"
 #include "llvm/Support/Errno.h"
 #include "llvm/Support/FileSystem.h"
@@ -36,6 +35,12 @@
 # include <io.h>
 # define lseek _lseek
 # define read _read
+#endif
+
+#ifndef LDPO_PIE
+// FIXME: remove this declaration when we stop maintaining Ubuntu Quantal and
+// Precise and Debian Wheezy (binutils 2.23 is required)
+# define LDPO_PIE 3
 #endif
 
 using namespace llvm;
@@ -153,8 +158,7 @@ ld_plugin_status onload(ld_plugin_tv *tv) {
         switch (tv->tv_u.tv_val) {
           case LDPO_REL:  // .o
           case LDPO_DYN:  // .so
-          // FIXME: Replace 3 with LDPO_PIE once that is in a released binutils.
-          case 3: // position independent executable
+          case LDPO_PIE:  // position independent executable
             output_type = LTO_CODEGEN_PIC_MODEL_DYNAMIC;
             break;
           case LDPO_EXEC:  // .exe
@@ -241,7 +245,7 @@ static ld_plugin_status claim_file_hook(const ld_plugin_input_file *file,
                                         int *claimed) {
   lto_module_t M;
   const void *view;
-  OwningPtr<MemoryBuffer> buffer;
+  std::unique_ptr<MemoryBuffer> buffer;
   if (get_view) {
     if (get_view(file->handle, &view) != LDPS_OK) {
       (*message)(LDPL_ERROR, "Failed to get a view of %s", file->name);

@@ -28,7 +28,6 @@
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/TableGen/Error.h"
 #include "llvm/TableGen/Record.h"
-#include "llvm/TableGen/TableGenBackend.h"
 #include <map>
 #include <string>
 #include <vector>
@@ -1705,13 +1704,6 @@ static bool populateInstruction(CodeGenTarget &Target,
   // If all the bit positions are not specified; do not decode this instruction.
   // We are bound to fail!  For proper disassembly, the well-known encoding bits
   // of the instruction must be fully specified.
-  //
-  // This also removes pseudo instructions from considerations of disassembly,
-  // which is a better design and less fragile than the name matchings.
-  // Ignore "asm parser only" instructions.
-  if (Def.getValueAsBit("isAsmParserOnly") ||
-      Def.getValueAsBit("isCodeGenOnly"))
-    return false;
 
   BitsInit &Bits = getBitsField(Def, "Inst");
   if (Bits.allInComplete()) return false;
@@ -1762,6 +1754,19 @@ static bool populateInstruction(CodeGenTarget &Target,
     const std::vector<RecordVal> &Vals = Def.getValues();
     unsigned NumberedOp = 0;
 
+    std::set<unsigned> NamedOpIndices;
+    if (Target.getInstructionSet()->
+         getValueAsBit("noNamedPositionallyEncodedOperands"))
+      // Collect the set of operand indices that might correspond to named
+      // operand, and skip these when assigning operands based on position.
+      for (unsigned i = 0, e = Vals.size(); i != e; ++i) {
+        unsigned OpIdx;
+        if (!CGI.Operands.hasOperandNamed(Vals[i].getName(), OpIdx))
+          continue;
+
+        NamedOpIndices.insert(OpIdx);
+      }
+
     for (unsigned i = 0, e = Vals.size(); i != e; ++i) {
       // Ignore fixed fields in the record, we're looking for values like:
       //    bits<5> RST = { ?, ?, ?, ?, ? };
@@ -1811,7 +1816,9 @@ static bool populateInstruction(CodeGenTarget &Target,
 
       unsigned NumberOps = CGI.Operands.size();
       while (NumberedOp < NumberOps &&
-             CGI.Operands.isFlatOperandNotEmitted(NumberedOp))
+             (CGI.Operands.isFlatOperandNotEmitted(NumberedOp) ||
+              (NamedOpIndices.size() && NamedOpIndices.count(
+                CGI.Operands.getSubOperandNumber(NumberedOp).first))))
         ++NumberedOp;
 
       OpIdx = NumberedOp++;

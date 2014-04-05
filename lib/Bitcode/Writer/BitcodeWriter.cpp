@@ -487,8 +487,6 @@ static unsigned getEncodedLinkage(const GlobalValue *GV) {
   case GlobalValue::WeakODRLinkage:                  return 10;
   case GlobalValue::LinkOnceODRLinkage:              return 11;
   case GlobalValue::AvailableExternallyLinkage:      return 12;
-  case GlobalValue::LinkerPrivateLinkage:            return 13;
-  case GlobalValue::LinkerPrivateWeakLinkage:        return 14;
   }
   llvm_unreachable("Invalid linkage");
 }
@@ -530,9 +528,9 @@ static void WriteModuleInfo(const Module *M, const ValueEnumerator &VE,
   if (!M->getTargetTriple().empty())
     WriteStringRecord(bitc::MODULE_CODE_TRIPLE, M->getTargetTriple(),
                       0/*TODO*/, Stream);
-  if (!M->getDataLayout().empty())
-    WriteStringRecord(bitc::MODULE_CODE_DATALAYOUT, M->getDataLayout(),
-                      0/*TODO*/, Stream);
+  const std::string &DL = M->getDataLayoutStr();
+  if (!DL.empty())
+    WriteStringRecord(bitc::MODULE_CODE_DATALAYOUT, DL, 0 /*TODO*/, Stream);
   if (!M->getModuleInlineAsm().empty())
     WriteStringRecord(bitc::MODULE_CODE_ASM, M->getModuleInlineAsm(),
                       0/*TODO*/, Stream);
@@ -1441,9 +1439,11 @@ static void WriteInstruction(const Instruction &I, unsigned InstID,
     pushValue(I.getOperand(2), InstID, Vals, VE);         // newval.
     Vals.push_back(cast<AtomicCmpXchgInst>(I).isVolatile());
     Vals.push_back(GetEncodedOrdering(
-                     cast<AtomicCmpXchgInst>(I).getOrdering()));
+                     cast<AtomicCmpXchgInst>(I).getSuccessOrdering()));
     Vals.push_back(GetEncodedSynchScope(
                      cast<AtomicCmpXchgInst>(I).getSynchScope()));
+    Vals.push_back(GetEncodedOrdering(
+                     cast<AtomicCmpXchgInst>(I).getFailureOrdering()));
     break;
   case Instruction::AtomicRMW:
     Code = bitc::FUNC_CODE_INST_ATOMICRMW;
@@ -1807,17 +1807,10 @@ static void WriteUseList(const Value *V, const ValueEnumerator &VE,
     return;
 
   // Make a copy of the in-memory use-list for sorting.
-  unsigned UseListSize = std::distance(V->use_begin(), V->use_end());
-  SmallVector<const User*, 8> UseList;
-  UseList.reserve(UseListSize);
-  for (Value::const_use_iterator I = V->use_begin(), E = V->use_end();
-       I != E; ++I) {
-    const User *U = *I;
-    UseList.push_back(U);
-  }
+  SmallVector<const User*, 8> UserList(V->user_begin(), V->user_end());
 
   // Sort the copy based on the order read by the BitcodeReader.
-  std::sort(UseList.begin(), UseList.end(), bitcodereader_order);
+  std::sort(UserList.begin(), UserList.end(), bitcodereader_order);
 
   // TODO: Generate a diff between the BitcodeWriter in-memory use-list and the
   // sorted list (i.e., the expected BitcodeReader in-memory use-list).

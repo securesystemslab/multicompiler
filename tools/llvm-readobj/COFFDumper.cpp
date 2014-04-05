@@ -47,16 +47,16 @@ public:
     cacheRelocations();
   }
 
-  virtual void printFileHeaders() LLVM_OVERRIDE;
-  virtual void printSections() LLVM_OVERRIDE;
-  virtual void printRelocations() LLVM_OVERRIDE;
-  virtual void printSymbols() LLVM_OVERRIDE;
-  virtual void printDynamicSymbols() LLVM_OVERRIDE;
-  virtual void printUnwindInfo() LLVM_OVERRIDE;
+  virtual void printFileHeaders() override;
+  virtual void printSections() override;
+  virtual void printRelocations() override;
+  virtual void printSymbols() override;
+  virtual void printDynamicSymbols() override;
+  virtual void printUnwindInfo() override;
 
 private:
-  void printSymbol(symbol_iterator SymI);
-  void printRelocation(section_iterator SecI, relocation_iterator RelI);
+  void printSymbol(const SymbolRef &Sym);
+  void printRelocation(const SectionRef &Section, const RelocationRef &Reloc);
   void printDataDirectory(uint32_t Index, const std::string &FieldName);
   void printX64UnwindInfo();
 
@@ -74,9 +74,9 @@ private:
     uint64_t OffsetInSection,
     const std::vector<RelocationRef> &Rels);
 
-  void printUnwindCode(const Win64EH::UnwindInfo& UI, ArrayRef<UnwindCode> UCs);
+  void printUnwindCode(const Win64EH::UnwindInfo &UI, ArrayRef<UnwindCode> UCs);
 
-  void printCodeViewLineTables(section_iterator SecI);
+  void printCodeViewLineTables(const SectionRef &Section);
 
   void cacheRelocations();
 
@@ -104,9 +104,8 @@ private:
 
 namespace llvm {
 
-error_code createCOFFDumper(const object::ObjectFile *Obj,
-                            StreamWriter& Writer,
-                            OwningPtr<ObjDumper> &Result) {
+error_code createCOFFDumper(const object::ObjectFile *Obj, StreamWriter &Writer,
+                            std::unique_ptr<ObjDumper> &Result) {
   const COFFObjectFile *COFFObj = dyn_cast<COFFObjectFile>(Obj);
   if (!COFFObj)
     return readobj_error::unsupported_obj_file_format;
@@ -185,11 +184,11 @@ static error_code resolveSectionAndAddress(const COFFObjectFile *Obj,
   if (error_code EC = Sym.getAddress(ResolvedAddr))
     return EC;
 
-  section_iterator iter(Obj->begin_sections());
+  section_iterator iter(Obj->section_begin());
   if (error_code EC = Sym.getSection(iter))
     return EC;
 
-  ResolvedSection = Obj->getCOFFSection(iter);
+  ResolvedSection = Obj->getCOFFSection(*iter);
   return object_error::success;
 }
 
@@ -229,7 +228,7 @@ static const EnumEntry<COFF::MachineTypes> ImageFileMachineType[] = {
   LLVM_READOBJ_ENUM_ENT(COFF, IMAGE_FILE_MACHINE_AM33     ),
   LLVM_READOBJ_ENUM_ENT(COFF, IMAGE_FILE_MACHINE_AMD64    ),
   LLVM_READOBJ_ENUM_ENT(COFF, IMAGE_FILE_MACHINE_ARM      ),
-  LLVM_READOBJ_ENUM_ENT(COFF, IMAGE_FILE_MACHINE_ARMV7    ),
+  LLVM_READOBJ_ENUM_ENT(COFF, IMAGE_FILE_MACHINE_ARMNT    ),
   LLVM_READOBJ_ENUM_ENT(COFF, IMAGE_FILE_MACHINE_EBC      ),
   LLVM_READOBJ_ENUM_ENT(COFF, IMAGE_FILE_MACHINE_I386     ),
   LLVM_READOBJ_ENUM_ENT(COFF, IMAGE_FILE_MACHINE_IA64     ),
@@ -431,29 +430,8 @@ static const EnumEntry<unsigned> UnwindOpInfo[] = {
 
 // Some additional COFF structures not defined by llvm::object.
 namespace {
-  struct coff_aux_function_definition {
-    support::ulittle32_t TagIndex;
-    support::ulittle32_t TotalSize;
-    support::ulittle32_t PointerToLineNumber;
-    support::ulittle32_t PointerToNextFunction;
-    uint8_t Unused[2];
-  };
-
-  struct coff_aux_weak_external_definition {
-    support::ulittle32_t TagIndex;
-    support::ulittle32_t Characteristics;
-    uint8_t Unused[10];
-  };
-
   struct coff_aux_file_record {
     char FileName[18];
-  };
-
-  struct coff_aux_clr_token {
-    support::ulittle8_t AuxType;
-    support::ulittle8_t Reserved;
-    support::ulittle32_t SymbolTableIndex;
-    uint8_t Unused[12];
   };
 } // namespace
 
@@ -541,23 +519,11 @@ error_code COFFDumper::getSection(
 }
 
 void COFFDumper::cacheRelocations() {
-  error_code EC;
-  for (section_iterator SecI = Obj->begin_sections(),
-                        SecE = Obj->end_sections();
-                        SecI != SecE; SecI.increment(EC)) {
-    if (error(EC))
-      break;
+  for (const SectionRef &S : Obj->sections()) {
+    const coff_section *Section = Obj->getCOFFSection(S);
 
-    const coff_section *Section = Obj->getCOFFSection(SecI);
-
-    for (relocation_iterator RelI = SecI->begin_relocations(),
-                             RelE = SecI->end_relocations();
-                             RelI != RelE; RelI.increment(EC)) {
-      if (error(EC))
-        break;
-
-      RelocMap[Section].push_back(*RelI);
-    }
+    for (const RelocationRef &Reloc : S.relocations())
+      RelocMap[Section].push_back(Reloc);
 
     // Sort relocations by address.
     std::sort(RelocMap[Section].begin(), RelocMap[Section].end(),
@@ -665,9 +631,10 @@ void COFFDumper::printBaseOfDataField(const pe32_header *Hdr) {
 
 void COFFDumper::printBaseOfDataField(const pe32plus_header *) {}
 
-void COFFDumper::printCodeViewLineTables(section_iterator SecI) {
+void COFFDumper::printCodeViewLineTables(const SectionRef &Section) {
   StringRef Data;
-  if (error(SecI->getContents(Data))) return;
+  if (error(Section.getContents(Data)))
+    return;
 
   SmallVector<StringRef, 10> FunctionNames;
   StringMap<StringRef> FunctionLineTables;
@@ -718,8 +685,8 @@ void COFFDumper::printCodeViewLineTables(section_iterator SecI) {
         }
 
         StringRef FunctionName;
-        if (error(resolveSymbolName(RelocMap[Obj->getCOFFSection(SecI)], Offset,
-                                    FunctionName)))
+        if (error(resolveSymbolName(RelocMap[Obj->getCOFFSection(Section)],
+                                    Offset, FunctionName)))
           return;
         W.printString("FunctionName", FunctionName);
         if (FunctionLineTables.count(FunctionName) != 0) {
@@ -824,22 +791,15 @@ void COFFDumper::printCodeViewLineTables(section_iterator SecI) {
 }
 
 void COFFDumper::printSections() {
-  error_code EC;
-
   ListScope SectionsD(W, "Sections");
   int SectionNumber = 0;
-  for (section_iterator SecI = Obj->begin_sections(),
-                        SecE = Obj->end_sections();
-                        SecI != SecE; SecI.increment(EC)) {
-    if (error(EC))
-      break;
-
+  for (const SectionRef &Sec : Obj->sections()) {
     ++SectionNumber;
-    const coff_section *Section = Obj->getCOFFSection(SecI);
+    const coff_section *Section = Obj->getCOFFSection(Sec);
 
     StringRef Name;
-    if (error(SecI->getName(Name)))
-        Name = "";
+    if (error(Sec.getName(Name)))
+      Name = "";
 
     DictScope D(W, "Section");
     W.printNumber("Number", SectionNumber);
@@ -858,36 +818,28 @@ void COFFDumper::printSections() {
 
     if (opts::SectionRelocations) {
       ListScope D(W, "Relocations");
-      for (relocation_iterator RelI = SecI->begin_relocations(),
-                               RelE = SecI->end_relocations();
-                               RelI != RelE; RelI.increment(EC)) {
-        if (error(EC)) break;
-
-        printRelocation(SecI, RelI);
-      }
+      for (const RelocationRef &Reloc : Sec.relocations())
+        printRelocation(Sec, Reloc);
     }
 
     if (opts::SectionSymbols) {
       ListScope D(W, "Symbols");
-      for (symbol_iterator SymI = Obj->begin_symbols(),
-                           SymE = Obj->end_symbols();
-                           SymI != SymE; SymI.increment(EC)) {
-        if (error(EC)) break;
-
+      for (const SymbolRef &Symbol : Obj->symbols()) {
         bool Contained = false;
-        if (SecI->containsSymbol(*SymI, Contained) || !Contained)
+        if (Sec.containsSymbol(Symbol, Contained) || !Contained)
           continue;
 
-        printSymbol(SymI);
+        printSymbol(Symbol);
       }
     }
 
     if (Name == ".debug$S" && opts::CodeViewLineTables)
-      printCodeViewLineTables(SecI);
+      printCodeViewLineTables(Sec);
 
     if (opts::SectionData) {
       StringRef Data;
-      if (error(SecI->getContents(Data))) break;
+      if (error(Sec.getContents(Data)))
+        break;
 
       W.printBinaryBlock("SectionData", Data);
     }
@@ -897,32 +849,22 @@ void COFFDumper::printSections() {
 void COFFDumper::printRelocations() {
   ListScope D(W, "Relocations");
 
-  error_code EC;
   int SectionNumber = 0;
-  for (section_iterator SecI = Obj->begin_sections(),
-                        SecE = Obj->end_sections();
-                        SecI != SecE; SecI.increment(EC)) {
+  for (const SectionRef &Section : Obj->sections()) {
     ++SectionNumber;
-    if (error(EC))
-      break;
-
     StringRef Name;
-    if (error(SecI->getName(Name)))
+    if (error(Section.getName(Name)))
       continue;
 
     bool PrintedGroup = false;
-    for (relocation_iterator RelI = SecI->begin_relocations(),
-                             RelE = SecI->end_relocations();
-                             RelI != RelE; RelI.increment(EC)) {
-      if (error(EC)) break;
-
+    for (const RelocationRef &Reloc : Section.relocations()) {
       if (!PrintedGroup) {
         W.startLine() << "Section (" << SectionNumber << ") " << Name << " {\n";
         W.indent();
         PrintedGroup = true;
       }
 
-      printRelocation(SecI, RelI);
+      printRelocation(Section, Reloc);
     }
 
     if (PrintedGroup) {
@@ -932,19 +874,24 @@ void COFFDumper::printRelocations() {
   }
 }
 
-void COFFDumper::printRelocation(section_iterator SecI,
-                                 relocation_iterator RelI) {
+void COFFDumper::printRelocation(const SectionRef &Section,
+                                 const RelocationRef &Reloc) {
   uint64_t Offset;
   uint64_t RelocType;
   SmallString<32> RelocName;
   StringRef SymbolName;
   StringRef Contents;
-  if (error(RelI->getOffset(Offset))) return;
-  if (error(RelI->getType(RelocType))) return;
-  if (error(RelI->getTypeName(RelocName))) return;
-  symbol_iterator Symbol = RelI->getSymbol();
-  if (error(Symbol->getName(SymbolName))) return;
-  if (error(SecI->getContents(Contents))) return;
+  if (error(Reloc.getOffset(Offset)))
+    return;
+  if (error(Reloc.getType(RelocType)))
+    return;
+  if (error(Reloc.getTypeName(RelocName)))
+    return;
+  symbol_iterator Symbol = Reloc.getSymbol();
+  if (error(Symbol->getName(SymbolName)))
+    return;
+  if (error(Section.getContents(Contents)))
+    return;
 
   if (opts::ExpandRelocs) {
     DictScope Group(W, "Relocation");
@@ -963,24 +910,16 @@ void COFFDumper::printRelocation(section_iterator SecI,
 void COFFDumper::printSymbols() {
   ListScope Group(W, "Symbols");
 
-  error_code EC;
-  for (symbol_iterator SymI = Obj->begin_symbols(),
-                       SymE = Obj->end_symbols();
-                       SymI != SymE; SymI.increment(EC)) {
-    if (error(EC)) break;
-
-    printSymbol(SymI);
-  }
+  for (const SymbolRef &Symbol : Obj->symbols())
+    printSymbol(Symbol);
 }
 
-void COFFDumper::printDynamicSymbols() {
-  ListScope Group(W, "DynamicSymbols");
-}
+void COFFDumper::printDynamicSymbols() { ListScope Group(W, "DynamicSymbols"); }
 
-void COFFDumper::printSymbol(symbol_iterator SymI) {
+void COFFDumper::printSymbol(const SymbolRef &Sym) {
   DictScope D(W, "Symbol");
 
-  const coff_symbol *Symbol = Obj->getCOFFSymbol(SymI);
+  const coff_symbol *Symbol = Obj->getCOFFSymbol(Sym);
   const coff_section *Section;
   if (error_code EC = Obj->getSection(Symbol->SectionNumber, Section)) {
     W.startLine() << "Invalid section number: " << EC.message() << "\n";
@@ -1007,10 +946,7 @@ void COFFDumper::printSymbol(symbol_iterator SymI) {
   W.printNumber("AuxSymbolCount", Symbol->NumberOfAuxSymbols);
 
   for (unsigned I = 0; I < Symbol->NumberOfAuxSymbols; ++I) {
-    if (Symbol->StorageClass     == COFF::IMAGE_SYM_CLASS_EXTERNAL &&
-        Symbol->getBaseType()    == COFF::IMAGE_SYM_TYPE_NULL &&
-        Symbol->getComplexType() == COFF::IMAGE_SYM_DTYPE_FUNCTION &&
-        Symbol->SectionNumber > 0) {
+    if (Symbol->isFunctionDefinition()) {
       const coff_aux_function_definition *Aux;
       if (error(getSymbolAuxData(Obj, Symbol + I, Aux)))
         break;
@@ -1018,16 +954,12 @@ void COFFDumper::printSymbol(symbol_iterator SymI) {
       DictScope AS(W, "AuxFunctionDef");
       W.printNumber("TagIndex", Aux->TagIndex);
       W.printNumber("TotalSize", Aux->TotalSize);
-      W.printHex("PointerToLineNumber", Aux->PointerToLineNumber);
+      W.printHex("PointerToLineNumber", Aux->PointerToLinenumber);
       W.printHex("PointerToNextFunction", Aux->PointerToNextFunction);
       W.printBinary("Unused", makeArrayRef(Aux->Unused));
 
-    } else if (
-        Symbol->StorageClass   == COFF::IMAGE_SYM_CLASS_WEAK_EXTERNAL ||
-        (Symbol->StorageClass  == COFF::IMAGE_SYM_CLASS_EXTERNAL &&
-         Symbol->SectionNumber == 0 &&
-         Symbol->Value         == 0)) {
-      const coff_aux_weak_external_definition *Aux;
+    } else if (Symbol->isWeakExternal()) {
+      const coff_aux_weak_external *Aux;
       if (error(getSymbolAuxData(Obj, Symbol + I, Aux)))
         break;
 
@@ -1044,9 +976,9 @@ void COFFDumper::printSymbol(symbol_iterator SymI) {
       W.printNumber("Linked", LinkedName, Aux->TagIndex);
       W.printEnum  ("Search", Aux->Characteristics,
                     makeArrayRef(WeakExternalCharacteristics));
-      W.printBinary("Unused", Aux->Unused);
+      W.printBinary("Unused", makeArrayRef(Aux->Unused));
 
-    } else if (Symbol->StorageClass == COFF::IMAGE_SYM_CLASS_FILE) {
+    } else if (Symbol->isFileRecord()) {
       const coff_aux_file_record *Aux;
       if (error(getSymbolAuxData(Obj, Symbol + I, Aux)))
         break;
@@ -1054,9 +986,7 @@ void COFFDumper::printSymbol(symbol_iterator SymI) {
       DictScope AS(W, "AuxFileRecord");
       W.printString("FileName", StringRef(Aux->FileName));
 
-    } else if (Symbol->StorageClass == COFF::IMAGE_SYM_CLASS_STATIC ||
-               (Symbol->StorageClass == COFF::IMAGE_SYM_CLASS_EXTERNAL &&
-                Symbol->SectionNumber != COFF::IMAGE_SYM_UNDEFINED)) {
+    } else if (Symbol->isSectionDefinition()) {
       const coff_aux_section_definition *Aux;
       if (error(getSymbolAuxData(Obj, Symbol + I, Aux)))
         break;
@@ -1083,16 +1013,25 @@ void COFFDumper::printSymbol(symbol_iterator SymI) {
 
         W.printNumber("AssocSection", AssocName, Aux->Number);
       }
-    } else if (Symbol->StorageClass == COFF::IMAGE_SYM_CLASS_CLR_TOKEN) {
+    } else if (Symbol->isCLRToken()) {
       const coff_aux_clr_token *Aux;
       if (error(getSymbolAuxData(Obj, Symbol + I, Aux)))
         break;
 
+      const coff_symbol *ReferredSym;
+      StringRef ReferredName;
+      error_code EC;
+      if ((EC = Obj->getSymbol(Aux->SymbolTableIndex, ReferredSym)) ||
+          (EC = Obj->getSymbolName(ReferredSym, ReferredName))) {
+        ReferredName = "";
+        error(EC);
+      }
+
       DictScope AS(W, "AuxCLRToken");
       W.printNumber("AuxType", Aux->AuxType);
       W.printNumber("Reserved", Aux->Reserved);
-      W.printNumber("SymbolTableIndex", Aux->SymbolTableIndex);
-      W.printBinary("Unused", Aux->Unused);
+      W.printNumber("SymbolTableIndex", ReferredName, Aux->SymbolTableIndex);
+      W.printBinary("Unused", makeArrayRef(Aux->Unused));
 
     } else {
       W.startLine() << "<unhandled auxiliary record>\n";
@@ -1116,23 +1055,17 @@ void COFFDumper::printUnwindInfo() {
 }
 
 void COFFDumper::printX64UnwindInfo() {
-  error_code EC;
-  for (section_iterator SecI = Obj->begin_sections(),
-                        SecE = Obj->end_sections();
-                        SecI != SecE; SecI.increment(EC)) {
-    if (error(EC)) break;
-
+  for (const SectionRef &Section : Obj->sections()) {
     StringRef Name;
-    if (error(SecI->getName(Name)))
+    if (error(Section.getName(Name)))
       continue;
     if (Name != ".pdata" && !Name.startswith(".pdata$"))
       continue;
 
-    const coff_section *PData = Obj->getCOFFSection(SecI);
+    const coff_section *PData = Obj->getCOFFSection(Section);
 
     ArrayRef<uint8_t> Contents;
-    if (error(Obj->getSectionContents(PData, Contents)) ||
-        Contents.empty())
+    if (error(Obj->getSectionContents(PData, Contents)) || Contents.empty())
       continue;
 
     ArrayRef<RuntimeFunction> RFs(

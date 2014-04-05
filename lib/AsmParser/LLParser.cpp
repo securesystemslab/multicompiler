@@ -13,7 +13,7 @@
 
 #include "LLParser.h"
 #include "llvm/ADT/SmallPtrSet.h"
-#include "llvm/AutoUpgrade.h"
+#include "llvm/IR/AutoUpgrade.h"
 #include "llvm/IR/CallingConv.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DerivedTypes.h"
@@ -246,8 +246,6 @@ bool LLParser::ParseTopLevelEntities() {
     //               OptionalThreadLocal OptionalAddrSpace OptionalUnNammedAddr
     //               ('constant'|'global') ...
     case lltok::kw_private:             // OptionalLinkage
-    case lltok::kw_linker_private:      // OptionalLinkage
-    case lltok::kw_linker_private_weak: // OptionalLinkage
     case lltok::kw_internal:            // OptionalLinkage
     case lltok::kw_weak:                // OptionalLinkage
     case lltok::kw_weak_odr:            // OptionalLinkage
@@ -707,7 +705,8 @@ bool LLParser::ParseAlias(const std::string &Name, LocTy NameLoc,
 ///       OptionalThreadLocal OptionalAddrSpace OptionalUnNammedAddr
 ///       OptionalExternallyInitialized GlobalType Type Const
 ///
-/// Everything through visibility has been parsed already.
+/// Everything up to and including OptionalDLLStorageClass has been parsed
+/// already.
 ///
 bool LLParser::ParseGlobal(const std::string &Name, LocTy NameLoc,
                            unsigned Linkage, bool HasLinkage,
@@ -1277,8 +1276,6 @@ bool LLParser::ParseOptionalReturnAttrs(AttrBuilder &B) {
 /// ParseOptionalLinkage
 ///   ::= /*empty*/
 ///   ::= 'private'
-///   ::= 'linker_private'
-///   ::= 'linker_private_weak'
 ///   ::= 'internal'
 ///   ::= 'weak'
 ///   ::= 'weak_odr'
@@ -1294,10 +1291,6 @@ bool LLParser::ParseOptionalLinkage(unsigned &Res, bool &HasLinkage) {
   switch (Lex.getKind()) {
   default:                       Res=GlobalValue::ExternalLinkage; return false;
   case lltok::kw_private:        Res = GlobalValue::PrivateLinkage;       break;
-  case lltok::kw_linker_private: Res = GlobalValue::LinkerPrivateLinkage; break;
-  case lltok::kw_linker_private_weak:
-    Res = GlobalValue::LinkerPrivateWeakLinkage;
-    break;
   case lltok::kw_internal:       Res = GlobalValue::InternalLinkage;      break;
   case lltok::kw_weak:           Res = GlobalValue::WeakAnyLinkage;       break;
   case lltok::kw_weak_odr:       Res = GlobalValue::WeakODRLinkage;       break;
@@ -1357,6 +1350,7 @@ bool LLParser::ParseOptionalDLLStorageClass(unsigned &Res) {
 ///   ::= 'x86_stdcallcc'
 ///   ::= 'x86_fastcallcc'
 ///   ::= 'x86_thiscallcc'
+///   ::= 'x86_cdeclmethodcc'
 ///   ::= 'arm_apcscc'
 ///   ::= 'arm_aapcscc'
 ///   ::= 'arm_aapcs_vfpcc'
@@ -1382,6 +1376,7 @@ bool LLParser::ParseOptionalCallingConv(CallingConv::ID &CC) {
   case lltok::kw_x86_stdcallcc:  CC = CallingConv::X86_StdCall; break;
   case lltok::kw_x86_fastcallcc: CC = CallingConv::X86_FastCall; break;
   case lltok::kw_x86_thiscallcc: CC = CallingConv::X86_ThisCall; break;
+  case lltok::kw_x86_cdeclmethodcc:CC = CallingConv::X86_CDeclMethod; break;
   case lltok::kw_arm_apcscc:     CC = CallingConv::ARM_APCS; break;
   case lltok::kw_arm_aapcscc:    CC = CallingConv::ARM_AAPCS; break;
   case lltok::kw_arm_aapcs_vfpcc:CC = CallingConv::ARM_AAPCS_VFP; break;
@@ -1515,6 +1510,15 @@ bool LLParser::ParseScopeAndOrdering(bool isAtomic, SynchronizationScope &Scope,
   Scope = CrossThread;
   if (EatIfPresent(lltok::kw_singlethread))
     Scope = SingleThread;
+
+  return ParseOrdering(Ordering);
+}
+
+/// ParseOrdering
+///   ::= AtomicOrdering
+///
+/// This sets Ordering to the parsed value.
+bool LLParser::ParseOrdering(AtomicOrdering &Ordering) {
   switch (Lex.getKind()) {
   default: return TokError("Expected ordering on atomic instruction");
   case lltok::kw_unordered: Ordering = Unordered; break;
@@ -2980,8 +2984,6 @@ bool LLParser::ParseFunctionHeader(Function *&Fn, bool isDefine) {
       return Error(LinkageLoc, "invalid linkage for function definition");
     break;
   case GlobalValue::PrivateLinkage:
-  case GlobalValue::LinkerPrivateLinkage:
-  case GlobalValue::LinkerPrivateWeakLinkage:
   case GlobalValue::InternalLinkage:
   case GlobalValue::AvailableExternallyLinkage:
   case GlobalValue::LinkOnceAnyLinkage:
@@ -4069,33 +4071,27 @@ bool LLParser::ParseCall(Instruction *&Inst, PerFunctionState &PFS,
 //===----------------------------------------------------------------------===//
 
 /// ParseAlloc
-///   ::= 'alloca' Type (',' 'inalloca')? (',' TypeAndValue)? (',' OptionalInfo)?
+///   ::= 'alloca' 'inalloca'? Type (',' TypeAndValue)? (',' 'align' i32)?
 int LLParser::ParseAlloc(Instruction *&Inst, PerFunctionState &PFS) {
   Value *Size = 0;
   LocTy SizeLoc;
   unsigned Alignment = 0;
-  bool IsInAlloca = false;
   Type *Ty = 0;
+
+  bool IsInAlloca = EatIfPresent(lltok::kw_inalloca);
+
   if (ParseType(Ty)) return true;
 
   bool AteExtraComma = false;
   if (EatIfPresent(lltok::comma)) {
-    bool HaveComma = true;
-    if (EatIfPresent(lltok::kw_inalloca)) {
-      IsInAlloca = true;
-      HaveComma = EatIfPresent(lltok::comma);
-    }
-
-    if (HaveComma) {
-      if (Lex.getKind() == lltok::kw_align) {
-        if (ParseOptionalAlignment(Alignment)) return true;
-      } else if (Lex.getKind() == lltok::MetadataVar) {
-        AteExtraComma = true;
-      } else {
-        if (ParseTypeAndValue(Size, SizeLoc, PFS) ||
-            ParseOptionalCommaAlign(Alignment, AteExtraComma))
-          return true;
-      }
+    if (Lex.getKind() == lltok::kw_align) {
+      if (ParseOptionalAlignment(Alignment)) return true;
+    } else if (Lex.getKind() == lltok::MetadataVar) {
+      AteExtraComma = true;
+    } else {
+      if (ParseTypeAndValue(Size, SizeLoc, PFS) ||
+          ParseOptionalCommaAlign(Alignment, AteExtraComma))
+        return true;
     }
   }
 
@@ -4196,11 +4192,12 @@ int LLParser::ParseStore(Instruction *&Inst, PerFunctionState &PFS) {
 
 /// ParseCmpXchg
 ///   ::= 'cmpxchg' 'volatile'? TypeAndValue ',' TypeAndValue ',' TypeAndValue
-///       'singlethread'? AtomicOrdering
+///       'singlethread'? AtomicOrdering AtomicOrdering
 int LLParser::ParseCmpXchg(Instruction *&Inst, PerFunctionState &PFS) {
   Value *Ptr, *Cmp, *New; LocTy PtrLoc, CmpLoc, NewLoc;
   bool AteExtraComma = false;
-  AtomicOrdering Ordering = NotAtomic;
+  AtomicOrdering SuccessOrdering = NotAtomic;
+  AtomicOrdering FailureOrdering = NotAtomic;
   SynchronizationScope Scope = CrossThread;
   bool isVolatile = false;
 
@@ -4212,11 +4209,16 @@ int LLParser::ParseCmpXchg(Instruction *&Inst, PerFunctionState &PFS) {
       ParseTypeAndValue(Cmp, CmpLoc, PFS) ||
       ParseToken(lltok::comma, "expected ',' after cmpxchg cmp operand") ||
       ParseTypeAndValue(New, NewLoc, PFS) ||
-      ParseScopeAndOrdering(true /*Always atomic*/, Scope, Ordering))
+      ParseScopeAndOrdering(true /*Always atomic*/, Scope, SuccessOrdering) ||
+      ParseOrdering(FailureOrdering))
     return true;
 
-  if (Ordering == Unordered)
+  if (SuccessOrdering == Unordered || FailureOrdering == Unordered)
     return TokError("cmpxchg cannot be unordered");
+  if (SuccessOrdering < FailureOrdering)
+    return TokError("cmpxchg must be at least as ordered on success as failure");
+  if (FailureOrdering == Release || FailureOrdering == AcquireRelease)
+    return TokError("cmpxchg failure ordering cannot include release semantics");
   if (!Ptr->getType()->isPointerTy())
     return Error(PtrLoc, "cmpxchg operand must be a pointer");
   if (cast<PointerType>(Ptr->getType())->getElementType() != Cmp->getType())
@@ -4230,8 +4232,8 @@ int LLParser::ParseCmpXchg(Instruction *&Inst, PerFunctionState &PFS) {
     return Error(NewLoc, "cmpxchg operand must be power-of-two byte-sized"
                          " integer");
 
-  AtomicCmpXchgInst *CXI =
-    new AtomicCmpXchgInst(Ptr, Cmp, New, Ordering, Scope);
+  AtomicCmpXchgInst *CXI = new AtomicCmpXchgInst(Ptr, Cmp, New, SuccessOrdering,
+                                                 FailureOrdering, Scope);
   CXI->setVolatile(isVolatile);
   Inst = CXI;
   return AteExtraComma ? InstExtraComma : InstNormal;

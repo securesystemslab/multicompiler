@@ -15,9 +15,10 @@
 #ifndef LLVM_IR_INSTRUCTION_H
 #define LLVM_IR_INSTRUCTION_H
 
+#include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/ilist_node.h"
+#include "llvm/IR/DebugLoc.h"
 #include "llvm/IR/User.h"
-#include "llvm/Support/DebugLoc.h"
 
 namespace llvm {
 
@@ -44,13 +45,15 @@ public:
   // Out of line virtual method, so the vtable, etc has a home.
   ~Instruction();
 
-  /// use_back - Specialize the methods defined in Value, as we know that an
+  /// user_back - Specialize the methods defined in Value, as we know that an
   /// instruction can only be used by other instructions.
-  Instruction       *use_back()       { return cast<Instruction>(*use_begin());}
-  const Instruction *use_back() const { return cast<Instruction>(*use_begin());}
+  Instruction       *user_back()       { return cast<Instruction>(*user_begin());}
+  const Instruction *user_back() const { return cast<Instruction>(*user_begin());}
 
   inline const BasicBlock *getParent() const { return Parent; }
   inline       BasicBlock *getParent()       { return Parent; }
+
+  const DataLayout *getDataLayout() const;
 
   /// removeFromParent - This method unlinks 'this' from the containing basic
   /// block, but does not delete it.
@@ -170,6 +173,21 @@ public:
   /// Node is null.
   void setMetadata(unsigned KindID, MDNode *Node);
   void setMetadata(StringRef Kind, MDNode *Node);
+
+  /// \brief Drop unknown metadata.
+  /// Passes are required to drop metadata they don't understand. This is a
+  /// convenience method for passes to do so.
+  void dropUnknownMetadata(ArrayRef<unsigned> KnownIDs);
+  void dropUnknownMetadata() {
+    return dropUnknownMetadata(ArrayRef<unsigned>());
+  }
+  void dropUnknownMetadata(unsigned ID1) {
+    return dropUnknownMetadata(makeArrayRef(ID1));
+  }
+  void dropUnknownMetadata(unsigned ID1, unsigned ID2) {
+    unsigned IDs[] = {ID1, ID2};
+    return dropUnknownMetadata(IDs);
+  }
 
   /// setDebugLoc - Set the debug location information for this instruction.
   void setDebugLoc(const DebugLoc &Loc) { DbgLoc = Loc; }

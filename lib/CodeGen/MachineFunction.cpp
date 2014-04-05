@@ -25,8 +25,8 @@
 #include "llvm/CodeGen/MachineModuleInfo.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/Passes.h"
-#include "llvm/DebugInfo.h"
 #include "llvm/IR/DataLayout.h"
+#include "llvm/IR/DebugInfo.h"
 #include "llvm/IR/Function.h"
 #include "llvm/MC/MCAsmInfo.h"
 #include "llvm/MC/MCContext.h"
@@ -139,7 +139,7 @@ void MachineFunction::RenumberBlocks(MachineBasicBlock *MBB) {
   // Figure out the block number this should have.
   unsigned BlockNo = 0;
   if (MBBI != begin())
-    BlockNo = prior(MBBI)->getNumber()+1;
+    BlockNo = std::prev(MBBI)->getNumber() + 1;
 
   for (; MBBI != E; ++MBBI, ++BlockNo) {
     if (MBBI->getNumber() != (int)BlockNo) {
@@ -346,7 +346,7 @@ void MachineFunction::print(raw_ostream &OS, SlotIndexes *Indexes) const {
       OS << PrintReg(I->first, TRI);
       if (I->second)
         OS << " in " << PrintReg(I->second, TRI);
-      if (llvm::next(I) != E)
+      if (std::next(I) != E)
         OS << ", ";
     }
     OS << '\n';
@@ -583,7 +583,7 @@ MachineFrameInfo::getPristineRegs(const MachineBasicBlock *MBB) const {
   if (!isCalleeSavedInfoValid())
     return BV;
 
-  for (const uint16_t *CSR = TRI->getCalleeSavedRegs(MF); CSR && *CSR; ++CSR)
+  for (const MCPhysReg *CSR = TRI->getCalleeSavedRegs(MF); CSR && *CSR; ++CSR)
     BV.set(*CSR);
 
   // The entry MBB always has all CSRs pristine.

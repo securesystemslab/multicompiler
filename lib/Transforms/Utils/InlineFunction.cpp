@@ -17,17 +17,17 @@
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/Analysis/CallGraph.h"
 #include "llvm/Analysis/InstructionSimplify.h"
-#include "llvm/DebugInfo.h"
 #include "llvm/IR/Attributes.h"
+#include "llvm/IR/CallSite.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DataLayout.h"
+#include "llvm/IR/DebugInfo.h"
 #include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/Intrinsics.h"
 #include "llvm/IR/Module.h"
-#include "llvm/Support/CallSite.h"
 #include "llvm/Transforms/Utils/Local.h"
 using namespace llvm;
 
@@ -343,7 +343,7 @@ static Value *HandleByValArgument(Value *Arg, Instruction *TheCall,
     // If the pointer is already known to be sufficiently aligned, or if we can
     // round it up to a larger alignment, then we don't need a temporary.
     if (getOrEnforceKnownAlignment(Arg, ByValAlignment,
-                                   IFI.TD) >= ByValAlignment)
+                                   IFI.DL) >= ByValAlignment)
       return Arg;
     
     // Otherwise, we have to make a memcpy to get a safe alignment.  This is bad
@@ -356,8 +356,8 @@ static Value *HandleByValArgument(Value *Arg, Instruction *TheCall,
   
   // Create the alloca.  If we have DataLayout, use nice alignment.
   unsigned Align = 1;
-  if (IFI.TD)
-    Align = IFI.TD->getPrefTypeAlignment(AggTy);
+  if (IFI.DL)
+    Align = IFI.DL->getPrefTypeAlignment(AggTy);
   
   // If the byval had an alignment specified, we *must* use at least that
   // alignment, as it is required by the byval argument (and uses of the
@@ -377,11 +377,11 @@ static Value *HandleByValArgument(Value *Arg, Instruction *TheCall,
   Value *SrcCast = new BitCastInst(Arg, VoidPtrTy, "tmp", TheCall);
   
   Value *Size;
-  if (IFI.TD == 0)
+  if (IFI.DL == 0)
     Size = ConstantExpr::getSizeOf(AggTy);
   else
     Size = ConstantInt::get(Type::getInt64Ty(Context),
-                            IFI.TD->getTypeStoreSize(AggTy));
+                            IFI.DL->getTypeStoreSize(AggTy));
   
   // Always generate a memcpy of alignment 1 here because we don't know
   // the alignment of the src pointer.  Other optimizations can infer
@@ -401,9 +401,8 @@ static Value *HandleByValArgument(Value *Arg, Instruction *TheCall,
 // isUsedByLifetimeMarker - Check whether this Value is used by a lifetime
 // intrinsic.
 static bool isUsedByLifetimeMarker(Value *V) {
-  for (Value::use_iterator UI = V->use_begin(), UE = V->use_end(); UI != UE;
-       ++UI) {
-    if (IntrinsicInst *II = dyn_cast<IntrinsicInst>(*UI)) {
+  for (User *U : V->users()) {
+    if (IntrinsicInst *II = dyn_cast<IntrinsicInst>(U)) {
       switch (II->getIntrinsicID()) {
       default: break;
       case Intrinsic::lifetime_start:
@@ -423,11 +422,10 @@ static bool hasLifetimeMarkers(AllocaInst *AI) {
     return isUsedByLifetimeMarker(AI);
 
   // Do a scan to find all the casts to i8*.
-  for (Value::use_iterator I = AI->use_begin(), E = AI->use_end(); I != E;
-       ++I) {
-    if (I->getType() != Int8PtrTy) continue;
-    if (I->stripPointerCasts() != AI) continue;
-    if (isUsedByLifetimeMarker(*I))
+  for (User *U : AI->users()) {
+    if (U->getType() != Int8PtrTy) continue;
+    if (U->stripPointerCasts() != AI) continue;
+    if (isUsedByLifetimeMarker(U))
       return true;
   }
   return false;
@@ -599,7 +597,7 @@ bool llvm::InlineFunction(CallSite CS, InlineFunctionInfo &IFI,
     // happy with whatever the cloner can do.
     CloneAndPruneFunctionInto(Caller, CalledFunc, VMap, 
                               /*ModuleLevelChanges=*/false, Returns, ".i",
-                              &InlinedFunctionInfo, IFI.TD, TheCall);
+                              &InlinedFunctionInfo, IFI.DL, TheCall);
 
     // Remember the first block that is newly cloned over.
     FirstNewBlock = LastBlock; ++FirstNewBlock;
@@ -669,9 +667,9 @@ bool llvm::InlineFunction(CallSite CS, InlineFunctionInfo &IFI,
       ConstantInt *AllocaSize = 0;
       if (ConstantInt *AIArraySize =
           dyn_cast<ConstantInt>(AI->getArraySize())) {
-        if (IFI.TD) {
+        if (IFI.DL) {
           Type *AllocaType = AI->getAllocatedType();
-          uint64_t AllocaTypeSize = IFI.TD->getTypeAllocSize(AllocaType);
+          uint64_t AllocaTypeSize = IFI.DL->getTypeAllocSize(AllocaType);
           uint64_t AllocaArraySize = AIArraySize->getLimitedValue();
           assert(AllocaArraySize > 0 && "array size of AllocaInst is zero");
           // Check that array size doesn't saturate uint64_t and doesn't
@@ -908,7 +906,7 @@ bool llvm::InlineFunction(CallSite CS, InlineFunctionInfo &IFI,
   // the entries are the same or undef).  If so, remove the PHI so it doesn't
   // block other optimizations.
   if (PHI) {
-    if (Value *V = SimplifyInstruction(PHI, IFI.TD)) {
+    if (Value *V = SimplifyInstruction(PHI, IFI.DL)) {
       PHI->replaceAllUsesWith(V);
       PHI->eraseFromParent();
     }

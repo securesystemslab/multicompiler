@@ -11,8 +11,8 @@
 #include "BitcodeReader.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/SmallVector.h"
-#include "llvm/AutoUpgrade.h"
 #include "llvm/Bitcode/LLVMBitCodes.h"
+#include "llvm/IR/AutoUpgrade.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/InlineAsm.h"
@@ -88,8 +88,10 @@ static GlobalValue::LinkageTypes GetDecodedLinkage(unsigned Val) {
   case 10: return GlobalValue::WeakODRLinkage;
   case 11: return GlobalValue::LinkOnceODRLinkage;
   case 12: return GlobalValue::AvailableExternallyLinkage;
-  case 13: return GlobalValue::LinkerPrivateLinkage;
-  case 14: return GlobalValue::LinkerPrivateWeakLinkage;
+  case 13:
+    return GlobalValue::PrivateLinkage; // Obsolete LinkerPrivateLinkage
+  case 14:
+    return GlobalValue::PrivateLinkage; // Obsolete LinkerPrivateWeakLinkage
   }
 }
 
@@ -332,7 +334,7 @@ void BitcodeReaderValueList::ResolveConstantForwardRefs() {
     // new value.  If they reference more than one placeholder, update them all
     // at once.
     while (!Placeholder->use_empty()) {
-      Value::use_iterator UI = Placeholder->use_begin();
+      auto UI = Placeholder->user_begin();
       User *U = *UI;
 
       // If the using object isn't uniqued, just update the operands.  This
@@ -958,7 +960,7 @@ error_code BitcodeReader::ParseValueSymbolTable() {
       if (ConvertToString(Record, 1, ValueName))
         return Error(InvalidRecord);
       unsigned ValueID = Record[0];
-      if (ValueID >= ValueList.size())
+      if (ValueID >= ValueList.size() || !ValueList[ValueID])
         return Error(InvalidRecord);
       Value *V = ValueList[ValueID];
 
@@ -1025,7 +1027,7 @@ error_code BitcodeReader::ParseMetadata() {
       unsigned Size = Record.size();
       NamedMDNode *NMD = TheModule->getOrInsertNamedMetadata(Name);
       for (unsigned i = 0; i != Size; ++i) {
-        MDNode *MD = dyn_cast<MDNode>(MDValueList.getValueFwdRef(Record[i]));
+        MDNode *MD = dyn_cast_or_null<MDNode>(MDValueList.getValueFwdRef(Record[i]));
         if (MD == 0)
           return Error(InvalidRecord);
         NMD->addOperand(MD);
@@ -1107,7 +1109,7 @@ error_code BitcodeReader::ResolveGlobalAndAliasInits() {
       // Not ready to resolve this yet, it requires something later in the file.
       GlobalInits.push_back(GlobalInitWorklist.back());
     } else {
-      if (Constant *C = dyn_cast<Constant>(ValueList[ValID]))
+      if (Constant *C = dyn_cast_or_null<Constant>(ValueList[ValID]))
         GlobalInitWorklist.back().first->setInitializer(C);
       else
         return Error(ExpectedConstant);
@@ -1120,7 +1122,7 @@ error_code BitcodeReader::ResolveGlobalAndAliasInits() {
     if (ValID >= ValueList.size()) {
       AliasInits.push_back(AliasInitWorklist.back());
     } else {
-      if (Constant *C = dyn_cast<Constant>(ValueList[ValID]))
+      if (Constant *C = dyn_cast_or_null<Constant>(ValueList[ValID]))
         AliasInitWorklist.back().first->setAliasee(C);
       else
         return Error(ExpectedConstant);
@@ -1133,7 +1135,7 @@ error_code BitcodeReader::ResolveGlobalAndAliasInits() {
     if (ValID >= ValueList.size()) {
       FunctionPrefixes.push_back(FunctionPrefixWorklist.back());
     } else {
-      if (Constant *C = dyn_cast<Constant>(ValueList[ValID]))
+      if (Constant *C = dyn_cast_or_null<Constant>(ValueList[ValID]))
         FunctionPrefixWorklist.back().first->setPrefixData(C);
       else
         return Error(ExpectedConstant);
@@ -1193,7 +1195,7 @@ error_code BitcodeReader::ParseConstants() {
     case bitc::CST_CODE_SETTYPE:   // SETTYPE: [typeid]
       if (Record.empty())
         return Error(InvalidRecord);
-      if (Record[0] >= TypeList.size())
+      if (Record[0] >= TypeList.size() || !TypeList[Record[0]])
         return Error(InvalidRecord);
       CurTy = TypeList[Record[0]];
       continue;  // Skip the ValueList manipulation.
@@ -2882,7 +2884,8 @@ error_code BitcodeReader::ParseFunctionBody(Function *F) {
       break;
     }
     case bitc::FUNC_CODE_INST_CMPXCHG: {
-      // CMPXCHG:[ptrty, ptr, cmp, new, vol, ordering, synchscope]
+      // CMPXCHG:[ptrty, ptr, cmp, new, vol, successordering, synchscope,
+      //          failureordering]
       unsigned OpNum = 0;
       Value *Ptr, *Cmp, *New;
       if (getValueTypePair(Record, OpNum, NextValueNo, Ptr) ||
@@ -2890,13 +2893,22 @@ error_code BitcodeReader::ParseFunctionBody(Function *F) {
                     cast<PointerType>(Ptr->getType())->getElementType(), Cmp) ||
           popValue(Record, OpNum, NextValueNo,
                     cast<PointerType>(Ptr->getType())->getElementType(), New) ||
-          OpNum+3 != Record.size())
+          (OpNum + 3 != Record.size() && OpNum + 4 != Record.size()))
         return Error(InvalidRecord);
-      AtomicOrdering Ordering = GetDecodedOrdering(Record[OpNum+1]);
-      if (Ordering == NotAtomic || Ordering == Unordered)
+      AtomicOrdering SuccessOrdering = GetDecodedOrdering(Record[OpNum+1]);
+      if (SuccessOrdering == NotAtomic || SuccessOrdering == Unordered)
         return Error(InvalidRecord);
       SynchronizationScope SynchScope = GetDecodedSynchScope(Record[OpNum+2]);
-      I = new AtomicCmpXchgInst(Ptr, Cmp, New, Ordering, SynchScope);
+
+      AtomicOrdering FailureOrdering;
+      if (Record.size() < 7)
+        FailureOrdering =
+            AtomicCmpXchgInst::getStrongestFailureOrdering(SuccessOrdering);
+      else
+        FailureOrdering = GetDecodedOrdering(Record[OpNum+3]);
+
+      I = new AtomicCmpXchgInst(Ptr, Cmp, New, SuccessOrdering, FailureOrdering,
+                                SynchScope);
       cast<AtomicCmpXchgInst>(I)->setVolatile(Record[OpNum]);
       InstructionList.push_back(I);
       break;
@@ -3027,7 +3039,7 @@ OutOfRecordLoop:
     if (A->getParent() == 0) {
       // We found at least one unresolved value.  Nuke them all to avoid leaks.
       for (unsigned i = ModuleValueListSize, e = ValueList.size(); i != e; ++i){
-        if ((A = dyn_cast<Argument>(ValueList[i])) && A->getParent() == 0) {
+        if ((A = dyn_cast_or_null<Argument>(ValueList[i])) && A->getParent() == 0) {
           A->replaceAllUsesWith(UndefValue::get(A->getType()));
           delete A;
         }
@@ -3116,8 +3128,8 @@ error_code BitcodeReader::Materialize(GlobalValue *GV) {
   for (UpgradedIntrinsicMap::iterator I = UpgradedIntrinsics.begin(),
        E = UpgradedIntrinsics.end(); I != E; ++I) {
     if (I->first != I->second) {
-      for (Value::use_iterator UI = I->first->use_begin(),
-           UE = I->first->use_end(); UI != UE; ) {
+      for (auto UI = I->first->user_begin(), UE = I->first->user_end();
+           UI != UE;) {
         if (CallInst* CI = dyn_cast<CallInst>(*UI++))
           UpgradeIntrinsicCall(CI, I->second);
       }
@@ -3172,8 +3184,8 @@ error_code BitcodeReader::MaterializeModule(Module *M) {
   for (std::vector<std::pair<Function*, Function*> >::iterator I =
        UpgradedIntrinsics.begin(), E = UpgradedIntrinsics.end(); I != E; ++I) {
     if (I->first != I->second) {
-      for (Value::use_iterator UI = I->first->use_begin(),
-           UE = I->first->use_end(); UI != UE; ) {
+      for (auto UI = I->first->user_begin(), UE = I->first->user_end();
+           UI != UE;) {
         if (CallInst* CI = dyn_cast<CallInst>(*UI++))
           UpgradeIntrinsicCall(CI, I->second);
       }
@@ -3245,11 +3257,11 @@ error_code BitcodeReader::InitLazyStream() {
 }
 
 namespace {
-class BitcodeErrorCategoryType : public _do_message {
-  const char *name() const LLVM_OVERRIDE {
+class BitcodeErrorCategoryType : public error_category {
+  const char *name() const override {
     return "llvm.bitcode";
   }
-  std::string message(int IE) const LLVM_OVERRIDE {
+  std::string message(int IE) const override {
     BitcodeReader::ErrorType E = static_cast<BitcodeReader::ErrorType>(IE);
     switch (E) {
     case BitcodeReader::BitcodeStreamInvalidSize:

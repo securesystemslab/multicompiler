@@ -33,6 +33,7 @@
 #include "llvm/Analysis/LoopPass.h"
 #include "llvm/Analysis/ScalarEvolutionExpander.h"
 #include "llvm/IR/BasicBlock.h"
+#include "llvm/IR/CFG.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/Dominators.h"
@@ -40,7 +41,6 @@
 #include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Type.h"
-#include "llvm/Support/CFG.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
@@ -71,7 +71,7 @@ namespace {
     LoopInfo        *LI;
     ScalarEvolution *SE;
     DominatorTree   *DT;
-    DataLayout      *TD;
+    const DataLayout *DL;
     TargetLibraryInfo *TLI;
 
     SmallVector<WeakVH, 16> DeadInsts;
@@ -79,14 +79,14 @@ namespace {
   public:
 
     static char ID; // Pass identification, replacement for typeid
-    IndVarSimplify() : LoopPass(ID), LI(0), SE(0), DT(0), TD(0),
+    IndVarSimplify() : LoopPass(ID), LI(0), SE(0), DT(0), DL(0),
                        Changed(false) {
       initializeIndVarSimplifyPass(*PassRegistry::getPassRegistry());
     }
 
-    virtual bool runOnLoop(Loop *L, LPPassManager &LPM);
+    bool runOnLoop(Loop *L, LPPassManager &LPM) override;
 
-    virtual void getAnalysisUsage(AnalysisUsage &AU) const {
+    void getAnalysisUsage(AnalysisUsage &AU) const override {
       AU.addRequired<DominatorTreeWrapperPass>();
       AU.addRequired<LoopInfo>();
       AU.addRequired<ScalarEvolution>();
@@ -99,7 +99,7 @@ namespace {
     }
 
   private:
-    virtual void releaseMemory() {
+    void releaseMemory() override {
       DeadInsts.clear();
     }
 
@@ -269,11 +269,11 @@ void IndVarSimplify::HandleFloatingPointIV(Loop *L, PHINode *PN) {
 
   // Check Incr uses. One user is PN and the other user is an exit condition
   // used by the conditional terminator.
-  Value::use_iterator IncrUse = Incr->use_begin();
+  Value::user_iterator IncrUse = Incr->user_begin();
   Instruction *U1 = cast<Instruction>(*IncrUse++);
-  if (IncrUse == Incr->use_end()) return;
+  if (IncrUse == Incr->user_end()) return;
   Instruction *U2 = cast<Instruction>(*IncrUse++);
-  if (IncrUse != Incr->use_end()) return;
+  if (IncrUse != Incr->user_end()) return;
 
   // Find exit condition, which is an fcmp.  If it doesn't exist, or if it isn't
   // only used by a branch, we can't transform it.
@@ -281,10 +281,10 @@ void IndVarSimplify::HandleFloatingPointIV(Loop *L, PHINode *PN) {
   if (!Compare)
     Compare = dyn_cast<FCmpInst>(U2);
   if (Compare == 0 || !Compare->hasOneUse() ||
-      !isa<BranchInst>(Compare->use_back()))
+      !isa<BranchInst>(Compare->user_back()))
     return;
 
-  BranchInst *TheBr = cast<BranchInst>(Compare->use_back());
+  BranchInst *TheBr = cast<BranchInst>(Compare->user_back());
 
   // We need to verify that the branch actually controls the iteration count
   // of the loop.  If not, the new IV can overflow and no one will notice.
@@ -497,6 +497,21 @@ void IndVarSimplify::RewriteLoopExitValues(Loop *L, SCEVExpander &Rewriter) {
 
     unsigned NumPreds = PN->getNumIncomingValues();
 
+    // We would like to be able to RAUW single-incoming value PHI nodes. We
+    // have to be certain this is safe even when this is an LCSSA PHI node.
+    // While the computed exit value is no longer varying in *this* loop, the
+    // exit block may be an exit block for an outer containing loop as well,
+    // the exit value may be varying in the outer loop, and thus it may still
+    // require an LCSSA PHI node. The safe case is when this is
+    // single-predecessor PHI node (LCSSA) and the exit block containing it is
+    // part of the enclosing loop, or this is the outer most loop of the nest.
+    // In either case the exit value could (at most) be varying in the same
+    // loop body as the phi node itself. Thus if it is in turn used outside of
+    // an enclosing loop it will only be via a separate LCSSA node.
+    bool LCSSASafePhiForRAUW =
+        NumPreds == 1 &&
+        (!L->getParentLoop() || L->getParentLoop() == LI->getLoopFor(ExitBB));
+
     // Iterate over all of the PHI nodes.
     BasicBlock::iterator BBI = ExitBB->begin();
     while ((PN = dyn_cast<PHINode>(BBI++))) {
@@ -548,8 +563,8 @@ void IndVarSimplify::RewriteLoopExitValues(Loop *L, SCEVExpander &Rewriter) {
           unsigned NumHardInternalUses = 0;
           unsigned NumSoftExternalUses = 0;
           unsigned NumUses = 0;
-          for (Value::use_iterator IB=Inst->use_begin(), IE=Inst->use_end();
-               IB!=IE && NumUses<=6 ; ++IB) {
+          for (auto IB = Inst->user_begin(), IE = Inst->user_end();
+               IB != IE && NumUses <= 6; ++IB) {
             Instruction *UseInstr = cast<Instruction>(*IB);
             unsigned Opc = UseInstr->getOpcode();
             NumUses++;
@@ -561,9 +576,9 @@ void IndVarSimplify::RewriteLoopExitValues(Loop *L, SCEVExpander &Rewriter) {
                 // Do not count the Phi as a use. LCSSA may have inserted
                 // plenty of trivial ones.
                 NumUses--;
-                for (Value::use_iterator PB=UseInstr->use_begin(),
-                                         PE=UseInstr->use_end();
-                     PB!=PE && NumUses<=6 ; ++PB, ++NumUses) {
+                for (auto PB = UseInstr->user_begin(),
+                          PE = UseInstr->user_end();
+                     PB != PE && NumUses <= 6; ++PB, ++NumUses) {
                   unsigned PhiOpc = cast<Instruction>(*PB)->getOpcode();
                   if (PhiOpc != Instruction::Call && PhiOpc != Instruction::Ret)
                     NumSoftExternalUses++;
@@ -597,17 +612,18 @@ void IndVarSimplify::RewriteLoopExitValues(Loop *L, SCEVExpander &Rewriter) {
         if (isInstructionTriviallyDead(Inst, TLI))
           DeadInsts.push_back(Inst);
 
-        if (NumPreds == 1) {
-          // Completely replace a single-pred PHI. This is safe, because the
-          // NewVal won't be variant in the loop, so we don't need an LCSSA phi
-          // node anymore.
+        // If we determined that this PHI is safe to replace even if an LCSSA
+        // PHI, do so.
+        if (LCSSASafePhiForRAUW) {
           PN->replaceAllUsesWith(ExitVal);
           PN->eraseFromParent();
         }
       }
-      if (NumPreds != 1) {
-        // Clone the PHI and delete the original one. This lets IVUsers and
-        // any other maps purge the original user from their records.
+
+      // If we were unable to completely replace the PHI node, clone the PHI
+      // and delete the original one. This lets IVUsers and any other maps
+      // purge the original user from their records.
+      if (!LCSSASafePhiForRAUW) {
         PHINode *NewPN = cast<PHINode>(PN->clone());
         NewPN->takeName(PN);
         NewPN->insertBefore(PN);
@@ -643,14 +659,14 @@ namespace {
 /// extended by this sign or zero extend operation. This is used to determine
 /// the final width of the IV before actually widening it.
 static void visitIVCast(CastInst *Cast, WideIVInfo &WI, ScalarEvolution *SE,
-                        const DataLayout *TD) {
+                        const DataLayout *DL) {
   bool IsSigned = Cast->getOpcode() == Instruction::SExt;
   if (!IsSigned && Cast->getOpcode() != Instruction::ZExt)
     return;
 
   Type *Ty = Cast->getType();
   uint64_t Width = SE->getTypeSizeInBits(Ty);
-  if (TD && !TD->isLegalInteger(Width))
+  if (DL && !DL->isLegalInteger(Width))
     return;
 
   if (!WI.WidestNativeType) {
@@ -1002,15 +1018,14 @@ Instruction *WidenIV::WidenIVUse(NarrowIVDefUse DU, SCEVExpander &Rewriter) {
 /// pushNarrowIVUsers - Add eligible users of NarrowDef to NarrowIVUsers.
 ///
 void WidenIV::pushNarrowIVUsers(Instruction *NarrowDef, Instruction *WideDef) {
-  for (Value::use_iterator UI = NarrowDef->use_begin(),
-         UE = NarrowDef->use_end(); UI != UE; ++UI) {
-    Instruction *NarrowUse = cast<Instruction>(*UI);
+  for (User *U : NarrowDef->users()) {
+    Instruction *NarrowUser = cast<Instruction>(U);
 
     // Handle data flow merges and bizarre phi cycles.
-    if (!Widened.insert(NarrowUse))
+    if (!Widened.insert(NarrowUser))
       continue;
 
-    NarrowIVUsers.push_back(NarrowIVDefUse(NarrowDef, NarrowUse, WideDef));
+    NarrowIVUsers.push_back(NarrowIVDefUse(NarrowDef, NarrowUser, WideDef));
   }
 }
 
@@ -1106,15 +1121,15 @@ PHINode *WidenIV::CreateWideIV(SCEVExpander &Rewriter) {
 namespace {
   class IndVarSimplifyVisitor : public IVVisitor {
     ScalarEvolution *SE;
-    const DataLayout *TD;
+    const DataLayout *DL;
     PHINode *IVPhi;
 
   public:
     WideIVInfo WI;
 
     IndVarSimplifyVisitor(PHINode *IV, ScalarEvolution *SCEV,
-                          const DataLayout *TData, const DominatorTree *DTree):
-      SE(SCEV), TD(TData), IVPhi(IV) {
+                          const DataLayout *DL, const DominatorTree *DTree):
+      SE(SCEV), DL(DL), IVPhi(IV) {
       DT = DTree;
       WI.NarrowIV = IVPhi;
       if (ReduceLiveIVs)
@@ -1122,7 +1137,7 @@ namespace {
     }
 
     // Implement the interface used by simplifyUsersOfIV.
-    virtual void visitCast(CastInst *Cast) { visitIVCast(Cast, WI, SE, TD); }
+    void visitCast(CastInst *Cast) override { visitIVCast(Cast, WI, SE, DL); }
   };
 }
 
@@ -1156,7 +1171,7 @@ void IndVarSimplify::SimplifyAndExtend(Loop *L,
       PHINode *CurrIV = LoopPhis.pop_back_val();
 
       // Information about sign/zero extensions of CurrIV.
-      IndVarSimplifyVisitor Visitor(CurrIV, SE, TD, DT);
+      IndVarSimplifyVisitor Visitor(CurrIV, SE, DL, DT);
 
       Changed |= simplifyUsersOfIV(CurrIV, SE, &LPM, DeadInsts, &Visitor);
 
@@ -1401,15 +1416,11 @@ static bool AlmostDeadIV(PHINode *Phi, BasicBlock *LatchBlock, Value *Cond) {
   int LatchIdx = Phi->getBasicBlockIndex(LatchBlock);
   Value *IncV = Phi->getIncomingValue(LatchIdx);
 
-  for (Value::use_iterator UI = Phi->use_begin(), UE = Phi->use_end();
-       UI != UE; ++UI) {
-    if (*UI != Cond && *UI != IncV) return false;
-  }
+  for (User *U : Phi->users())
+    if (U != Cond && U != IncV) return false;
 
-  for (Value::use_iterator UI = IncV->use_begin(), UE = IncV->use_end();
-       UI != UE; ++UI) {
-    if (*UI != Cond && *UI != Phi) return false;
-  }
+  for (User *U : IncV->users())
+    if (U != Cond && U != Phi) return false;
   return true;
 }
 
@@ -1428,7 +1439,7 @@ static bool AlmostDeadIV(PHINode *Phi, BasicBlock *LatchBlock, Value *Cond) {
 /// could at least handle constant BECounts.
 static PHINode *
 FindLoopCounter(Loop *L, const SCEV *BECount,
-                ScalarEvolution *SE, DominatorTree *DT, const DataLayout *TD) {
+                ScalarEvolution *SE, DominatorTree *DT, const DataLayout *DL) {
   uint64_t BCWidth = SE->getTypeSizeInBits(BECount->getType());
 
   Value *Cond =
@@ -1457,7 +1468,7 @@ FindLoopCounter(Loop *L, const SCEV *BECount,
     // AR may be wider than BECount. With eq/ne tests overflow is immaterial.
     // AR may not be a narrower type, or we may never exit.
     uint64_t PhiWidth = SE->getTypeSizeInBits(AR->getType());
-    if (PhiWidth < BCWidth || (TD && !TD->isLegalInteger(PhiWidth)))
+    if (PhiWidth < BCWidth || (DL && !DL->isLegalInteger(PhiWidth)))
       continue;
 
     const SCEV *Step = dyn_cast<SCEVConstant>(AR->getStepRecurrence(*SE));
@@ -1739,13 +1750,12 @@ void IndVarSimplify::SinkUnusedInvariants(Loop *L) {
     // Determine if there is a use in or before the loop (direct or
     // otherwise).
     bool UsedInLoop = false;
-    for (Value::use_iterator UI = I->use_begin(), UE = I->use_end();
-         UI != UE; ++UI) {
-      User *U = *UI;
-      BasicBlock *UseBB = cast<Instruction>(U)->getParent();
-      if (PHINode *P = dyn_cast<PHINode>(U)) {
+    for (Use &U : I->uses()) {
+      Instruction *User = cast<Instruction>(U.getUser());
+      BasicBlock *UseBB = User->getParent();
+      if (PHINode *P = dyn_cast<PHINode>(User)) {
         unsigned i =
-          PHINode::getIncomingValueNumForOperand(UI.getOperandNo());
+          PHINode::getIncomingValueNumForOperand(U.getOperandNo());
         UseBB = P->getIncomingBlock(i);
       }
       if (UseBB == Preheader || L->contains(UseBB)) {
@@ -1785,6 +1795,9 @@ void IndVarSimplify::SinkUnusedInvariants(Loop *L) {
 //===----------------------------------------------------------------------===//
 
 bool IndVarSimplify::runOnLoop(Loop *L, LPPassManager &LPM) {
+  if (skipOptnoneFunction(L))
+    return false;
+
   // If LoopSimplify form is not available, stay out of trouble. Some notes:
   //  - LSR currently only supports LoopSimplify-form loops. Indvars'
   //    canonicalization can be a pessimization without LSR to "clean up"
@@ -1799,7 +1812,8 @@ bool IndVarSimplify::runOnLoop(Loop *L, LPPassManager &LPM) {
   LI = &getAnalysis<LoopInfo>();
   SE = &getAnalysis<ScalarEvolution>();
   DT = &getAnalysis<DominatorTreeWrapperPass>().getDomTree();
-  TD = getAnalysisIfAvailable<DataLayout>();
+  DataLayoutPass *DLP = getAnalysisIfAvailable<DataLayoutPass>();
+  DL = DLP ? &DLP->getDataLayout() : 0;
   TLI = getAnalysisIfAvailable<TargetLibraryInfo>();
 
   DeadInsts.clear();
@@ -1841,7 +1855,7 @@ bool IndVarSimplify::runOnLoop(Loop *L, LPPassManager &LPM) {
   // If we have a trip count expression, rewrite the loop's exit condition
   // using it.  We can currently only handle loops with a single exit.
   if (canExpandBackedgeTakenCount(L, SE) && needsLFTR(L, DT)) {
-    PHINode *IndVar = FindLoopCounter(L, BackedgeTakenCount, SE, DT, TD);
+    PHINode *IndVar = FindLoopCounter(L, BackedgeTakenCount, SE, DT, DL);
     if (IndVar) {
       // Check preconditions for proper SCEVExpander operation. SCEV does not
       // express SCEVExpander's dependencies, such as LoopSimplify. Instead any

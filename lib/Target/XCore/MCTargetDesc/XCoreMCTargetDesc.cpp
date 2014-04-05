@@ -99,10 +99,10 @@ class XCoreTargetAsmStreamer : public XCoreTargetStreamer {
   formatted_raw_ostream &OS;
 public:
   XCoreTargetAsmStreamer(MCStreamer &S, formatted_raw_ostream &OS);
-  virtual void emitCCTopData(StringRef Name) LLVM_OVERRIDE;
-  virtual void emitCCTopFunction(StringRef Name) LLVM_OVERRIDE;
-  virtual void emitCCBottomData(StringRef Name) LLVM_OVERRIDE;
-  virtual void emitCCBottomFunction(StringRef Name) LLVM_OVERRIDE;
+  virtual void emitCCTopData(StringRef Name) override;
+  virtual void emitCCTopFunction(StringRef Name) override;
+  virtual void emitCCBottomData(StringRef Name) override;
+  virtual void emitCCBottomFunction(StringRef Name) override;
 };
 
 XCoreTargetAsmStreamer::XCoreTargetAsmStreamer(MCStreamer &S,
@@ -128,12 +128,12 @@ void XCoreTargetAsmStreamer::emitCCBottomFunction(StringRef Name) {
 
 static MCStreamer *
 createXCoreMCAsmStreamer(MCContext &Ctx, formatted_raw_ostream &OS,
-                         bool isVerboseAsm, bool useLoc, bool useCFI,
-                         bool useDwarfDirectory, MCInstPrinter *InstPrint,
-                         MCCodeEmitter *CE, MCAsmBackend *TAB, bool ShowInst) {
+                         bool isVerboseAsm, bool useCFI, bool useDwarfDirectory,
+                         MCInstPrinter *InstPrint, MCCodeEmitter *CE,
+                         MCAsmBackend *TAB, bool ShowInst) {
   MCStreamer *S =
-      llvm::createAsmStreamer(Ctx, OS, isVerboseAsm, useLoc, useCFI,
-                              useDwarfDirectory, InstPrint, CE, TAB, ShowInst);
+      llvm::createAsmStreamer(Ctx, OS, isVerboseAsm, useCFI, useDwarfDirectory,
+                              InstPrint, CE, TAB, ShowInst);
   new XCoreTargetAsmStreamer(*S, OS);
   return S;
 }

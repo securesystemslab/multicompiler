@@ -16,12 +16,12 @@
 #include "BugDriver.h"
 #include "ToolRunner.h"
 #include "llvm/IR/LLVMContext.h"
+#include "llvm/IR/LegacyPassNameParser.h"
 #include "llvm/LinkAllIR.h"
 #include "llvm/LinkAllPasses.h"
 #include "llvm/PassManager.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/ManagedStatic.h"
-#include "llvm/Support/PassNameParser.h"
 #include "llvm/Support/PluginLoader.h"
 #include "llvm/Support/PrettyStackTrace.h"
 #include "llvm/Support/Process.h"
@@ -72,15 +72,15 @@ StandardLinkOpts("std-link-opts",
 
 static cl::opt<bool>
 OptLevelO1("O1",
-           cl::desc("Optimization level 1. Identical with 'opt -O1'"));
+           cl::desc("Optimization level 1. Identical to 'opt -O1'"));
 
 static cl::opt<bool>
 OptLevelO2("O2",
-           cl::desc("Optimization level 2. Identical with 'opt -O2'"));
+           cl::desc("Optimization level 2. Identical to 'opt -O2'"));
 
 static cl::opt<bool>
 OptLevelO3("O3",
-           cl::desc("Optimization level 3. Identical with 'opt -O3'"));
+           cl::desc("Optimization level 3. Identical to 'opt -O3'"));
 
 static cl::opt<std::string>
 OverrideTriple("mtriple", cl::desc("Override target triple for module"));
@@ -101,13 +101,19 @@ namespace {
   public:
     AddToDriver(BugDriver &_D) : FunctionPassManager(0), D(_D) {}
 
-    virtual void add(Pass *P) {
+    void add(Pass *P) override {
       const void *ID = P->getPassID();
       const PassInfo *PI = PassRegistry::getPassRegistry()->getPassInfo(ID);
       D.addPass(PI->getPassArgument());
     }
   };
 }
+
+#ifdef LINK_POLLY_INTO_TOOLS
+namespace polly {
+void initializePollyPasses(llvm::PassRegistry &Registry);
+}
+#endif
 
 int main(int argc, char **argv) {
 #ifndef DEBUG_BUGPOINT
@@ -129,6 +135,10 @@ int main(int argc, char **argv) {
   initializeInstCombine(Registry);
   initializeInstrumentation(Registry);
   initializeTarget(Registry);
+
+#ifdef LINK_POLLY_INTO_TOOLS
+  polly::initializePollyPasses(Registry);
+#endif
 
   cl::ParseCommandLineOptions(argc, argv,
                               "LLVM automatic testcase reducer. See\nhttp://"

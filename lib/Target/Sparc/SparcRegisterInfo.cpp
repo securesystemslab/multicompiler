@@ -35,11 +35,11 @@ ReserveAppRegisters("sparc-reserve-app-registers", cl::Hidden, cl::init(false),
                     cl::desc("Reserve application registers (%g2-%g4)"));
 
 SparcRegisterInfo::SparcRegisterInfo(SparcSubtarget &st)
-  : SparcGenRegisterInfo(SP::I7), Subtarget(st) {
+  : SparcGenRegisterInfo(SP::O7), Subtarget(st) {
 }
 
-const uint16_t* SparcRegisterInfo::getCalleeSavedRegs(const MachineFunction *MF)
-                                                                         const {
+const MCPhysReg*
+SparcRegisterInfo::getCalleeSavedRegs(const MachineFunction *MF) const {
   return CSR_SaveList;
 }
 

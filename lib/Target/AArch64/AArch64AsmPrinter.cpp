@@ -18,7 +18,7 @@
 #include "llvm/ADT/SmallString.h"
 #include "llvm/CodeGen/MachineModuleInfoImpls.h"
 #include "llvm/CodeGen/TargetLoweringObjectFileImpl.h"
-#include "llvm/DebugInfo.h"
+#include "llvm/IR/DebugInfo.h"
 #include "llvm/IR/Mangler.h"
 #include "llvm/MC/MCAsmInfo.h"
 #include "llvm/MC/MCInst.h"
@@ -264,7 +264,7 @@ void AArch64AsmPrinter::EmitInstruction(const MachineInstr *MI) {
 
   MCInst TmpInst;
   LowerAArch64MachineInstrToMCInst(MI, TmpInst, *this);
-  OutStreamer.EmitInstruction(TmpInst);
+  EmitToStreamer(OutStreamer, TmpInst);
 }
 
 void AArch64AsmPrinter::EmitEndOfAsmFile(Module &M) {
@@ -296,6 +296,7 @@ bool AArch64AsmPrinter::runOnMachineFunction(MachineFunction &MF) {
 
 // Force static initialization.
 extern "C" void LLVMInitializeAArch64AsmPrinter() {
-    RegisterAsmPrinter<AArch64AsmPrinter> X(TheAArch64Target);
+    RegisterAsmPrinter<AArch64AsmPrinter> X(TheAArch64leTarget);
+    RegisterAsmPrinter<AArch64AsmPrinter> Y(TheAArch64beTarget);
 }
 

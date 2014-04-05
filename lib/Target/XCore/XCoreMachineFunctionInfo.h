@@ -31,24 +31,29 @@ class XCoreFunctionInfo : public MachineFunctionInfo {
   int LRSpillSlot;
   bool FPSpillSlotSet;
   int FPSpillSlot;
+  bool EHSpillSlotSet;
+  int EHSpillSlot[2];
+  unsigned ReturnStackOffset;
+  bool ReturnStackOffsetSet;
   int VarArgsFrameIndex;
   mutable int CachedEStackSize;
-  std::vector<std::pair<MCSymbol*, CalleeSavedInfo> > SpillLabels;
+  std::vector<std::pair<MachineBasicBlock::iterator, CalleeSavedInfo>>
+  SpillLabels;
 
 public:
   XCoreFunctionInfo() :
     LRSpillSlotSet(false),
-    LRSpillSlot(0),
     FPSpillSlotSet(false),
-    FPSpillSlot(0),
+    EHSpillSlotSet(false),
+    ReturnStackOffsetSet(false),
     VarArgsFrameIndex(0),
     CachedEStackSize(-1) {}
   
   explicit XCoreFunctionInfo(MachineFunction &MF) :
     LRSpillSlotSet(false),
-    LRSpillSlot(0),
     FPSpillSlotSet(false),
-    FPSpillSlot(0),
+    EHSpillSlotSet(false),
+    ReturnStackOffsetSet(false),
     VarArgsFrameIndex(0),
     CachedEStackSize(-1) {}
   
@@ -60,20 +65,39 @@ public:
   int createLRSpillSlot(MachineFunction &MF);
   bool hasLRSpillSlot() { return LRSpillSlotSet; }
   int getLRSpillSlot() const {
-    assert(LRSpillSlotSet && "LR Spill slot no set");
+    assert(LRSpillSlotSet && "LR Spill slot not set");
     return LRSpillSlot;
   }
 
   int createFPSpillSlot(MachineFunction &MF);
   bool hasFPSpillSlot() { return FPSpillSlotSet; }
   int getFPSpillSlot() const {
-    assert(FPSpillSlotSet && "FP Spill slot no set");
+    assert(FPSpillSlotSet && "FP Spill slot not set");
     return FPSpillSlot;
+  }
+
+  const int* createEHSpillSlot(MachineFunction &MF);
+  bool hasEHSpillSlot() { return EHSpillSlotSet; }
+  const int* getEHSpillSlot() const {
+    assert(EHSpillSlotSet && "EH Spill slot not set");
+    return EHSpillSlot;
+  }
+
+  void setReturnStackOffset(unsigned value) {
+    assert(!ReturnStackOffsetSet && "Return stack offset set twice");
+    ReturnStackOffset = value;
+    ReturnStackOffsetSet = true;
+  }
+
+  unsigned getReturnStackOffset() const {
+    assert(ReturnStackOffsetSet && "Return stack offset not set");
+    return ReturnStackOffset;
   }
 
   bool isLargeFrame(const MachineFunction &MF) const;
 
-  std::vector<std::pair<MCSymbol*, CalleeSavedInfo> > &getSpillLabels() {
+  std::vector<std::pair<MachineBasicBlock::iterator, CalleeSavedInfo>> &
+  getSpillLabels() {
     return SpillLabels;
   }
 };

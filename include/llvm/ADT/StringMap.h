@@ -136,10 +136,8 @@ public:
                                 InitType InitVal) {
     unsigned KeyLength = static_cast<unsigned>(KeyEnd-KeyStart);
 
-    // Okay, the item doesn't already exist, and 'Bucket' is the bucket to fill
-    // in.  Allocate a new item with space for the string at the end and a null
+    // Allocate a new item with space for the string at the end and a null
     // terminator.
-
     unsigned AllocSize = static_cast<unsigned>(sizeof(StringMapEntry))+
       KeyLength+1;
     unsigned Alignment = alignOf<StringMapEntry>();
@@ -389,7 +387,17 @@ public:
   }
 
   ~StringMap() {
-    clear();
+    // Delete all the elements in the map, but don't reset the elements
+    // to default values.  This is a copy of clear(), but avoids unnecessary
+    // work not required in the destructor.
+    if (!empty()) {
+      for (unsigned I = 0, E = NumBuckets; I != E; ++I) {
+        StringMapEntryBase *Bucket = TheTable[I];
+        if (Bucket && Bucket != getTombstoneVal()) {
+          static_cast<MapEntryTy*>(Bucket)->Destroy(Allocator);
+        }
+      }
+    }
     free(TheTable);
   }
 };

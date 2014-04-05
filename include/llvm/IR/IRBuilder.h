@@ -19,13 +19,13 @@
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/Twine.h"
 #include "llvm/IR/BasicBlock.h"
+#include "llvm/IR/ConstantFolder.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Operator.h"
+#include "llvm/IR/ValueHandle.h"
 #include "llvm/Support/CBindingWrapping.h"
-#include "llvm/Support/ConstantFolder.h"
-#include "llvm/Support/ValueHandle.h"
 
 namespace llvm {
   class MDNode;
@@ -282,6 +282,12 @@ public:
     return ConstantInt::get(getInt64Ty(), C);
   }
 
+  /// \brief Get a constant N-bit value, zero extended or truncated from
+  /// a 64-bit value.
+  ConstantInt *getIntN(unsigned N, uint64_t C) {
+    return ConstantInt::get(getIntNTy(N), C);
+  }
+
   /// \brief Get a constant integer value.
   ConstantInt *getInt(const APInt &AI) {
     return ConstantInt::get(Context, AI);
@@ -314,6 +320,11 @@ public:
   /// \brief Fetch the type representing a 64-bit integer.
   IntegerType *getInt64Ty() {
     return Type::getInt64Ty(Context);
+  }
+
+  /// \brief Fetch the type representing an N-bit integer.
+  IntegerType *getIntNTy(unsigned N) {
+    return Type::getIntNTy(Context, N);
   }
 
   /// \brief Fetch the type representing a 32-bit floating point value.
@@ -923,10 +934,13 @@ public:
                          const Twine &Name = "") {
     return Insert(new FenceInst(Context, Ordering, SynchScope), Name);
   }
-  AtomicCmpXchgInst *CreateAtomicCmpXchg(Value *Ptr, Value *Cmp, Value *New,
-                                         AtomicOrdering Ordering,
-                               SynchronizationScope SynchScope = CrossThread) {
-    return Insert(new AtomicCmpXchgInst(Ptr, Cmp, New, Ordering, SynchScope));
+  AtomicCmpXchgInst *
+  CreateAtomicCmpXchg(Value *Ptr, Value *Cmp, Value *New,
+                      AtomicOrdering SuccessOrdering,
+                      AtomicOrdering FailureOrdering,
+                      SynchronizationScope SynchScope = CrossThread) {
+    return Insert(new AtomicCmpXchgInst(Ptr, Cmp, New, SuccessOrdering,
+                                        FailureOrdering, SynchScope));
   }
   AtomicRMWInst *CreateAtomicRMW(AtomicRMWInst::BinOp Op, Value *Ptr, Value *Val,
                                  AtomicOrdering Ordering,

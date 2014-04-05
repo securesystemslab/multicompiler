@@ -48,7 +48,7 @@ const char* TargetLibraryInfo::StandardNames[LibFunc::NumLibFuncs] =
     "__isoc99_sscanf",
     "__memcpy_chk",
     "__sincospi_stret",
-    "__sincospi_stretf",
+    "__sincospif_stret",
     "__sinpi",
     "__sinpif",
     "__sqrt_finite",
@@ -190,6 +190,9 @@ const char* TargetLibraryInfo::StandardNames[LibFunc::NumLibFuncs] =
     "isdigit",
     "labs",
     "lchown",
+    "ldexp",
+    "ldexpf",
+    "ldexpl",
     "llabs",
     "log",
     "log10",
@@ -375,8 +378,17 @@ static void initialize(TargetLibraryInfo &TLI, const Triple &T,
       llvm_unreachable("TargetLibraryInfo function names must be sorted");
   }
 #endif // !NDEBUG
-  
-  // memset_pattern16 is only available on iOS 3.0 and Mac OS/X 10.5 and later.
+
+  // There are no library implementations of mempcy and memset for r600 and
+  // these can be difficult to lower in the backend.
+  if (T.getArch() == Triple::r600) {
+    TLI.setUnavailable(LibFunc::memcpy);
+    TLI.setUnavailable(LibFunc::memset);
+    TLI.setUnavailable(LibFunc::memset_pattern16);
+    return;
+  }
+
+  // memset_pattern16 is only available on iOS 3.0 and Mac OS X 10.5 and later.
   if (T.isMacOSX()) {
     if (T.isMacOSXVersionLT(10, 5))
       TLI.setUnavailable(LibFunc::memset_pattern16);
@@ -393,7 +405,7 @@ static void initialize(TargetLibraryInfo &TLI, const Triple &T,
     TLI.setUnavailable(LibFunc::cospi);
     TLI.setUnavailable(LibFunc::cospif);
     TLI.setUnavailable(LibFunc::sincospi_stret);
-    TLI.setUnavailable(LibFunc::sincospi_stretf);
+    TLI.setUnavailable(LibFunc::sincospif_stret);
   }
 
   if (T.isMacOSX() && T.getArch() == Triple::x86 &&
@@ -414,7 +426,7 @@ static void initialize(TargetLibraryInfo &TLI, const Triple &T,
     TLI.setUnavailable(LibFunc::fiprintf);
   }
 
-  if (T.getOS() == Triple::Win32) {
+  if (T.isKnownWindowsMSVCEnvironment()) {
     // Win32 does not support long double
     TLI.setUnavailable(LibFunc::acosl);
     TLI.setUnavailable(LibFunc::asinl);
@@ -432,6 +444,8 @@ static void initialize(TargetLibraryInfo &TLI, const Triple &T,
     TLI.setUnavailable(LibFunc::fminl);
     TLI.setUnavailable(LibFunc::fmodl);
     TLI.setUnavailable(LibFunc::frexpl);
+    TLI.setUnavailable(LibFunc::ldexpf);
+    TLI.setUnavailable(LibFunc::ldexpl);
     TLI.setUnavailable(LibFunc::logl);
     TLI.setUnavailable(LibFunc::modfl);
     TLI.setUnavailable(LibFunc::powl);

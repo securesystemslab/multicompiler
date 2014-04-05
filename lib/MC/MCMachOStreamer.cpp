@@ -8,6 +8,8 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/MC/MCStreamer.h"
+#include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/SmallVector.h"
 #include "llvm/MC/MCAsmBackend.h"
 #include "llvm/MC/MCAssembler.h"
 #include "llvm/MC/MCCodeEmitter.h"
@@ -15,6 +17,7 @@
 #include "llvm/MC/MCDwarf.h"
 #include "llvm/MC/MCExpr.h"
 #include "llvm/MC/MCInst.h"
+#include "llvm/MC/MCLinkerOptimizationHint.h"
 #include "llvm/MC/MCMachOSymbolFlags.h"
 #include "llvm/MC/MCObjectFileInfo.h"
 #include "llvm/MC/MCObjectStreamer.h"
@@ -31,67 +34,98 @@ namespace {
 
 class MCMachOStreamer : public MCObjectStreamer {
 private:
-  virtual void EmitInstToData(const MCInst &Inst);
+  /// LabelSections - true if each section change should emit a linker local
+  /// label for use in relocations for assembler local references. Obviates the
+  /// need for local relocations. False by default.
+  bool LabelSections;
+
+  /// HasSectionLabel - map of which sections have already had a non-local
+  /// label emitted to them. Used so we don't emit extraneous linker local
+  /// labels in the middle of the section.
+  DenseMap<const MCSection*, bool> HasSectionLabel;
+
+  void EmitInstToData(const MCInst &Inst, const MCSubtargetInfo &STI) override;
 
   void EmitDataRegion(DataRegionData::KindTy Kind);
   void EmitDataRegionEnd();
+
 public:
   MCMachOStreamer(MCContext &Context, MCAsmBackend &MAB, raw_ostream &OS,
-                  MCCodeEmitter *Emitter)
-      : MCObjectStreamer(Context, MAB, OS, Emitter) {}
+                  MCCodeEmitter *Emitter, bool label)
+      : MCObjectStreamer(Context, MAB, OS, Emitter),
+        LabelSections(label) {}
 
   /// @name MCStreamer Interface
   /// @{
 
-  virtual void EmitLabel(MCSymbol *Symbol);
-  virtual void EmitDebugLabel(MCSymbol *Symbol);
-  virtual void EmitEHSymAttributes(const MCSymbol *Symbol,
-                                   MCSymbol *EHSymbol);
-  virtual void EmitAssemblerFlag(MCAssemblerFlag Flag);
-  virtual void EmitLinkerOptions(ArrayRef<std::string> Options);
-  virtual void EmitDataRegion(MCDataRegionType Kind);
-  virtual void EmitThumbFunc(MCSymbol *Func);
-  virtual bool EmitSymbolAttribute(MCSymbol *Symbol, MCSymbolAttr Attribute);
-  virtual void EmitSymbolDesc(MCSymbol *Symbol, unsigned DescValue);
-  virtual void EmitCommonSymbol(MCSymbol *Symbol, uint64_t Size,
-                                unsigned ByteAlignment);
-  virtual void BeginCOFFSymbolDef(const MCSymbol *Symbol) {
+  void ChangeSection(const MCSection *Sect, const MCExpr *Subsect) override;
+  void EmitLabel(MCSymbol *Symbol) override;
+  void EmitDebugLabel(MCSymbol *Symbol) override;
+  void EmitEHSymAttributes(const MCSymbol *Symbol, MCSymbol *EHSymbol) override;
+  void EmitAssemblerFlag(MCAssemblerFlag Flag) override;
+  void EmitLinkerOptions(ArrayRef<std::string> Options) override;
+  void EmitDataRegion(MCDataRegionType Kind) override;
+  void EmitVersionMin(MCVersionMinType Kind, unsigned Major,
+                      unsigned Minor, unsigned Update) override;
+  void EmitThumbFunc(MCSymbol *Func) override;
+  bool EmitSymbolAttribute(MCSymbol *Symbol, MCSymbolAttr Attribute) override;
+  void EmitSymbolDesc(MCSymbol *Symbol, unsigned DescValue) override;
+  void EmitCommonSymbol(MCSymbol *Symbol, uint64_t Size,
+                        unsigned ByteAlignment) override;
+  void BeginCOFFSymbolDef(const MCSymbol *Symbol) override {
     llvm_unreachable("macho doesn't support this directive");
   }
-  virtual void EmitCOFFSymbolStorageClass(int StorageClass) {
+  void EmitCOFFSymbolStorageClass(int StorageClass) override {
     llvm_unreachable("macho doesn't support this directive");
   }
-  virtual void EmitCOFFSymbolType(int Type) {
+  void EmitCOFFSymbolType(int Type) override {
     llvm_unreachable("macho doesn't support this directive");
   }
-  virtual void EndCOFFSymbolDef() {
+  void EndCOFFSymbolDef() override {
     llvm_unreachable("macho doesn't support this directive");
   }
-  virtual void EmitELFSize(MCSymbol *Symbol, const MCExpr *Value) {
+  void EmitELFSize(MCSymbol *Symbol, const MCExpr *Value) override {
     llvm_unreachable("macho doesn't support this directive");
   }
-  virtual void EmitLocalCommonSymbol(MCSymbol *Symbol, uint64_t Size,
-                                     unsigned ByteAlignment);
-  virtual void EmitZerofill(const MCSection *Section, MCSymbol *Symbol = 0,
-                            uint64_t Size = 0, unsigned ByteAlignment = 0);
+  void EmitLocalCommonSymbol(MCSymbol *Symbol, uint64_t Size,
+                             unsigned ByteAlignment) override;
+  void EmitZerofill(const MCSection *Section, MCSymbol *Symbol = 0,
+                    uint64_t Size = 0, unsigned ByteAlignment = 0) override;
   virtual void EmitTBSSSymbol(const MCSection *Section, MCSymbol *Symbol,
-                              uint64_t Size, unsigned ByteAlignment = 0);
+                      uint64_t Size, unsigned ByteAlignment = 0) override;
 
-  virtual void EmitFileDirective(StringRef Filename) {
+  void EmitFileDirective(StringRef Filename) override {
     // FIXME: Just ignore the .file; it isn't important enough to fail the
     // entire assembly.
 
     // report_fatal_error("unsupported directive: '.file'");
   }
 
-  virtual void EmitIdent(StringRef IdentString) {
+  void EmitIdent(StringRef IdentString) override {
     llvm_unreachable("macho doesn't support this directive");
   }
 
-  virtual void FinishImpl();
+  void EmitLOHDirective(MCLOHType Kind, const MCLOHArgs &Args) override {
+    getAssembler().getLOHContainer().addDirective(Kind, Args);
+  }
+
+  void FinishImpl() override;
 };
 
 } // end anonymous namespace.
+
+void MCMachOStreamer::ChangeSection(const MCSection *Section,
+                                    const MCExpr *Subsection) {
+  // Change the section normally.
+  MCObjectStreamer::ChangeSection(Section, Subsection);
+  // Output a linker-local symbol so we don't need section-relative local
+  // relocations. The linker hates us when we do that.
+  if (LabelSections && !HasSectionLabel[Section]) {
+    MCSymbol *Label = getContext().CreateLinkerPrivateTempSymbol();
+    EmitLabel(Label);
+    HasSectionLabel[Section] = true;
+  }
+}
 
 void MCMachOStreamer::EmitEHSymAttributes(const MCSymbol *Symbol,
                                           MCSymbol *EHSymbol) {
@@ -192,6 +226,11 @@ void MCMachOStreamer::EmitDataRegion(MCDataRegionType Kind) {
     EmitDataRegionEnd();
     return;
   }
+}
+
+void MCMachOStreamer::EmitVersionMin(MCVersionMinType Kind, unsigned Major,
+                                     unsigned Minor, unsigned Update) {
+  getAssembler().setVersionMinInfo(Kind, Major, Minor, Update);
 }
 
 void MCMachOStreamer::EmitThumbFunc(MCSymbol *Symbol) {
@@ -364,13 +403,14 @@ void MCMachOStreamer::EmitTBSSSymbol(const MCSection *Section, MCSymbol *Symbol,
   return;
 }
 
-void MCMachOStreamer::EmitInstToData(const MCInst &Inst) {
+void MCMachOStreamer::EmitInstToData(const MCInst &Inst,
+                                     const MCSubtargetInfo &STI) {
   MCDataFragment *DF = getOrCreateDataFragment();
 
   SmallVector<MCFixup, 4> Fixups;
   SmallString<256> Code;
   raw_svector_ostream VecOS(Code);
-  getAssembler().getEmitter().EncodeInstruction(Inst, VecOS, Fixups);
+  getAssembler().getEmitter().EncodeInstruction(Inst, VecOS, Fixups, STI);
   VecOS.flush();
 
   // Add the fixups and data.
@@ -418,8 +458,9 @@ void MCMachOStreamer::FinishImpl() {
 
 MCStreamer *llvm::createMachOStreamer(MCContext &Context, MCAsmBackend &MAB,
                                       raw_ostream &OS, MCCodeEmitter *CE,
-                                      bool RelaxAll) {
-  MCMachOStreamer *S = new MCMachOStreamer(Context, MAB, OS, CE);
+                                      bool RelaxAll,
+                                      bool LabelSections) {
+  MCMachOStreamer *S = new MCMachOStreamer(Context, MAB, OS, CE, LabelSections);
   if (RelaxAll)
     S->getAssembler().setRelaxAll(true);
   return S;

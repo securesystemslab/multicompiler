@@ -14,13 +14,13 @@
 #include "llvm/IR/BasicBlock.h"
 #include "SymbolTableListTraitsImpl.h"
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/IR/CFG.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/LLVMContext.h"
+#include "llvm/IR/LeakDetector.h"
 #include "llvm/IR/Type.h"
-#include "llvm/Support/CFG.h"
-#include "llvm/Support/LeakDetector.h"
 #include <algorithm>
 using namespace llvm;
 
@@ -28,6 +28,10 @@ ValueSymbolTable *BasicBlock::getValueSymbolTable() {
   if (Function *F = getParent())
     return &F->getValueSymbolTable();
   return 0;
+}
+
+const DataLayout *BasicBlock::getDataLayout() const {
+  return getParent()->getDataLayout();
 }
 
 LLVMContext &BasicBlock::getContext() const {
@@ -70,7 +74,7 @@ BasicBlock::~BasicBlock() {
     Constant *Replacement =
       ConstantInt::get(llvm::Type::getInt32Ty(getContext()), 1);
     while (!use_empty()) {
-      BlockAddress *BA = cast<BlockAddress>(use_back());
+      BlockAddress *BA = cast<BlockAddress>(user_back());
       BA->replaceAllUsesWith(ConstantExpr::getIntToPtr(Replacement,
                                                        BA->getType()));
       BA->destroyConstant();
@@ -300,7 +304,7 @@ BasicBlock *BasicBlock::splitBasicBlock(iterator I, const Twine &BBName) {
   assert(I != InstList.end() &&
          "Trying to get me to create degenerate basic block!");
 
-  BasicBlock *InsertBefore = llvm::next(Function::iterator(this))
+  BasicBlock *InsertBefore = std::next(Function::iterator(this))
                                .getNodePtrUnchecked();
   BasicBlock *New = BasicBlock::Create(getContext(), BBName,
                                        getParent(), InsertBefore);

@@ -59,6 +59,20 @@ Mips16ConstantIslands(
   cl::desc("MIPS: mips16 constant islands enable."),
   cl::init(true));
 
+/// Select the Mips CPU for the given triple and cpu name.
+/// FIXME: Merge with the copy in MipsMCTargetDesc.cpp
+static inline StringRef selectMipsCPU(StringRef TT, StringRef CPU) {
+  if (CPU.empty() || CPU == "generic") {
+    Triple TheTriple(TT);
+    if (TheTriple.getArch() == Triple::mips ||
+        TheTriple.getArch() == Triple::mipsel)
+      CPU = "mips32";
+    else
+      CPU = "mips64";
+  }
+  return CPU;
+}
+
 void MipsSubtarget::anchor() { }
 
 MipsSubtarget::MipsSubtarget(const std::string &TT, const std::string &CPU,
@@ -67,16 +81,15 @@ MipsSubtarget::MipsSubtarget(const std::string &TT, const std::string &CPU,
   MipsGenSubtargetInfo(TT, CPU, FS),
   MipsArchVersion(Mips32), MipsABI(UnknownABI), IsLittle(little),
   IsSingleFloat(false), IsFP64bit(false), IsGP64bit(false), HasVFPU(false),
-  IsLinux(true), HasSEInReg(false), HasCondMov(false), HasSwap(false),
-  HasBitCount(false), HasFPIdx(false),
+  HasCnMips(false), IsLinux(true), HasSEInReg(false), HasCondMov(false),
+  HasSwap(false), HasBitCount(false), HasFPIdx(false),
   InMips16Mode(false), InMips16HardFloat(Mips16HardFloat),
   InMicroMipsMode(false), HasDSP(false), HasDSPR2(false),
   AllowMixed16_32(Mixed16_32 | Mips_Os16), Os16(Mips_Os16), HasMSA(false),
-  RM(_RM), OverrideMode(NoOverride), TM(_TM)
+  RM(_RM), OverrideMode(NoOverride), TM(_TM), TargetTriple(TT)
 {
   std::string CPUName = CPU;
-  if (CPUName.empty())
-    CPUName = "mips32";
+  CPUName = selectMipsCPU(TT, CPUName);
 
   // Parse features string.
   ParseSubtargetFeatures(CPUName, FS);
@@ -96,13 +109,16 @@ MipsSubtarget::MipsSubtarget(const std::string &TT, const std::string &CPU,
   // Initialize scheduling itinerary for the specified CPU.
   InstrItins = getInstrItineraryForCPU(CPUName);
 
-  // Set MipsABI if it hasn't been set yet.
-  if (MipsABI == UnknownABI)
-    MipsABI = hasMips64() ? N64 : O32;
+  // Assert exactly one ABI was chosen.
+  assert(MipsABI != UnknownABI);
+  assert((((getFeatureBits() & Mips::FeatureO32) != 0) +
+          ((getFeatureBits() & Mips::FeatureEABI) != 0) +
+          ((getFeatureBits() & Mips::FeatureN32) != 0) +
+          ((getFeatureBits() & Mips::FeatureN64) != 0)) == 1);
 
   // Check if Architecture and ABI are compatible.
-  assert(((!hasMips64() && (isABI_O32() || isABI_EABI())) ||
-          (hasMips64() && (isABI_N32() || isABI_N64()))) &&
+  assert(((!isGP64bit() && (isABI_O32() || isABI_EABI())) ||
+          (isGP64bit() && (isABI_N32() || isABI_N64()))) &&
          "Invalid  Arch & ABI pair.");
 
   if (hasMSA() && !isFP64bit())
@@ -127,8 +143,8 @@ MipsSubtarget::enablePostRAScheduler(CodeGenOpt::Level OptLevel,
                                      RegClassVector &CriticalPathRCs) const {
   Mode = TargetSubtargetInfo::ANTIDEP_NONE;
   CriticalPathRCs.clear();
-  CriticalPathRCs.push_back(hasMips64() ?
-                            &Mips::GPR64RegClass : &Mips::GPR32RegClass);
+  CriticalPathRCs.push_back(isGP64bit() ? &Mips::GPR64RegClass
+                                        : &Mips::GPR32RegClass);
   return OptLevel >= CodeGenOpt::Aggressive;
 }
 

@@ -85,7 +85,7 @@ namespace {
     static char ID;
     PostRAScheduler() : MachineFunctionPass(ID) {}
 
-    void getAnalysisUsage(AnalysisUsage &AU) const {
+    void getAnalysisUsage(AnalysisUsage &AU) const override {
       AU.setPreservesCFG();
       AU.addRequired<AliasAnalysis>();
       AU.addRequired<TargetPassConfig>();
@@ -96,7 +96,7 @@ namespace {
       MachineFunctionPass::getAnalysisUsage(AU);
     }
 
-    bool runOnMachineFunction(MachineFunction &Fn);
+    bool runOnMachineFunction(MachineFunction &Fn) override;
   };
   char PostRAScheduler::ID = 0;
 
@@ -141,23 +141,23 @@ namespace {
     /// startBlock - Initialize register live-range state for scheduling in
     /// this block.
     ///
-    void startBlock(MachineBasicBlock *BB);
+    void startBlock(MachineBasicBlock *BB) override;
 
     // Set the index of RegionEnd within the current BB.
     void setEndIndex(unsigned EndIdx) { EndIndex = EndIdx; }
 
     /// Initialize the scheduler state for the next scheduling region.
-    virtual void enterRegion(MachineBasicBlock *bb,
-                             MachineBasicBlock::iterator begin,
-                             MachineBasicBlock::iterator end,
-                             unsigned regioninstrs);
+    void enterRegion(MachineBasicBlock *bb,
+                     MachineBasicBlock::iterator begin,
+                     MachineBasicBlock::iterator end,
+                     unsigned regioninstrs) override;
 
     /// Notify that the scheduler has finished scheduling the current region.
-    virtual void exitRegion();
+    void exitRegion() override;
 
     /// Schedule - Schedule the instruction range using list scheduling.
     ///
-    void schedule();
+    void schedule() override;
 
     void EmitSchedule();
 
@@ -168,14 +168,13 @@ namespace {
 
     /// finishBlock - Clean up register live-range state.
     ///
-    void finishBlock();
+    void finishBlock() override;
 
   private:
     void ReleaseSucc(SUnit *SU, SDep *SuccEdge);
     void ReleaseSuccessors(SUnit *SU);
     void ScheduleNodeTopDown(SUnit *SU, unsigned CurCycle);
     void ListScheduleTopDown();
-    void StartBlockForKills(MachineBasicBlock *BB);
 
     void dumpSchedule() const;
     void emitNoop(unsigned CurCycle);
@@ -246,6 +245,9 @@ void SchedulePostRATDList::dumpSchedule() const {
 #endif
 
 bool PostRAScheduler::runOnMachineFunction(MachineFunction &Fn) {
+  if (skipOptnoneFunction(*Fn.getFunction()))
+    return false;
+
   TII = Fn.getTarget().getInstrInfo();
   MachineLoopInfo &MLI = getAnalysis<MachineLoopInfo>();
   MachineDominatorTree &MDT = getAnalysis<MachineDominatorTree>();
@@ -306,7 +308,7 @@ bool PostRAScheduler::runOnMachineFunction(MachineFunction &Fn) {
     MachineBasicBlock::iterator Current = MBB->end();
     unsigned Count = MBB->size(), CurrentCount = Count;
     for (MachineBasicBlock::iterator I = Current; I != MBB->begin(); ) {
-      MachineInstr *MI = llvm::prior(I);
+      MachineInstr *MI = std::prev(I);
       --Count;
       // Calls are not scheduling boundaries before register allocation, but
       // post-ra we don't gain anything by scheduling across calls since we
@@ -648,13 +650,13 @@ void SchedulePostRATDList::EmitSchedule() {
     // Update the Begin iterator, as the first instruction in the block
     // may have been scheduled later.
     if (i == 0)
-      RegionBegin = prior(RegionEnd);
+      RegionBegin = std::prev(RegionEnd);
   }
 
   // Reinsert any remaining debug_values.
   for (std::vector<std::pair<MachineInstr *, MachineInstr *> >::iterator
          DI = DbgValues.end(), DE = DbgValues.begin(); DI != DE; --DI) {
-    std::pair<MachineInstr *, MachineInstr *> P = *prior(DI);
+    std::pair<MachineInstr *, MachineInstr *> P = *std::prev(DI);
     MachineInstr *DbgValue = P.first;
     MachineBasicBlock::iterator OrigPrivMI = P.second;
     BB->splice(++OrigPrivMI, BB, DbgValue);

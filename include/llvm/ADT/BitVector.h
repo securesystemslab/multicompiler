@@ -58,14 +58,14 @@ public:
 
     reference& operator=(bool t) {
       if (t)
-        *WordRef |= 1L << BitPos;
+        *WordRef |= BitWord(1) << BitPos;
       else
-        *WordRef &= ~(1L << BitPos);
+        *WordRef &= ~(BitWord(1) << BitPos);
       return *this;
     }
 
     operator bool() const {
-      return ((*WordRef) & (1L << BitPos)) ? true : false;
+      return ((*WordRef) & (BitWord(1) << BitPos)) ? true : false;
     }
   };
 
@@ -98,12 +98,10 @@ public:
     std::memcpy(Bits, RHS.Bits, Capacity * sizeof(BitWord));
   }
 
-#if LLVM_HAS_RVALUE_REFERENCES
   BitVector(BitVector &&RHS)
     : Bits(RHS.Bits), Size(RHS.Size), Capacity(RHS.Capacity) {
     RHS.Bits = 0;
   }
-#endif
 
   ~BitVector() {
     std::free(Bits);
@@ -240,7 +238,7 @@ public:
   }
 
   BitVector &set(unsigned Idx) {
-    Bits[Idx / BITWORD_SIZE] |= 1L << (Idx % BITWORD_SIZE);
+    Bits[Idx / BITWORD_SIZE] |= BitWord(1) << (Idx % BITWORD_SIZE);
     return *this;
   }
 
@@ -279,7 +277,7 @@ public:
   }
 
   BitVector &reset(unsigned Idx) {
-    Bits[Idx / BITWORD_SIZE] &= ~(1L << (Idx % BITWORD_SIZE));
+    Bits[Idx / BITWORD_SIZE] &= ~(BitWord(1) << (Idx % BITWORD_SIZE));
     return *this;
   }
 
@@ -320,7 +318,7 @@ public:
   }
 
   BitVector &flip(unsigned Idx) {
-    Bits[Idx / BITWORD_SIZE] ^= 1L << (Idx % BITWORD_SIZE);
+    Bits[Idx / BITWORD_SIZE] ^= BitWord(1) << (Idx % BITWORD_SIZE);
     return *this;
   }
 
@@ -332,7 +330,7 @@ public:
 
   bool operator[](unsigned Idx) const {
     assert (Idx < Size && "Out-of-bounds Bit access.");
-    BitWord Mask = 1L << (Idx % BITWORD_SIZE);
+    BitWord Mask = BitWord(1) << (Idx % BITWORD_SIZE);
     return (Bits[Idx / BITWORD_SIZE] & Mask) != 0;
   }
 
@@ -461,7 +459,6 @@ public:
     return *this;
   }
 
-#if LLVM_HAS_RVALUE_REFERENCES
   const BitVector &operator=(BitVector &&RHS) {
     if (this == &RHS) return *this;
 
@@ -474,7 +471,6 @@ public:
 
     return *this;
   }
-#endif
 
   void swap(BitVector &RHS) {
     std::swap(Bits, RHS.Bits);

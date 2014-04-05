@@ -36,7 +36,6 @@ class MDNode;
 class SDDbgValue;
 class TargetLowering;
 class TargetSelectionDAGInfo;
-class TargetTransformInfo;
 
 class SDVTListNode : public FoldingSetNode {
   friend struct FoldingSetTrait<SDVTListNode>;
@@ -169,7 +168,6 @@ void checkForCycles(const SelectionDAG *DAG);
 class SelectionDAG {
   const TargetMachine &TM;
   const TargetSelectionDAGInfo &TSI;
-  const TargetTransformInfo *TTI;
   const TargetLowering *TLI;
   MachineFunction *MF;
   LLVMContext *Context;
@@ -269,8 +267,7 @@ public:
   /// init - Prepare this SelectionDAG to process code in the given
   /// MachineFunction.
   ///
-  void init(MachineFunction &mf, const TargetTransformInfo *TTI,
-            const TargetLowering *TLI);
+  void init(MachineFunction &mf, const TargetLowering *TLI);
 
   /// clear - Clear state and free memory necessary to make this
   /// SelectionDAG ready to process a new block.
@@ -281,7 +278,6 @@ public:
   const TargetMachine &getTarget() const { return TM; }
   const TargetLowering &getTargetLoweringInfo() const { return *TLI; }
   const TargetSelectionDAGInfo &getSelectionDAGInfo() const { return TSI; }
-  const TargetTransformInfo *getTargetTransformInfo() const { return TTI; }
   LLVMContext *getContext() const {return Context; }
 
   /// viewGraph - Pop up a GraphViz/gv window with the DAG rendered using 'dot'.
@@ -696,12 +692,14 @@ public:
   SDValue getAtomic(unsigned Opcode, SDLoc dl, EVT MemVT, SDValue Chain,
                     SDValue Ptr, SDValue Cmp, SDValue Swp,
                     MachinePointerInfo PtrInfo, unsigned Alignment,
-                    AtomicOrdering Ordering,
+                    AtomicOrdering SuccessOrdering,
+                    AtomicOrdering FailureOrdering,
                     SynchronizationScope SynchScope);
   SDValue getAtomic(unsigned Opcode, SDLoc dl, EVT MemVT, SDValue Chain,
                     SDValue Ptr, SDValue Cmp, SDValue Swp,
                     MachineMemOperand *MMO,
-                    AtomicOrdering Ordering,
+                    AtomicOrdering SuccessOrdering,
+                    AtomicOrdering FailureOrdering,
                     SynchronizationScope SynchScope);
 
   /// getAtomic - Gets a node for an atomic op, produces result (if relevant)
@@ -730,9 +728,13 @@ public:
   /// getAtomic - Gets a node for an atomic op, produces result and chain and
   /// takes N operands.
   SDValue getAtomic(unsigned Opcode, SDLoc dl, EVT MemVT, SDVTList VTList,
-                    SDValue* Ops, unsigned NumOps, MachineMemOperand *MMO,
-                    AtomicOrdering Ordering,
+                    SDValue *Ops, unsigned NumOps, MachineMemOperand *MMO,
+                    AtomicOrdering SuccessOrdering,
+                    AtomicOrdering FailureOrdering,
                     SynchronizationScope SynchScope);
+  SDValue getAtomic(unsigned Opcode, SDLoc dl, EVT MemVT, SDVTList VTList,
+                    SDValue *Ops, unsigned NumOps, MachineMemOperand *MMO,
+                    AtomicOrdering Ordering, SynchronizationScope SynchScope);
 
   /// getMemIntrinsicNode - Creates a MemIntrinsicNode that may produce a
   /// result and takes a list of operands. Opcode may be INTRINSIC_VOID,
@@ -1147,7 +1149,7 @@ public:
   /// low/high part.
   std::pair<SDValue, SDValue> SplitVector(const SDValue &N, const SDLoc &DL) {
     EVT LoVT, HiVT;
-    llvm::tie(LoVT, HiVT) = GetSplitDestVTs(N.getValueType());
+    std::tie(LoVT, HiVT) = GetSplitDestVTs(N.getValueType());
     return SplitVector(N, DL, LoVT, HiVT);
   }
 

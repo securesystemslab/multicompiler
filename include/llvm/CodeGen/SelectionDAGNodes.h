@@ -29,9 +29,9 @@
 #include "llvm/CodeGen/MachineMemOperand.h"
 #include "llvm/CodeGen/ValueTypes.h"
 #include "llvm/IR/Constants.h"
+#include "llvm/IR/DebugLoc.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/Support/DataTypes.h"
-#include "llvm/Support/DebugLoc.h"
 #include "llvm/Support/MathExtras.h"
 #include <cassert>
 
@@ -120,7 +120,7 @@ public:
     return !operator==(O);
   }
   bool operator<(const SDValue &O) const {
-    return Node < O.Node || (Node == O.Node && ResNo < O.ResNo);
+    return std::tie(Node, ResNo) < std::tie(O.Node, O.ResNo);
   }
 
   SDValue getValue(unsigned R) const {
@@ -143,6 +143,10 @@ public:
   ///
   unsigned getValueSizeInBits() const {
     return getValueType().getSizeInBits();
+  }
+
+  unsigned getScalarValueSizeInBits() const {
+    return getValueType().getScalarType().getSizeInBits();
   }
 
   // Forwarding methods - These forward to the corresponding methods in SDNode.
@@ -408,7 +412,7 @@ public:
   /// hasOneUse - Return true if there is exactly one use of this node.
   ///
   bool hasOneUse() const {
-    return !use_empty() && llvm::next(use_begin()) == use_end();
+    return !use_empty() && std::next(use_begin()) == use_end();
   }
 
   /// use_size - Return the number of uses of this node. This method takes
@@ -1089,15 +1093,27 @@ public:
 class AtomicSDNode : public MemSDNode {
   SDUse Ops[4];
 
-  void InitAtomic(AtomicOrdering Ordering, SynchronizationScope SynchScope) {
+  /// For cmpxchg instructions, the ordering requirements when a store does not
+  /// occur.
+  AtomicOrdering FailureOrdering;
+
+  void InitAtomic(AtomicOrdering SuccessOrdering,
+                  AtomicOrdering FailureOrdering,
+                  SynchronizationScope SynchScope) {
     // This must match encodeMemSDNodeFlags() in SelectionDAG.cpp.
-    assert((Ordering & 15) == Ordering &&
+    assert((SuccessOrdering & 15) == SuccessOrdering &&
+           "Ordering may not require more than 4 bits!");
+    assert((FailureOrdering & 15) == FailureOrdering &&
            "Ordering may not require more than 4 bits!");
     assert((SynchScope & 1) == SynchScope &&
            "SynchScope may not require more than 1 bit!");
-    SubclassData |= Ordering << 8;
+    SubclassData |= SuccessOrdering << 8;
     SubclassData |= SynchScope << 12;
-    assert(getOrdering() == Ordering && "Ordering encoding error!");
+    this->FailureOrdering = FailureOrdering;
+    assert(getSuccessOrdering() == SuccessOrdering &&
+           "Ordering encoding error!");
+    assert(getFailureOrdering() == FailureOrdering &&
+           "Ordering encoding error!");
     assert(getSynchScope() == SynchScope && "Synch-scope encoding error!");
   }
 
@@ -1111,12 +1127,11 @@ public:
   // SrcVal: address to update as a Value (used for MemOperand)
   // Align:  alignment of memory
   AtomicSDNode(unsigned Opc, unsigned Order, DebugLoc dl, SDVTList VTL,
-               EVT MemVT,
-               SDValue Chain, SDValue Ptr,
-               SDValue Cmp, SDValue Swp, MachineMemOperand *MMO,
-               AtomicOrdering Ordering, SynchronizationScope SynchScope)
-    : MemSDNode(Opc, Order, dl, VTL, MemVT, MMO) {
-    InitAtomic(Ordering, SynchScope);
+               EVT MemVT, SDValue Chain, SDValue Ptr, SDValue Cmp, SDValue Swp,
+               MachineMemOperand *MMO, AtomicOrdering Ordering,
+               SynchronizationScope SynchScope)
+      : MemSDNode(Opc, Order, dl, VTL, MemVT, MMO) {
+    InitAtomic(Ordering, Ordering, SynchScope);
     InitOperands(Ops, Chain, Ptr, Cmp, Swp);
   }
   AtomicSDNode(unsigned Opc, unsigned Order, DebugLoc dl, SDVTList VTL,
@@ -1125,7 +1140,7 @@ public:
                SDValue Val, MachineMemOperand *MMO,
                AtomicOrdering Ordering, SynchronizationScope SynchScope)
     : MemSDNode(Opc, Order, dl, VTL, MemVT, MMO) {
-    InitAtomic(Ordering, SynchScope);
+    InitAtomic(Ordering, Ordering, SynchScope);
     InitOperands(Ops, Chain, Ptr, Val);
   }
   AtomicSDNode(unsigned Opc, unsigned Order, DebugLoc dl, SDVTList VTL,
@@ -1134,15 +1149,16 @@ public:
                MachineMemOperand *MMO,
                AtomicOrdering Ordering, SynchronizationScope SynchScope)
     : MemSDNode(Opc, Order, dl, VTL, MemVT, MMO) {
-    InitAtomic(Ordering, SynchScope);
+    InitAtomic(Ordering, Ordering, SynchScope);
     InitOperands(Ops, Chain, Ptr);
   }
   AtomicSDNode(unsigned Opc, unsigned Order, DebugLoc dl, SDVTList VTL, EVT MemVT,
                SDValue* AllOps, SDUse *DynOps, unsigned NumOps,
                MachineMemOperand *MMO,
-               AtomicOrdering Ordering, SynchronizationScope SynchScope)
+               AtomicOrdering SuccessOrdering, AtomicOrdering FailureOrdering,
+               SynchronizationScope SynchScope)
     : MemSDNode(Opc, Order, dl, VTL, MemVT, MMO) {
-    InitAtomic(Ordering, SynchScope);
+    InitAtomic(SuccessOrdering, FailureOrdering, SynchScope);
     assert((DynOps || NumOps <= array_lengthof(Ops)) &&
            "Too many ops for internal storage!");
     InitOperands(DynOps ? DynOps : Ops, AllOps, NumOps);
@@ -1150,6 +1166,16 @@ public:
 
   const SDValue &getBasePtr() const { return getOperand(1); }
   const SDValue &getVal() const { return getOperand(2); }
+
+  AtomicOrdering getSuccessOrdering() const {
+    return getOrdering();
+  }
+
+  // Not quite enough room in SubclassData for everything, so failure gets its
+  // own field.
+  AtomicOrdering getFailureOrdering() const {
+    return FailureOrdering;
+  }
 
   bool isCompareAndSwap() const {
     unsigned Op = getOpcode();
@@ -1493,7 +1519,14 @@ public:
   /// undefined.  isBigEndian describes the endianness of the target.
   bool isConstantSplat(APInt &SplatValue, APInt &SplatUndef,
                        unsigned &SplatBitSize, bool &HasAnyUndefs,
-                       unsigned MinSplatBits = 0, bool isBigEndian = false);
+                       unsigned MinSplatBits = 0,
+                       bool isBigEndian = false) const;
+
+  /// getConstantSplatValue - Check if this is a constant splat, and if so,
+  /// return the splat value only if it is a ConstantSDNode. Otherwise
+  /// return nullptr. This is a simpler form of isConstantSplat.
+  /// Get the constant splat only if you care about the splat value.
+  ConstantSDNode *getConstantSplatValue() const;
 
   bool isConstant() const;
 

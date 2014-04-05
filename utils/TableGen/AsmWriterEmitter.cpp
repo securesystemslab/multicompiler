@@ -34,7 +34,7 @@ class AsmWriterEmitter {
   RecordKeeper &Records;
   CodeGenTarget Target;
   std::map<const CodeGenInstruction*, AsmWriterInst*> CGIAWIMap;
-  std::vector<const CodeGenInstruction*> NumberedInstructions;
+  const std::vector<const CodeGenInstruction*> *NumberedInstructions;
   std::vector<AsmWriterInst> Instructions;
 public:
   AsmWriterEmitter(RecordKeeper &R);
@@ -47,9 +47,9 @@ private:
   void EmitPrintAliasInstruction(raw_ostream &O);
 
   AsmWriterInst *getAsmWriterInstByID(unsigned ID) const {
-    assert(ID < NumberedInstructions.size());
+    assert(ID < NumberedInstructions->size());
     std::map<const CodeGenInstruction*, AsmWriterInst*>::const_iterator I =
-      CGIAWIMap.find(NumberedInstructions[ID]);
+      CGIAWIMap.find(NumberedInstructions->at(ID));
     assert(I != CGIAWIMap.end() && "Didn't find inst!");
     return I->second;
   }
@@ -141,7 +141,7 @@ void AsmWriterEmitter::
 FindUniqueOperandCommands(std::vector<std::string> &UniqueOperandCommands,
                           std::vector<unsigned> &InstIdxs,
                           std::vector<unsigned> &InstOpsUsed) const {
-  InstIdxs.assign(NumberedInstructions.size(), ~0U);
+  InstIdxs.assign(NumberedInstructions->size(), ~0U);
 
   // This vector parallels UniqueOperandCommands, keeping track of which
   // instructions each case are used for.  It is a comma separated string of
@@ -150,9 +150,10 @@ FindUniqueOperandCommands(std::vector<std::string> &UniqueOperandCommands,
   InstrsForCase.resize(UniqueOperandCommands.size());
   InstOpsUsed.assign(UniqueOperandCommands.size(), 0);
 
-  for (unsigned i = 0, e = NumberedInstructions.size(); i != e; ++i) {
+  for (unsigned i = 0, e = NumberedInstructions->size(); i != e; ++i) {
     const AsmWriterInst *Inst = getAsmWriterInstByID(i);
-    if (Inst == 0) continue;  // PHI, INLINEASM, PROLOG_LABEL, etc.
+    if (Inst == 0)
+      continue; // PHI, INLINEASM, CFI_INSTRUCTION, etc.
 
     std::string Command;
     if (Inst->Operands.empty())
@@ -298,8 +299,8 @@ void AsmWriterEmitter::EmitPrintInstruction(raw_ostream &O) {
 
   // Add all strings to the string table upfront so it can generate an optimized
   // representation.
-  for (unsigned i = 0, e = NumberedInstructions.size(); i != e; ++i) {
-    AsmWriterInst *AWI = CGIAWIMap[NumberedInstructions[i]];
+  for (unsigned i = 0, e = NumberedInstructions->size(); i != e; ++i) {
+    AsmWriterInst *AWI = CGIAWIMap[NumberedInstructions->at(i)];
     if (AWI != 0 &&
         AWI->Operands[0].OperandType ==
                  AsmWriterOperand::isLiteralTextOperand &&
@@ -313,8 +314,8 @@ void AsmWriterEmitter::EmitPrintInstruction(raw_ostream &O) {
   StringTable.layout();
 
   unsigned MaxStringIdx = 0;
-  for (unsigned i = 0, e = NumberedInstructions.size(); i != e; ++i) {
-    AsmWriterInst *AWI = CGIAWIMap[NumberedInstructions[i]];
+  for (unsigned i = 0, e = NumberedInstructions->size(); i != e; ++i) {
+    AsmWriterInst *AWI = CGIAWIMap[NumberedInstructions->at(i)];
     unsigned Idx;
     if (AWI == 0) {
       // Something not handled by the asmwriter printer.
@@ -376,7 +377,7 @@ void AsmWriterEmitter::EmitPrintInstruction(raw_ostream &O) {
     BitsLeft -= NumBits;
 
     // Remove the info about this operand.
-    for (unsigned i = 0, e = NumberedInstructions.size(); i != e; ++i) {
+    for (unsigned i = 0, e = NumberedInstructions->size(); i != e; ++i) {
       if (AsmWriterInst *Inst = getAsmWriterInstByID(i))
         if (!Inst->Operands.empty()) {
           unsigned NumOps = NumInstOpsHandled[InstIdxs[i]];
@@ -395,9 +396,9 @@ void AsmWriterEmitter::EmitPrintInstruction(raw_ostream &O) {
   // We always emit at least one 32-bit table. A second table is emitted if
   // more bits are needed.
   O<<"  static const uint32_t OpInfo[] = {\n";
-  for (unsigned i = 0, e = NumberedInstructions.size(); i != e; ++i) {
+  for (unsigned i = 0, e = NumberedInstructions->size(); i != e; ++i) {
     O << "    " << (OpcodeInfo[i] & 0xffffffff) << "U,\t// "
-      << NumberedInstructions[i]->TheDef->getName() << "\n";
+      << NumberedInstructions->at(i)->TheDef->getName() << "\n";
   }
   // Add a dummy entry so the array init doesn't end with a comma.
   O << "    0U\n";
@@ -409,9 +410,9 @@ void AsmWriterEmitter::EmitPrintInstruction(raw_ostream &O) {
     O << "  static const uint"
       << ((BitsLeft < 16) ? "32" : (BitsLeft < 24) ? "16" : "8")
       << "_t OpInfo2[] = {\n";
-    for (unsigned i = 0, e = NumberedInstructions.size(); i != e; ++i) {
+    for (unsigned i = 0, e = NumberedInstructions->size(); i != e; ++i) {
       O << "    " << (OpcodeInfo[i] >> 32) << "U,\t// "
-        << NumberedInstructions[i]->TheDef->getName() << "\n";
+        << NumberedInstructions->at(i)->TheDef->getName() << "\n";
     }
     // Add a dummy entry so the array init doesn't end with a comma.
     O << "    0U\n";
@@ -546,8 +547,8 @@ emitRegisterNameString(raw_ostream &O, StringRef AltName,
           Reg.TheDef->getValueAsListOfStrings("AltNames");
         if (AltNames.size() <= Idx)
           PrintFatalError(Reg.TheDef->getLoc(),
-            (Twine("Register definition missing alt name for '") +
-             AltName + "'.").str());
+                          "Register definition missing alt name for '" +
+                          AltName + "'.");
         AsmName = AltNames[Idx];
       }
     }
@@ -602,8 +603,8 @@ void AsmWriterEmitter::EmitGetRegisterName(raw_ostream &O) {
       << "  switch(AltIdx) {\n"
       << "  default: llvm_unreachable(\"Invalid register alt name index!\");\n";
     for (unsigned i = 0, e = AltNameIndices.size(); i < e; ++i) {
-      StringRef Namespace = AltNameIndices[1]->getValueAsString("Namespace");
-      StringRef AltName(AltNameIndices[i]->getName());
+      std::string Namespace = AltNameIndices[1]->getValueAsString("Namespace");
+      std::string AltName(AltNameIndices[i]->getName());
       O << "  case " << Namespace << "::" << AltName
         << ":\n"
         << "    AsmStrs = AsmStrs" << AltName  << ";\n"
@@ -984,7 +985,7 @@ AsmWriterEmitter::AsmWriterEmitter(RecordKeeper &R) : Records(R), Target(R) {
                         AsmWriter->getValueAsInt("OperandSpacing")));
 
   // Get the instruction numbering.
-  NumberedInstructions = Target.getInstructionsByEnumValue();
+  NumberedInstructions = &Target.getInstructionsByEnumValue();
 
   // Compute the CodeGenInstruction -> AsmWriterInst mapping.  Note that not
   // all machine instructions are necessarily being printed, so there may be

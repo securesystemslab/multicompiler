@@ -245,7 +245,6 @@ static DecodeStatus DecodeSHLLInstruction(MCInst &Inst, unsigned Insn,
 static bool Check(DecodeStatus &Out, DecodeStatus In);
 
 #include "AArch64GenDisassemblerTables.inc"
-#include "AArch64GenInstrInfo.inc"
 
 static bool Check(DecodeStatus &Out, DecodeStatus In) {
   switch (In) {
@@ -997,7 +996,9 @@ static MCDisassembler *createAArch64Disassembler(const Target &T,
 }
 
 extern "C" void LLVMInitializeAArch64Disassembler() {
-  TargetRegistry::RegisterMCDisassembler(TheAArch64Target,
+  TargetRegistry::RegisterMCDisassembler(TheAArch64leTarget,
+                                         createAArch64Disassembler);
+  TargetRegistry::RegisterMCDisassembler(TheAArch64beTarget,
                                          createAArch64Disassembler);
 }
 

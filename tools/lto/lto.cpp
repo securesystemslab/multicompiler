@@ -56,29 +56,6 @@ static void lto_initialize() {
   }
 }
 
-static void lto_set_target_options(llvm::TargetOptions &Options) {
-  Options.LessPreciseFPMADOption = EnableFPMAD;
-  Options.NoFramePointerElim = DisableFPElim;
-  Options.AllowFPOpFusion = FuseFPOps;
-  Options.UnsafeFPMath = EnableUnsafeFPMath;
-  Options.NoInfsFPMath = EnableNoInfsFPMath;
-  Options.NoNaNsFPMath = EnableNoNaNsFPMath;
-  Options.HonorSignDependentRoundingFPMathOption =
-    EnableHonorSignDependentRoundingFPMath;
-  Options.UseSoftFloat = GenerateSoftFloatCalls;
-  if (FloatABIForCalls != llvm::FloatABI::Default)
-    Options.FloatABIType = FloatABIForCalls;
-  Options.NoZerosInBSS = DontPlaceZerosInBSS;
-  Options.GuaranteedTailCallOpt = EnableGuaranteedTailCallOpt;
-  Options.DisableTailCalls = DisableTailCalls;
-  Options.StackAlignmentOverride = OverrideStackAlignment;
-  Options.TrapFuncName = TrapFuncName;
-  Options.PositionIndependentExecutable = EnablePIE;
-  Options.EnableSegmentedStacks = SegmentedStacks;
-  Options.NOPInsertion = NOPInsertion;
-  Options.UseInitArray = UseInitArray;
-}
-
 /// lto_get_version - Returns a printable string.
 extern const char* lto_get_version() {
   return LTOCodeGenerator::getVersionString();
@@ -121,8 +98,7 @@ lto_module_is_object_file_in_memory_for_target(const void* mem,
 /// (check lto_get_error_message() for details).
 lto_module_t lto_module_create(const char* path) {
   lto_initialize();
-  llvm::TargetOptions Options;
-  lto_set_target_options(Options);
+  llvm::TargetOptions Options = InitTargetOptionsFromCodeGenFlags();
   return LTOModule::makeLTOModule(path, Options, sLastErrorString);
 }
 
@@ -130,8 +106,7 @@ lto_module_t lto_module_create(const char* path) {
 /// error (check lto_get_error_message() for details).
 lto_module_t lto_module_create_from_fd(int fd, const char *path, size_t size) {
   lto_initialize();
-  llvm::TargetOptions Options;
-  lto_set_target_options(Options);
+  llvm::TargetOptions Options = InitTargetOptionsFromCodeGenFlags();
   return LTOModule::makeLTOModule(fd, path, size, Options, sLastErrorString);
 }
 
@@ -142,8 +117,7 @@ lto_module_t lto_module_create_from_fd_at_offset(int fd, const char *path,
                                                  size_t map_size,
                                                  off_t offset) {
   lto_initialize();
-  llvm::TargetOptions Options;
-  lto_set_target_options(Options);
+  llvm::TargetOptions Options = InitTargetOptionsFromCodeGenFlags();
   return LTOModule::makeLTOModule(fd, path, map_size, offset, Options,
                                   sLastErrorString);
 }
@@ -152,9 +126,18 @@ lto_module_t lto_module_create_from_fd_at_offset(int fd, const char *path,
 /// NULL on error (check lto_get_error_message() for details).
 lto_module_t lto_module_create_from_memory(const void* mem, size_t length) {
   lto_initialize();
-  llvm::TargetOptions Options;
-  lto_set_target_options(Options);
+  llvm::TargetOptions Options = InitTargetOptionsFromCodeGenFlags();
   return LTOModule::makeLTOModule(mem, length, Options, sLastErrorString);
+}
+
+/// Loads an object file from memory with an extra path argument.
+/// Returns NULL on error (check lto_get_error_message() for details).
+lto_module_t lto_module_create_from_memory_with_path(const void* mem,
+                                                     size_t length,
+                                                     const char *path) {
+  lto_initialize();
+  llvm::TargetOptions Options = InitTargetOptionsFromCodeGenFlags();
+  return LTOModule::makeLTOModule(mem, length, Options, sLastErrorString, path);
 }
 
 /// lto_module_dispose - Frees all memory for a module. Upon return the
@@ -228,8 +211,7 @@ void lto_codegen_set_diagnostic_handler(lto_code_gen_t cg,
 lto_code_gen_t lto_codegen_create(void) {
   lto_initialize();
 
-  TargetOptions Options;
-  lto_set_target_options(Options);
+  TargetOptions Options = InitTargetOptionsFromCodeGenFlags();
 
   LTOCodeGenerator *CodeGen = new LTOCodeGenerator();
   if (CodeGen)
@@ -280,13 +262,6 @@ void lto_codegen_set_assembler_path(lto_code_gen_t cg, const char *path) {
 void lto_codegen_set_assembler_args(lto_code_gen_t cg, const char **args,
                                     int nargs) {
   // In here only for backwards compatibility. We use MC now.
-}
-
-/// lto_codegen_set_internalize_strategy - Sets the strategy to use during
-/// internalize.
-void lto_codegen_set_internalize_strategy(lto_code_gen_t cg,
-                                          lto_internalize_strategy strategy) {
-  cg->setInternalizeStrategy(strategy);
 }
 
 /// lto_codegen_add_must_preserve_symbol - Adds to a list of all global symbols

@@ -39,6 +39,11 @@ protected:
   /// non-.globl label.  This defaults to true.
   bool IsFunctionEHFrameSymbolPrivate;
 
+  /// SupportsCompactUnwindWithoutEHFrame - True if the target object file
+  /// supports emitting a compact unwind section without an associated EH frame
+  /// section.
+  bool SupportsCompactUnwindWithoutEHFrame;
+
   /// PersonalityEncoding, LSDAEncoding, FDEEncoding, TTypeEncoding - Some
   /// encoding values for EH.
   unsigned PersonalityEncoding;
@@ -129,6 +134,8 @@ protected:
   const MCSection *DwarfGnuPubNamesSection;
   const MCSection *DwarfGnuPubTypesSection;
 
+  const MCSection *COFFDebugSymbolsSection;
+
   // Extra TLS Variable Data section.  If the target needs to put additional
   // information for a TLS variable, it'll go here.
   const MCSection *TLSExtraDataSection;
@@ -200,6 +207,9 @@ public:
   }
   bool getSupportsWeakOmittedEHFrame() const {
     return SupportsWeakOmittedEHFrame;
+  }
+  bool getSupportsCompactUnwindWithoutEHFrame() const {
+    return SupportsCompactUnwindWithoutEHFrame;
   }
   bool getCommDirectiveSupportsAlignment() const {
     return CommDirectiveSupportsAlignment;
@@ -283,6 +293,10 @@ public:
     return DwarfAddrSection;
   }
 
+  const MCSection *getCOFFDebugSymbolsSection() const {
+    return COFFDebugSymbolsSection;
+  }
+
   const MCSection *getTLSExtraDataSection() const {
     return TLSExtraDataSection;
   }
@@ -358,6 +372,10 @@ public:
   enum Environment { IsMachO, IsELF, IsCOFF };
   Environment getObjectFileType() const {
     return Env;
+  }
+
+  Reloc::Model getRelocM() const {
+    return RelocM;
   }
 
 private:

@@ -290,11 +290,11 @@ public:
   void enterRegion(MachineBasicBlock *bb,
                    MachineBasicBlock::iterator begin,
                    MachineBasicBlock::iterator end,
-                   unsigned regioninstrs) LLVM_OVERRIDE;
+                   unsigned regioninstrs) override;
 
   /// Implement ScheduleDAGInstrs interface for scheduling a sequence of
   /// reorderable instructions.
-  virtual void schedule();
+  void schedule() override;
 
   /// Change the position of an instruction within the basic block and update
   /// live ranges and region boundary iterators.
@@ -304,8 +304,8 @@ public:
 
   const SUnit *getNextClusterSucc() const { return NextClusterSucc; }
 
-  void viewGraph(const Twine &Name, const Twine &Title) LLVM_OVERRIDE;
-  void viewGraph() LLVM_OVERRIDE;
+  void viewGraph(const Twine &Name, const Twine &Title) override;
+  void viewGraph() override;
 
 protected:
   // Top-Level entry points for the schedule() driver...
@@ -384,7 +384,7 @@ public:
   virtual ~ScheduleDAGMILive();
 
   /// Return true if this DAG supports VReg liveness and RegPressure.
-  virtual bool hasVRegLiveness() const { return true; }
+  bool hasVRegLiveness() const override { return true; }
 
   /// \brief Return true if register pressure tracking is enabled.
   bool isTrackingPressure() const { return ShouldTrackPressure; }
@@ -423,11 +423,11 @@ public:
   void enterRegion(MachineBasicBlock *bb,
                    MachineBasicBlock::iterator begin,
                    MachineBasicBlock::iterator end,
-                   unsigned regioninstrs) LLVM_OVERRIDE;
+                   unsigned regioninstrs) override;
 
   /// Implement ScheduleDAGInstrs interface for scheduling a sequence of
   /// reorderable instructions.
-  virtual void schedule();
+  void schedule() override;
 
   /// Compute the cyclic critical path through the DAG.
   unsigned computeCyclicCriticalPath();

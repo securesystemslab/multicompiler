@@ -22,7 +22,7 @@ using namespace llvm;
 
 /// ContractNodes - Turn multiple matcher node patterns like 'MoveChild+Record'
 /// into single compound nodes like RecordChild.
-static void ContractNodes(OwningPtr<Matcher> &MatcherPtr,
+static void ContractNodes(std::unique_ptr<Matcher> &MatcherPtr,
                           const CodeGenDAGPatterns &CGP) {
   // If we reached the end of the chain, we're done.
   Matcher *N = MatcherPtr.get();
@@ -31,9 +31,9 @@ static void ContractNodes(OwningPtr<Matcher> &MatcherPtr,
   // If we have a scope node, walk down all of the children.
   if (ScopeMatcher *Scope = dyn_cast<ScopeMatcher>(N)) {
     for (unsigned i = 0, e = Scope->getNumChildren(); i != e; ++i) {
-      OwningPtr<Matcher> Child(Scope->takeChild(i));
+      std::unique_ptr<Matcher> Child(Scope->takeChild(i));
       ContractNodes(Child, CGP);
-      Scope->resetChild(i, Child.take());
+      Scope->resetChild(i, Child.release());
     }
     return;
   }
@@ -46,7 +46,7 @@ static void ContractNodes(OwningPtr<Matcher> &MatcherPtr,
       if (MC->getChildNo() < 8)  // Only have RecordChild0...7
         New = new RecordChildMatcher(MC->getChildNo(), RM->getWhatFor(),
                                      RM->getResultNo());
-    
+
     if (CheckTypeMatcher *CT = dyn_cast<CheckTypeMatcher>(MC->getNext()))
       if (MC->getChildNo() < 8 &&  // Only have CheckChildType0...7
           CT->getResNo() == 0)     // CheckChildType checks res #0
@@ -56,9 +56,13 @@ static void ContractNodes(OwningPtr<Matcher> &MatcherPtr,
       if (MC->getChildNo() < 4)  // Only have CheckChildSame0...3
         New = new CheckChildSameMatcher(MC->getChildNo(), CS->getMatchNumber());
 
+    if (CheckIntegerMatcher *CS = dyn_cast<CheckIntegerMatcher>(MC->getNext()))
+      if (MC->getChildNo() < 5)  // Only have CheckChildInteger0...4
+        New = new CheckChildIntegerMatcher(MC->getChildNo(), CS->getValue());
+
     if (New) {
       // Insert the new node.
-      New->setNext(MatcherPtr.take());
+      New->setNext(MatcherPtr.release());
       MatcherPtr.reset(New);
       // Remove the old one.
       MC->setNext(MC->getNext()->takeNext());
@@ -81,7 +85,7 @@ static void ContractNodes(OwningPtr<Matcher> &MatcherPtr,
   if (isa<EmitNodeMatcher>(N) && isa<MarkGlueResultsMatcher>(N->getNext()) &&
       isa<CompleteMatchMatcher>(N->getNext()->getNext())) {
     // Unlink the two nodes from the list.
-    Matcher *EmitNode = MatcherPtr.take();
+    Matcher *EmitNode = MatcherPtr.release();
     Matcher *MFR = EmitNode->takeNext();
     Matcher *Tail = MFR->takeNext();
         
@@ -160,7 +164,7 @@ static void ContractNodes(OwningPtr<Matcher> &MatcherPtr,
        isa<RecordMatcher>(N)) &&
       isa<CheckOpcodeMatcher>(N->getNext())) {
     // Unlink the two nodes from the list.
-    Matcher *CheckType = MatcherPtr.take();
+    Matcher *CheckType = MatcherPtr.release();
     Matcher *CheckOpcode = CheckType->takeNext();
     Matcher *Tail = CheckOpcode->takeNext();
     
@@ -183,7 +187,7 @@ static void ContractNodes(OwningPtr<Matcher> &MatcherPtr,
 /// run a the complex pattern if the pattern predicate will fail.  For this
 /// reason, we refuse to sink the pattern predicate past a ComplexPattern.
 ///
-static void SinkPatternPredicates(OwningPtr<Matcher> &MatcherPtr) {
+static void SinkPatternPredicates(std::unique_ptr<Matcher> &MatcherPtr) {
   // Recursively scan for a PatternPredicate.
   // If we reached the end of the chain, we're done.
   Matcher *N = MatcherPtr.get();
@@ -192,9 +196,9 @@ static void SinkPatternPredicates(OwningPtr<Matcher> &MatcherPtr) {
   // Walk down all members of a scope node.
   if (ScopeMatcher *Scope = dyn_cast<ScopeMatcher>(N)) {
     for (unsigned i = 0, e = Scope->getNumChildren(); i != e; ++i) {
-      OwningPtr<Matcher> Child(Scope->takeChild(i));
+      std::unique_ptr<Matcher> Child(Scope->takeChild(i));
       SinkPatternPredicates(Child);
-      Scope->resetChild(i, Child.take());
+      Scope->resetChild(i, Child.release());
     }
     return;
   }
@@ -213,7 +217,7 @@ static void SinkPatternPredicates(OwningPtr<Matcher> &MatcherPtr) {
   
   // Okay, we know we can sink it past at least one node.  Unlink it from the
   // chain and scan for the new insertion point.
-  MatcherPtr.take();  // Don't delete CPPM.
+  MatcherPtr.release();  // Don't delete CPPM.
   MatcherPtr.reset(CPPM->takeNext());
   
   N = MatcherPtr.get();
@@ -248,7 +252,7 @@ static Matcher *FindNodeWithKind(Matcher *M, Matcher::KindTy Kind) {
 ///       ABC
 ///       XYZ
 ///
-static void FactorNodes(OwningPtr<Matcher> &MatcherPtr) {
+static void FactorNodes(std::unique_ptr<Matcher> &MatcherPtr) {
   // If we reached the end of the chain, we're done.
   Matcher *N = MatcherPtr.get();
   if (N == 0) return;
@@ -265,10 +269,10 @@ static void FactorNodes(OwningPtr<Matcher> &MatcherPtr) {
   
   for (unsigned i = 0, e = Scope->getNumChildren(); i != e; ++i) {
     // Factor the subexpression.
-    OwningPtr<Matcher> Child(Scope->takeChild(i));
+    std::unique_ptr<Matcher> Child(Scope->takeChild(i));
     FactorNodes(Child);
     
-    if (Matcher *N = Child.take())
+    if (Matcher *N = Child.release())
       OptionsToMatch.push_back(N);
   }
   
@@ -508,9 +512,9 @@ static void FactorNodes(OwningPtr<Matcher> &MatcherPtr) {
 
 Matcher *llvm::OptimizeMatcher(Matcher *TheMatcher,
                                const CodeGenDAGPatterns &CGP) {
-  OwningPtr<Matcher> MatcherPtr(TheMatcher);
+  std::unique_ptr<Matcher> MatcherPtr(TheMatcher);
   ContractNodes(MatcherPtr, CGP);
   SinkPatternPredicates(MatcherPtr);
   FactorNodes(MatcherPtr);
-  return MatcherPtr.take();
+  return MatcherPtr.release();
 }

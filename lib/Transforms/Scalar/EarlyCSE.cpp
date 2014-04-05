@@ -262,7 +262,7 @@ namespace {
 /// cases.
 class EarlyCSE : public FunctionPass {
 public:
-  const DataLayout *TD;
+  const DataLayout *DL;
   const TargetLibraryInfo *TLI;
   DominatorTree *DT;
   typedef RecyclingAllocator<BumpPtrAllocator,
@@ -303,7 +303,7 @@ public:
     initializeEarlyCSEPass(*PassRegistry::getPassRegistry());
   }
 
-  bool runOnFunction(Function &F);
+  bool runOnFunction(Function &F) override;
 
 private:
 
@@ -376,7 +376,7 @@ private:
   bool processNode(DomTreeNode *Node);
 
   // This transformation requires dominator postdominator info
-  virtual void getAnalysisUsage(AnalysisUsage &AU) const {
+  void getAnalysisUsage(AnalysisUsage &AU) const override {
     AU.addRequired<DominatorTreeWrapperPass>();
     AU.addRequired<TargetLibraryInfo>();
     AU.setPreservesCFG();
@@ -432,7 +432,7 @@ bool EarlyCSE::processNode(DomTreeNode *Node) {
 
     // If the instruction can be simplified (e.g. X+0 = X) then replace it with
     // its simpler value.
-    if (Value *V = SimplifyInstruction(Inst, TD, TLI, DT)) {
+    if (Value *V = SimplifyInstruction(Inst, DL, TLI, DT)) {
       DEBUG(dbgs() << "EarlyCSE Simplify: " << *Inst << "  to: " << *V << '\n');
       Inst->replaceAllUsesWith(V);
       Inst->eraseFromParent();
@@ -552,9 +552,13 @@ bool EarlyCSE::processNode(DomTreeNode *Node) {
 
 
 bool EarlyCSE::runOnFunction(Function &F) {
+  if (skipOptnoneFunction(F))
+    return false;
+
   std::vector<StackNode *> nodesToProcess;
 
-  TD = getAnalysisIfAvailable<DataLayout>();
+  DataLayoutPass *DLP = getAnalysisIfAvailable<DataLayoutPass>();
+  DL = DLP ? &DLP->getDataLayout() : 0;
   TLI = &getAnalysis<TargetLibraryInfo>();
   DT = &getAnalysis<DominatorTreeWrapperPass>().getDomTree();
 

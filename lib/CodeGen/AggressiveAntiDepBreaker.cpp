@@ -169,7 +169,7 @@ void AggressiveAntiDepBreaker::StartBlock(MachineBasicBlock *BB) {
   // callee-saved register that is not saved in the prolog.
   const MachineFrameInfo *MFI = MF.getFrameInfo();
   BitVector Pristine = MFI->getPristineRegs(BB);
-  for (const uint16_t *I = TRI->getCalleeSavedRegs(&MF); *I; ++I) {
+  for (const MCPhysReg *I = TRI->getCalleeSavedRegs(&MF); *I; ++I) {
     unsigned Reg = *I;
     if (!IsReturnBlock && !Pristine.test(Reg)) continue;
     for (MCRegAliasIterator AI(Reg, TRI, true); AI.isValid(); ++AI) {
@@ -403,8 +403,18 @@ void AggressiveAntiDepBreaker::PrescanInstruction(MachineInstr *MI,
       continue;
 
     // Update def for Reg and aliases.
-    for (MCRegAliasIterator AI(Reg, TRI, true); AI.isValid(); ++AI)
+    for (MCRegAliasIterator AI(Reg, TRI, true); AI.isValid(); ++AI) {
+      // We need to be careful here not to define already-live super registers.
+      // If the super register is already live, then this definition is not
+      // a definition of the whole super register (just a partial insertion
+      // into it). Earlier subregister definitions (which we've not yet visited
+      // because we're iterating bottom-up) need to be linked to the same group
+      // as this definition.
+      if (TRI->isSuperRegister(Reg, *AI) && State->IsLive(*AI))
+        continue;
+
       DefIndices[*AI] = Count;
+    }
   }
 }
 

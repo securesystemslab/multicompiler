@@ -96,6 +96,10 @@ namespace EEVT {
     /// a floating point value type.
     bool hasFloatingPointTypes() const;
 
+    /// hasScalarTypes - Return true if this TypeSet contains a scalar value
+    /// type.
+    bool hasScalarTypes() const;
+
     /// hasVectorTypes - Return true if this TypeSet contains a vector value
     /// type.
     bool hasVectorTypes() const;
@@ -805,7 +809,7 @@ private:
   void ParseNodeInfo();
   void ParseNodeTransforms();
   void ParseComplexPatterns();
-  void ParsePatternFragments();
+  void ParsePatternFragments(bool OutFrags = false);
   void ParseDefaultOperands();
   void ParseInstructions();
   void ParsePatterns();

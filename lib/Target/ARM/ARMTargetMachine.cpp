@@ -10,8 +10,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "ARMTargetMachine.h"
 #include "ARM.h"
+#include "ARMTargetMachine.h"
 #include "ARMFrameLowering.h"
 #include "llvm/CodeGen/Passes.h"
 #include "llvm/MC/MCAsmInfo.h"
@@ -24,19 +24,16 @@
 using namespace llvm;
 
 static cl::opt<bool>
-EnableGlobalMerge("global-merge", cl::Hidden,
-                  cl::desc("Enable global merge pass"),
-                  cl::init(true));
-
-static cl::opt<bool>
 DisableA15SDOptimization("disable-a15-sd-optimization", cl::Hidden,
                    cl::desc("Inhibit optimization of S->D register accesses on A15"),
                    cl::init(false));
 
 extern "C" void LLVMInitializeARMTarget() {
   // Register the target.
-  RegisterTargetMachine<ARMTargetMachine> X(TheARMTarget);
-  RegisterTargetMachine<ThumbTargetMachine> Y(TheThumbTarget);
+  RegisterTargetMachine<ARMLETargetMachine> X(TheARMLETarget);
+  RegisterTargetMachine<ARMBETargetMachine> Y(TheARMBETarget);
+  RegisterTargetMachine<ThumbLETargetMachine> A(TheThumbLETarget);
+  RegisterTargetMachine<ThumbBETargetMachine> B(TheThumbBETarget);
 }
 
 
@@ -46,9 +43,10 @@ ARMBaseTargetMachine::ARMBaseTargetMachine(const Target &T, StringRef TT,
                                            StringRef CPU, StringRef FS,
                                            const TargetOptions &Options,
                                            Reloc::Model RM, CodeModel::Model CM,
-                                           CodeGenOpt::Level OL)
+                                           CodeGenOpt::Level OL,
+                                           bool isLittle)
   : LLVMTargetMachine(T, TT, CPU, FS, Options, RM, CM, OL),
-    Subtarget(TT, CPU, FS, Options),
+    Subtarget(TT, CPU, FS, isLittle, Options),
     JITInfo(),
     InstrItins(Subtarget.getInstrItineraryData()) {
 
@@ -70,8 +68,14 @@ void ARMBaseTargetMachine::addAnalysisPasses(PassManagerBase &PM) {
 void ARMTargetMachine::anchor() { }
 
 static std::string computeDataLayout(ARMSubtarget &ST) {
-  // Little endian.
-  std::string Ret = "e";
+  std::string Ret = "";
+
+  if (ST.isLittle())
+    // Little endian.
+    Ret += "e";
+  else
+    // Big endian.
+    Ret += "E";
 
   Ret += DataLayout::getManglingComponent(ST.getTargetTriple());
 
@@ -83,7 +87,7 @@ static std::string computeDataLayout(ARMSubtarget &ST) {
   if (ST.isThumb())
     Ret += "-i1:8:32-i8:8:32-i16:16:32";
 
-  // ABIs other than APC have 64 bit integers with natural alignment.
+  // ABIs other than APCS have 64 bit integers with natural alignment.
   if (!ST.isAPCS_ABI())
     Ret += "-i64:64";
 
@@ -123,8 +127,9 @@ ARMTargetMachine::ARMTargetMachine(const Target &T, StringRef TT,
                                    StringRef CPU, StringRef FS,
                                    const TargetOptions &Options,
                                    Reloc::Model RM, CodeModel::Model CM,
-                                   CodeGenOpt::Level OL)
-  : ARMBaseTargetMachine(T, TT, CPU, FS, Options, RM, CM, OL),
+                                   CodeGenOpt::Level OL,
+                                   bool isLittle)
+  : ARMBaseTargetMachine(T, TT, CPU, FS, Options, RM, CM, OL, isLittle),
     InstrInfo(Subtarget),
     DL(computeDataLayout(Subtarget)),
     TLInfo(*this),
@@ -136,14 +141,33 @@ ARMTargetMachine::ARMTargetMachine(const Target &T, StringRef TT,
                        "support ARM mode execution!");
 }
 
+void ARMLETargetMachine::anchor() { }
+
+ARMLETargetMachine::
+ARMLETargetMachine(const Target &T, StringRef TT,
+                       StringRef CPU, StringRef FS, const TargetOptions &Options,
+                       Reloc::Model RM, CodeModel::Model CM,
+                       CodeGenOpt::Level OL)
+  : ARMTargetMachine(T, TT, CPU, FS, Options, RM, CM, OL, true) {}
+
+void ARMBETargetMachine::anchor() { }
+
+ARMBETargetMachine::
+ARMBETargetMachine(const Target &T, StringRef TT,
+                       StringRef CPU, StringRef FS, const TargetOptions &Options,
+                       Reloc::Model RM, CodeModel::Model CM,
+                       CodeGenOpt::Level OL)
+  : ARMTargetMachine(T, TT, CPU, FS, Options, RM, CM, OL, false) {}
+
 void ThumbTargetMachine::anchor() { }
 
 ThumbTargetMachine::ThumbTargetMachine(const Target &T, StringRef TT,
                                        StringRef CPU, StringRef FS,
                                        const TargetOptions &Options,
                                        Reloc::Model RM, CodeModel::Model CM,
-                                       CodeGenOpt::Level OL)
-  : ARMBaseTargetMachine(T, TT, CPU, FS, Options, RM, CM, OL),
+                                       CodeGenOpt::Level OL,
+                                       bool isLittle)
+  : ARMBaseTargetMachine(T, TT, CPU, FS, Options, RM, CM, OL, isLittle),
     InstrInfo(Subtarget.hasThumb2()
               ? ((ARMBaseInstrInfo*)new Thumb2InstrInfo(Subtarget))
               : ((ARMBaseInstrInfo*)new Thumb1InstrInfo(Subtarget))),
@@ -155,6 +179,24 @@ ThumbTargetMachine::ThumbTargetMachine(const Target &T, StringRef TT,
               : (ARMFrameLowering*)new Thumb1FrameLowering(Subtarget)) {
   initAsmInfo();
 }
+
+void ThumbLETargetMachine::anchor() { }
+
+ThumbLETargetMachine::
+ThumbLETargetMachine(const Target &T, StringRef TT,
+                       StringRef CPU, StringRef FS, const TargetOptions &Options,
+                       Reloc::Model RM, CodeModel::Model CM,
+                       CodeGenOpt::Level OL)
+  : ThumbTargetMachine(T, TT, CPU, FS, Options, RM, CM, OL, true) {}
+
+void ThumbBETargetMachine::anchor() { }
+
+ThumbBETargetMachine::
+ThumbBETargetMachine(const Target &T, StringRef TT,
+                       StringRef CPU, StringRef FS, const TargetOptions &Options,
+                       Reloc::Model RM, CodeModel::Model CM,
+                       CodeGenOpt::Level OL)
+  : ThumbTargetMachine(T, TT, CPU, FS, Options, RM, CM, OL, false) {}
 
 namespace {
 /// ARM Code Generator Pass Configuration Options.
@@ -171,11 +213,11 @@ public:
     return *getARMTargetMachine().getSubtargetImpl();
   }
 
-  virtual bool addPreISel();
-  virtual bool addInstSelector();
-  virtual bool addPreRegAlloc();
-  virtual bool addPreSched2();
-  virtual bool addPreEmitPass();
+  bool addPreISel() override;
+  bool addInstSelector() override;
+  bool addPreRegAlloc() override;
+  bool addPreSched2() override;
+  bool addPreEmitPass() override;
 };
 } // namespace
 
@@ -184,7 +226,11 @@ TargetPassConfig *ARMBaseTargetMachine::createPassConfig(PassManagerBase &PM) {
 }
 
 bool ARMPassConfig::addPreISel() {
-  if (TM->getOptLevel() != CodeGenOpt::None && EnableGlobalMerge)
+  const ARMSubtarget *Subtarget = &getARMSubtarget();
+  if (Subtarget->hasAnyDataBarrier() && !Subtarget->isThumb1Only())
+    addPass(createARMAtomicExpandPass(TM));
+
+  if (TM->getOptLevel() != CodeGenOpt::None)
     addPass(createGlobalMergePass(TM));
 
   return false;
@@ -254,6 +300,7 @@ bool ARMPassConfig::addPreEmitPass() {
     addPass(&UnpackMachineBundlesID);
   }
 
+  addPass(createARMOptimizeBarriersPass());
   addPass(createARMConstantIslandPass());
 
   return true;

@@ -50,41 +50,41 @@ public:
 
   // MCStreamer interface
 
-  virtual void InitSections(bool Force);
-  virtual void EmitLabel(MCSymbol *Symbol);
-  virtual void EmitDebugLabel(MCSymbol *Symbol);
-  virtual void EmitAssemblerFlag(MCAssemblerFlag Flag);
-  virtual void EmitThumbFunc(MCSymbol *Func);
-  virtual bool EmitSymbolAttribute(MCSymbol *Symbol, MCSymbolAttr Attribute);
-  virtual void EmitSymbolDesc(MCSymbol *Symbol, unsigned DescValue);
-  virtual void BeginCOFFSymbolDef(MCSymbol const *Symbol);
-  virtual void EmitCOFFSymbolStorageClass(int StorageClass);
-  virtual void EmitCOFFSymbolType(int Type);
-  virtual void EndCOFFSymbolDef();
-  virtual void EmitCOFFSectionIndex(MCSymbol const *Symbol);
-  virtual void EmitCOFFSecRel32(MCSymbol const *Symbol);
-  virtual void EmitELFSize(MCSymbol *Symbol, const MCExpr *Value);
-  virtual void EmitCommonSymbol(MCSymbol *Symbol, uint64_t Size,
-                                unsigned ByteAlignment);
-  virtual void EmitLocalCommonSymbol(MCSymbol *Symbol, uint64_t Size,
-                                     unsigned ByteAlignment);
-  virtual void EmitZerofill(const MCSection *Section, MCSymbol *Symbol,
-                            uint64_t Size,unsigned ByteAlignment);
-  virtual void EmitTBSSSymbol(const MCSection *Section, MCSymbol *Symbol,
-                              uint64_t Size, unsigned ByteAlignment);
-  virtual void EmitFileDirective(StringRef Filename);
-  virtual void EmitIdent(StringRef IdentString);
-  virtual void EmitWin64EHHandlerData();
-  virtual void FinishImpl();
+  void InitSections() override;
+  void EmitLabel(MCSymbol *Symbol) override;
+  void EmitDebugLabel(MCSymbol *Symbol) override;
+  void EmitAssemblerFlag(MCAssemblerFlag Flag) override;
+  void EmitThumbFunc(MCSymbol *Func) override;
+  bool EmitSymbolAttribute(MCSymbol *Symbol, MCSymbolAttr Attribute) override;
+  void EmitSymbolDesc(MCSymbol *Symbol, unsigned DescValue) override;
+  void BeginCOFFSymbolDef(MCSymbol const *Symbol) override;
+  void EmitCOFFSymbolStorageClass(int StorageClass) override;
+  void EmitCOFFSymbolType(int Type) override;
+  void EndCOFFSymbolDef() override;
+  void EmitCOFFSectionIndex(MCSymbol const *Symbol) override;
+  void EmitCOFFSecRel32(MCSymbol const *Symbol) override;
+  void EmitELFSize(MCSymbol *Symbol, const MCExpr *Value) override;
+  void EmitCommonSymbol(MCSymbol *Symbol, uint64_t Size,
+                        unsigned ByteAlignment) override;
+  void EmitLocalCommonSymbol(MCSymbol *Symbol, uint64_t Size,
+                             unsigned ByteAlignment) override;
+  void EmitZerofill(const MCSection *Section, MCSymbol *Symbol,
+                    uint64_t Size,unsigned ByteAlignment) override;
+  void EmitTBSSSymbol(const MCSection *Section, MCSymbol *Symbol,
+                      uint64_t Size, unsigned ByteAlignment) override;
+  void EmitFileDirective(StringRef Filename) override;
+  void EmitIdent(StringRef IdentString) override;
+  void EmitWin64EHHandlerData() override;
+  void FinishImpl() override;
 
 private:
-  virtual void EmitInstToData(const MCInst &Inst) {
+  void EmitInstToData(const MCInst &Inst, const MCSubtargetInfo &STI) override {
     MCDataFragment *DF = getOrCreateDataFragment();
 
     SmallVector<MCFixup, 4> Fixups;
     SmallString<256> Code;
     raw_svector_ostream VecOS(Code);
-    getAssembler().getEmitter().EncodeInstruction(Inst, VecOS, Fixups);
+    getAssembler().getEmitter().EncodeInstruction(Inst, VecOS, Fixups, STI);
     VecOS.flush();
 
     // Add the fixups and data.
@@ -123,18 +123,18 @@ void WinCOFFStreamer::AddCommonSymbol(MCSymbol *Symbol, uint64_t Size,
 
 // MCStreamer interface
 
-void WinCOFFStreamer::InitSections(bool Force) {
+void WinCOFFStreamer::InitSections() {
   // FIXME: this is identical to the ELF one.
   // This emulates the same behavior of GNU as. This makes it easier
   // to compare the output as the major sections are in the same order.
   SwitchSection(getContext().getObjectFileInfo()->getTextSection());
-  EmitCodeAlignment(4, 0);
+  EmitCodeAlignment(4);
 
   SwitchSection(getContext().getObjectFileInfo()->getDataSection());
-  EmitCodeAlignment(4, 0);
+  EmitCodeAlignment(4);
 
   SwitchSection(getContext().getObjectFileInfo()->getBSSSection());
-  EmitCodeAlignment(4, 0);
+  EmitCodeAlignment(4);
 
   SwitchSection(getContext().getObjectFileInfo()->getTextSection());
 }

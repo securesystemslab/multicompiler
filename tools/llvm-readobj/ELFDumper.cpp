@@ -13,12 +13,15 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm-readobj.h"
+#include "ARMAttributeParser.h"
 #include "ARMEHABIPrinter.h"
 #include "Error.h"
 #include "ObjDumper.h"
 #include "StreamWriter.h"
 #include "llvm/ADT/SmallString.h"
+#include "llvm/ADT/StringExtras.h"
 #include "llvm/Object/ELFObjectFile.h"
+#include "llvm/Support/ARMBuildAttributes.h"
 #include "llvm/Support/Compiler.h"
 #include "llvm/Support/Format.h"
 #include "llvm/Support/MathExtras.h"
@@ -39,16 +42,18 @@ public:
   ELFDumper(const ELFFile<ELFT> *Obj, StreamWriter &Writer)
       : ObjDumper(Writer), Obj(Obj) {}
 
-  virtual void printFileHeaders() LLVM_OVERRIDE;
-  virtual void printSections() LLVM_OVERRIDE;
-  virtual void printRelocations() LLVM_OVERRIDE;
-  virtual void printSymbols() LLVM_OVERRIDE;
-  virtual void printDynamicSymbols() LLVM_OVERRIDE;
-  virtual void printUnwindInfo() LLVM_OVERRIDE;
+  void printFileHeaders() override;
+  void printSections() override;
+  void printRelocations() override;
+  void printSymbols() override;
+  void printDynamicSymbols() override;
+  void printUnwindInfo() override;
 
-  virtual void printDynamicTable() LLVM_OVERRIDE;
-  virtual void printNeededLibraries() LLVM_OVERRIDE;
-  virtual void printProgramHeaders() LLVM_OVERRIDE;
+  void printDynamicTable() override;
+  void printNeededLibraries() override;
+  void printProgramHeaders() override;
+
+  void printAttributes() override;
 
 private:
   typedef ELFFile<ELFT> ELFO;
@@ -78,14 +83,13 @@ namespace llvm {
 template <class ELFT>
 static error_code createELFDumper(const ELFFile<ELFT> *Obj,
                                   StreamWriter &Writer,
-                                  OwningPtr<ObjDumper> &Result) {
+                                  std::unique_ptr<ObjDumper> &Result) {
   Result.reset(new ELFDumper<ELFT>(Obj, Writer));
   return readobj_error::success;
 }
 
-error_code createELFDumper(const object::ObjectFile *Obj,
-                           StreamWriter& Writer,
-                           OwningPtr<ObjDumper> &Result) {
+error_code createELFDumper(const object::ObjectFile *Obj, StreamWriter &Writer,
+                           std::unique_ptr<ObjDumper> &Result) {
   // Little-endian 32-bit
   if (const ELF32LEObjectFile *ELFObj = dyn_cast<ELF32LEObjectFile>(Obj))
     return createELFDumper(ELFObj->getELFFile(), Writer, Result);
@@ -621,8 +625,30 @@ void ELFDumper<ELFT>::printDynamicSymbols() {
 template <class ELFT>
 void ELFDumper<ELFT>::printSymbol(typename ELFO::Elf_Sym_Iter Symbol) {
   StringRef SymbolName = errorOrDefault(Obj->getSymbolName(Symbol));
-  const Elf_Shdr *Sec = Obj->getSection(&*Symbol);
-  StringRef SectionName = Sec ? errorOrDefault(Obj->getSectionName(Sec)) : "";
+
+  unsigned SectionIndex = Symbol->st_shndx;
+  StringRef SectionName;
+  if (SectionIndex == SHN_UNDEF) {
+    SectionName = "Undefined";
+  } else if (SectionIndex >= SHN_LOPROC && SectionIndex <= SHN_HIPROC) {
+    SectionName = "Processor Specific";
+  } else if (SectionIndex >= SHN_LOOS && SectionIndex <= SHN_HIOS) {
+    SectionName = "Operating System Specific";
+  } else if (SectionIndex > SHN_HIOS && SectionIndex < SHN_ABS) {
+    SectionName = "Reserved";
+  } else if (SectionIndex == SHN_ABS) {
+    SectionName = "Absolute";
+  } else if (SectionIndex == SHN_COMMON) {
+    SectionName = "Common";
+  } else {
+    if (SectionIndex == SHN_XINDEX)
+      SectionIndex = Obj->getSymbolTableIndex(&*Symbol);
+    assert(SectionIndex != SHN_XINDEX &&
+           "getSymbolTableIndex should handle this");
+    const Elf_Shdr *Sec = Obj->getSection(SectionIndex);
+    SectionName = errorOrDefault(Obj->getSectionName(Sec));
+  }
+
   std::string FullSymbolName(SymbolName);
   if (Symbol.isDynamic()) {
     bool IsDefault;
@@ -642,7 +668,7 @@ void ELFDumper<ELFT>::printSymbol(typename ELFO::Elf_Sym_Iter Symbol) {
                   makeArrayRef(ElfSymbolBindings));
   W.printEnum  ("Type", Symbol->getType(), makeArrayRef(ElfSymbolTypes));
   W.printNumber("Other", Symbol->st_other);
-  W.printHex   ("Section", SectionName, Symbol->st_shndx);
+  W.printHex("Section", SectionName, SectionIndex);
 }
 
 #define LLVM_READOBJ_TYPE_CASE(name) \
@@ -855,3 +881,42 @@ void ELFDumper<ELFT>::printProgramHeaders() {
     W.printNumber("Alignment", PI->p_align);
   }
 }
+
+template <class ELFT>
+void ELFDumper<ELFT>::printAttributes() {
+  W.startLine() << "Attributes not implemented.\n";
+}
+
+namespace {
+template <>
+void ELFDumper<ELFType<support::little, 2, false> >::printAttributes() {
+  if (Obj->getHeader()->e_machine != EM_ARM) {
+    W.startLine() << "Attributes not implemented.\n";
+    return;
+  }
+
+  DictScope BA(W, "BuildAttributes");
+  for (ELFO::Elf_Shdr_Iter SI = Obj->begin_sections(), SE = Obj->end_sections();
+       SI != SE; ++SI) {
+    if (SI->sh_type != ELF::SHT_ARM_ATTRIBUTES)
+      continue;
+
+    ErrorOr<ArrayRef<uint8_t> > Contents = Obj->getSectionContents(&(*SI));
+    if (!Contents)
+      continue;
+
+    if ((*Contents)[0] != ARMBuildAttrs::Format_Version) {
+      errs() << "unrecognised FormatVersion: 0x" << utohexstr((*Contents)[0])
+             << '\n';
+      continue;
+    }
+
+    W.printHex("FormatVersion", (*Contents)[0]);
+    if (Contents->size() == 1)
+      continue;
+
+    ARMAttributeParser(W).Parse(*Contents);
+  }
+}
+}
+

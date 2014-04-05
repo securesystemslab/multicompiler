@@ -16,6 +16,7 @@ add_llvm_library(LLVMMC
   MCELF.cpp
   MCELFObjectTargetWriter.cpp
   MCELFStreamer.cpp
+  MCFixup.cpp
   MCFunction.cpp
   MCExpr.cpp
   MCExternalSymbolizer.cpp
@@ -23,6 +24,7 @@ add_llvm_library(LLVMMC
   MCInstPrinter.cpp
   MCInstrAnalysis.cpp
   MCLabel.cpp
+  MCLinkerOptimizationHint.cpp
   MCMachOStreamer.cpp
   MCMachObjectTargetWriter.cpp
   MCModule.cpp
@@ -33,7 +35,6 @@ add_llvm_library(LLVMMC
   MCObjectStreamer.cpp
   MCObjectSymbolizer.cpp
   MCObjectWriter.cpp
-  MCPureStreamer.cpp
   MCRegisterInfo.cpp
   MCRelocationInfo.cpp
   MCSection.cpp

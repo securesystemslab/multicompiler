@@ -12,8 +12,8 @@
 /// which is a very useful tool for interprocedural optimization.
 ///
 /// Every function in a module is represented as a node in the call graph.  The
-/// callgraph node keeps track of which functions the are called by the
-/// function corresponding to the node.
+/// callgraph node keeps track of which functions are called by the function
+/// corresponding to the node.
 ///
 /// A call graph may contain nodes where the function that they correspond to
 /// is null.  These 'external' nodes are used to represent control flow that is
@@ -53,13 +53,12 @@
 #define LLVM_ANALYSIS_CALLGRAPH_H
 
 #include "llvm/ADT/GraphTraits.h"
-#include "llvm/ADT/OwningPtr.h"
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/IR/CallSite.h"
 #include "llvm/IR/Function.h"
+#include "llvm/IR/ValueHandle.h"
 #include "llvm/Pass.h"
-#include "llvm/Support/CallSite.h"
 #include "llvm/Support/IncludeFile.h"
-#include "llvm/Support/ValueHandle.h"
 #include <map>
 
 namespace llvm {
@@ -314,7 +313,7 @@ private:
 /// call graph interface is entirelly a wrapper around a \c CallGraph object
 /// which is stored internally for each module.
 class CallGraphWrapperPass : public ModulePass {
-  OwningPtr<CallGraph> G;
+  std::unique_ptr<CallGraph> G;
 
 public:
   static char ID; // Class identification, replacement for typeinfo
@@ -381,11 +380,11 @@ public:
   // Implementation of the ModulePass interface needed here.
   //
 
-  virtual void getAnalysisUsage(AnalysisUsage &AU) const;
-  virtual bool runOnModule(Module &M);
-  virtual void releaseMemory();
+  void getAnalysisUsage(AnalysisUsage &AU) const override;
+  bool runOnModule(Module &M) override;
+  void releaseMemory() override;
 
-  void print(raw_ostream &o, const Module *) const;
+  void print(raw_ostream &o, const Module *) const override;
   void dump() const;
 };
 

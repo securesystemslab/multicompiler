@@ -123,14 +123,14 @@ bool IVUsers::AddUsersImpl(Instruction *I,
   // IVUsers is used by LSR which assumes that all SCEV expressions are safe to
   // pass to SCEVExpander. Expressions are not safe to expand if they represent
   // operations that are not safe to speculate, namely integer division.
-  if (!isa<PHINode>(I) && !isSafeToSpeculativelyExecute(I, TD))
+  if (!isa<PHINode>(I) && !isSafeToSpeculativelyExecute(I, DL))
     return false;
 
   // LSR is not APInt clean, do not touch integers bigger than 64-bits.
   // Also avoid creating IVs of non-native types. For example, we don't want a
   // 64-bit IV in 32-bit code just because the loop has one 64-bit cast.
   uint64_t Width = SE->getTypeSizeInBits(I->getType());
-  if (Width > 64 || (TD && !TD->isLegalInteger(Width)))
+  if (Width > 64 || (DL && !DL->isLegalInteger(Width)))
     return false;
 
   // Get the symbolic expression for this instruction.
@@ -142,9 +142,8 @@ bool IVUsers::AddUsersImpl(Instruction *I,
     return false;
 
   SmallPtrSet<Instruction *, 4> UniqueUsers;
-  for (Value::use_iterator UI = I->use_begin(), E = I->use_end();
-       UI != E; ++UI) {
-    Instruction *User = cast<Instruction>(*UI);
+  for (Use &U : I->uses()) {
+    Instruction *User = cast<Instruction>(U.getUser());
     if (!UniqueUsers.insert(User))
       continue;
 
@@ -157,7 +156,7 @@ bool IVUsers::AddUsersImpl(Instruction *I,
     BasicBlock *UseBB = User->getParent();
     // A phi's use is live out of its predecessor block.
     if (PHINode *PHI = dyn_cast<PHINode>(User)) {
-      unsigned OperandNo = UI.getOperandNo();
+      unsigned OperandNo = U.getOperandNo();
       unsigned ValNo = PHINode::getIncomingValueNumForOperand(OperandNo);
       UseBB = PHI->getIncomingBlock(ValNo);
     }
@@ -186,15 +185,34 @@ bool IVUsers::AddUsersImpl(Instruction *I,
 
     if (AddUserToIVUsers) {
       // Okay, we found a user that we cannot reduce.
-      IVUses.push_back(new IVStrideUse(this, User, I));
-      IVStrideUse &NewUse = IVUses.back();
+      IVStrideUse &NewUse = AddUser(User, I);
       // Autodetect the post-inc loop set, populating NewUse.PostIncLoops.
       // The regular return value here is discarded; instead of recording
       // it, we just recompute it when we need it.
+      const SCEV *OriginalISE = ISE;
       ISE = TransformForPostIncUse(NormalizeAutodetect,
                                    ISE, User, I,
                                    NewUse.PostIncLoops,
                                    *SE, *DT);
+
+      // PostIncNormalization effectively simplifies the expression under
+      // pre-increment assumptions. Those assumptions (no wrapping) might not
+      // hold for the post-inc value. Catch such cases by making sure the
+      // transformation is invertible.
+      if (OriginalISE != ISE) {
+        const SCEV *DenormalizedISE =
+          TransformForPostIncUse(Denormalize, ISE, User, I,
+              NewUse.PostIncLoops, *SE, *DT);
+
+        // If we normalized the expression, but denormalization doesn't give the
+        // original one, discard this user.
+        if (OriginalISE != DenormalizedISE) {
+          DEBUG(dbgs() << "   DISCARDING (NORMALIZATION ISN'T INVERTIBLE): "
+                       << *ISE << '\n');
+          IVUses.pop_back();
+          return false;
+        }
+      }
       DEBUG(if (SE->getSCEV(I) != ISE)
               dbgs() << "   NORMALIZED TO: " << *ISE << '\n');
     }
@@ -234,7 +252,8 @@ bool IVUsers::runOnLoop(Loop *l, LPPassManager &LPM) {
   LI = &getAnalysis<LoopInfo>();
   DT = &getAnalysis<DominatorTreeWrapperPass>().getDomTree();
   SE = &getAnalysis<ScalarEvolution>();
-  TD = getAnalysisIfAvailable<DataLayout>();
+  DataLayoutPass *DLP = getAnalysisIfAvailable<DataLayoutPass>();
+  DL = DLP ? &DLP->getDataLayout() : 0;
 
   // Find all uses of induction variables in this loop, and categorize
   // them by stride.  Start by finding all of the PHI nodes in the header for

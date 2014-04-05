@@ -91,7 +91,7 @@ public:
   /// @param Res - The relocatable value, if evaluation succeeds.
   /// @param Layout - The assembler layout object to use for evaluating values.
   /// @result - True on success.
-  bool EvaluateAsRelocatable(MCValue &Res, const MCAsmLayout &Layout) const;
+  bool EvaluateAsRelocatable(MCValue &Res, const MCAsmLayout *Layout) const;
 
   /// FindAssociatedSection - Find the "associated section" for this expression,
   /// which is currently defined as the absolute section for constants, or
@@ -158,14 +158,24 @@ public:
     VK_TLSLDM,
     VK_TPOFF,
     VK_DTPOFF,
-    VK_TLVP,      // Mach-O thread local variable relocation
+    VK_TLVP,      // Mach-O thread local variable relocations
+    VK_TLVPPAGE,
+    VK_TLVPPAGEOFF,
+    VK_PAGE,
+    VK_PAGEOFF,
+    VK_GOTPAGE,
+    VK_GOTPAGEOFF,
     VK_SECREL,
+    VK_WEAKREF,   // The link between the symbols in .weakref foo, bar
 
     VK_ARM_NONE,
     VK_ARM_TARGET1,
     VK_ARM_TARGET2,
     VK_ARM_PREL31,
     VK_ARM_TLSLDO,         // symbol(tlsldo)
+    VK_ARM_TLSCALL,        // symbol(tlscall)
+    VK_ARM_TLSDESC,        // symbol(tlsdesc)
+    VK_ARM_TLSDESCSEQ,
 
     VK_PPC_LO,             // symbol@l
     VK_PPC_HI,             // symbol@h

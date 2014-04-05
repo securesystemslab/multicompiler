@@ -2,17 +2,10 @@
 # options and executing the appropriate CMake commands to realize the users'
 # selections.
 
+include(HandleLLVMStdlib)
 include(AddLLVMDefinitions)
 include(CheckCCompilerFlag)
 include(CheckCXXCompilerFlag)
-
-if( CMAKE_COMPILER_IS_GNUCXX )
-  set(LLVM_COMPILER_IS_GCC_COMPATIBLE ON)
-elseif( MSVC )
-  set(LLVM_COMPILER_IS_GCC_COMPATIBLE OFF)
-elseif( "${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang" )
-  set(LLVM_COMPILER_IS_GCC_COMPATIBLE ON)
-endif()
 
 if(NOT LLVM_FORCE_USE_OLD_TOOLCHAIN)
   if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
@@ -108,7 +101,14 @@ endif(WIN32)
 
 set(EXEEXT ${CMAKE_EXECUTABLE_SUFFIX})
 set(LTDL_SHLIB_EXT ${CMAKE_SHARED_LIBRARY_SUFFIX})
-set(LLVM_PLUGIN_EXT ${CMAKE_SHARED_MODULE_SUFFIX})
+
+# We use *.dylib rather than *.so on darwin.
+set(LLVM_PLUGIN_EXT ${CMAKE_SHARED_LIBRARY_SUFFIX})
+
+if(APPLE)
+  # Darwin-specific linker flags for loadable modules.
+  set(CMAKE_MODULE_LINKER_FLAGS "${CMAKE_MODULE_LINKER_FLAGS} -Wl,-flat_namespace -Wl,-undefined -Wl,suppress")
+endif()
 
 function(add_flag_or_print_warning flag)
   check_c_compiler_flag(${flag} C_SUPPORTS_FLAG)
@@ -173,6 +173,29 @@ if( CMAKE_SIZEOF_VOID_P EQUAL 8 AND NOT WIN32 )
   endif( LLVM_BUILD_32_BITS )
 endif( CMAKE_SIZEOF_VOID_P EQUAL 8 AND NOT WIN32 )
 
+if( XCODE )
+  # For Xcode enable several build settings that correspond to
+  # many warnings that are on by default in Clang but are
+  # not enabled for historical reasons.  For versions of Xcode
+  # that do not support these options they will simply
+  # be ignored.
+  set(CMAKE_XCODE_ATTRIBUTE_GCC_WARN_ABOUT_RETURN_TYPE "YES")
+  set(CMAKE_XCODE_ATTRIBUTE_GCC_WARN_ABOUT_MISSING_NEWLINE "YES")
+  set(CMAKE_XCODE_ATTRIBUTE_GCC_WARN_UNUSED_VALUE "YES")
+  set(CMAKE_XCODE_ATTRIBUTE_GCC_WARN_UNUSED_VARIABLE "YES")
+  set(CMAKE_XCODE_ATTRIBUTE_GCC_WARN_SIGN_COMPARE "YES")
+  set(CMAKE_XCODE_ATTRIBUTE_GCC_WARN_UNUSED_FUNCTION "YES")
+  set(CMAKE_XCODE_ATTRIBUTE_GCC_WARN_INITIALIZER_NOT_FULLY_BRACKETED "YES")
+  set(CMAKE_XCODE_ATTRIBUTE_GCC_WARN_HIDDEN_VIRTUAL_FUNCTIONS "YES")
+  set(CMAKE_XCODE_ATTRIBUTE_GCC_WARN_UNINITIALIZED_AUTOS "YES")
+  set(CMAKE_XCODE_ATTRIBUTE_CLANG_WARN_BOOL_CONVERSION "YES")
+  set(CMAKE_XCODE_ATTRIBUTE_CLANG_WARN_EMPTY_BODY "YES")
+  set(CMAKE_XCODE_ATTRIBUTE_CLANG_WARN_ENUM_CONVERSION "YES")
+  set(CMAKE_XCODE_ATTRIBUTE_CLANG_WARN_INT_CONVERSION "YES")
+  set(CMAKE_XCODE_ATTRIBUTE_CLANG_WARN_CONSTANT_CONVERSION "YES")
+  set(CMAKE_XCODE_ATTRIBUTE_GCC_WARN_NON_VIRTUAL_DESTRUCTOR "YES")
+endif()
+
 # On Win32 using MS tools, provide an option to set the number of parallel jobs
 # to use.
 if( MSVC_IDE )
@@ -182,14 +205,8 @@ if( MSVC_IDE )
     if( LLVM_COMPILER_JOBS STREQUAL "0" )
       add_llvm_definitions( /MP )
     else()
-      if (MSVC10)
-        message(FATAL_ERROR
-          "Due to a bug in CMake only 0 and 1 is supported for "
-          "LLVM_COMPILER_JOBS when generating for Visual Studio 2010")
-      else()
-        message(STATUS "Number of parallel compiler jobs set to " ${LLVM_COMPILER_JOBS})
-        add_llvm_definitions( /MP${LLVM_COMPILER_JOBS} )
-      endif()
+      message(STATUS "Number of parallel compiler jobs set to " ${LLVM_COMPILER_JOBS})
+      add_llvm_definitions( /MP${LLVM_COMPILER_JOBS} )
     endif()
   else()
     message(STATUS "Parallel compilation disabled")
@@ -208,13 +225,7 @@ if( MSVC )
     set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} /STACK:10000000")
   endif()
 
-  if( MSVC10 )
-    # MSVC 10 will complain about headers in the STL not being exported, but
-    # will not complain in MSVC 11.
-    add_llvm_definitions(
-      -wd4275 # Suppress 'An exported class was derived from a class that was not exported.'
-    )
-  elseif( MSVC11 )
+  if( MSVC11 )
     add_llvm_definitions(-D_VARIADIC_MAX=10)
   endif()
   
@@ -233,13 +244,14 @@ if( MSVC )
     -wd4180 # Suppress 'qualifier applied to function type has no meaning; ignored'
     -wd4244 # Suppress ''argument' : conversion from 'type1' to 'type2', possible loss of data'
     -wd4267 # Suppress ''var' : conversion from 'size_t' to 'type', possible loss of data'
+    -wd4291 # Suppress ''declaration' : no matching operator delete found; memory will not be freed if initialization throws an exception'
     -wd4345 # Suppress 'behavior change: an object of POD type constructed with an initializer of the form () will be default-initialized'
     -wd4351 # Suppress 'new behavior: elements of array 'array' will be default initialized'
     -wd4355 # Suppress ''this' : used in base member initializer list'
     -wd4503 # Suppress ''identifier' : decorated name length exceeded, name was truncated'
     -wd4624 # Suppress ''derived class' : destructor could not be generated because a base class destructor is inaccessible'
+    -wd4722 # Suppress 'function' : destructor never returns, potential memory leak
     -wd4800 # Suppress ''type' : forcing value to bool 'true' or 'false' (performance warning)'
-    -wd4291 # Suppress ''declaration' : no matching operator delete found; memory will not be freed if initialization throws an exception'
     
     # Promoted warnings.
     -w14062 # Promote 'enumerator in switch of enum is not handled' to level 1 warning.
@@ -284,20 +296,24 @@ elseif( LLVM_COMPILER_IS_GCC_COMPATIBLE )
     check_cxx_compiler_flag("-Werror -Wnon-virtual-dtor" CXX_SUPPORTS_NON_VIRTUAL_DTOR_FLAG)
     append_if(CXX_SUPPORTS_NON_VIRTUAL_DTOR_FLAG "-Wnon-virtual-dtor" CMAKE_CXX_FLAGS)
   endif (LLVM_ENABLE_WARNINGS)
-  if (LLVM_ENABLE_WERROR)
-    add_llvm_definitions( -Werror )
-  endif (LLVM_ENABLE_WERROR)
-  if (LLVM_ENABLE_CXX11)
+  append_if(LLVM_ENABLE_WERROR "-Werror" CMAKE_C_FLAGS CMAKE_CXX_FLAGS)
+  if (LLVM_ENABLE_CXX1Y)
+    check_cxx_compiler_flag("-std=c++1y" CXX_SUPPORTS_CXX1Y)
+    append_if(CXX_SUPPORTS_CXX1Y "-std=c++1y" CMAKE_CXX_FLAGS)
+  else()
     check_cxx_compiler_flag("-std=c++11" CXX_SUPPORTS_CXX11)
-    append_if(CXX_SUPPORTS_CXX11 "-std=c++11" CMAKE_CXX_FLAGS)
-  endif (LLVM_ENABLE_CXX11)
-  if(LLVM_ENABLE_LIBCXX)
-    check_cxx_compiler_flag("-stdlib=libc++" CXX_SUPPORTS_STDLIB)
-    append_if(CXX_SUPPORTS_STDLIB "-stdlib=libc++" CMAKE_CXX_FLAGS)
-    append_if(CXX_SUPPORTS_STDLIB "-stdlib=libc++" CMAKE_EXE_LINKER_FLAGS)
-    append_if(CXX_SUPPORTS_STDLIB "-stdlib=libc++" CMAKE_SHARED_LINKER_FLAGS)
-    append_if(CXX_SUPPORTS_STDLIB "-stdlib=libc++" CMAKE_MODULE_LINKER_FLAGS)
-  endif ()
+    if (CXX_SUPPORTS_CXX11)
+      if (CYGWIN OR MINGW)
+        # MinGW and Cygwin are a bit stricter and lack things like
+        # 'strdup', 'stricmp', etc in c++11 mode.
+        append("-std=gnu++11" CMAKE_CXX_FLAGS)
+      else()
+        append("-std=c++11" CMAKE_CXX_FLAGS)
+      endif()
+    else()
+      message(FATAL_ERROR "LLVM requires C++11 support but the '-std=c++11' flag isn't supported.")
+    endif()
+  endif()
 endif( MSVC )
 
 macro(append_common_sanitizer_flags)
@@ -348,4 +364,44 @@ if (UNIX AND
     CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND
     CMAKE_GENERATOR STREQUAL "Ninja")
   append("-fcolor-diagnostics" CMAKE_C_FLAGS CMAKE_CXX_FLAGS)
+endif()
+
+# Add flags for add_dead_strip().
+# FIXME: With MSVS, consider compiling with /Gy and linking with /OPT:REF?
+# But MinSizeRel seems to add that automatically, so maybe disable these
+# flags instead if LLVM_NO_DEAD_STRIP is set.
+if(NOT CYGWIN AND NOT WIN32)
+  if(NOT ${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
+    check_c_compiler_flag("-Werror -fno-function-sections" C_SUPPORTS_FNO_FUNCTION_SECTIONS)
+    if (C_SUPPORTS_FNO_FUNCTION_SECTIONS)
+      # Don't add -ffunction-section if it can be disabled with -fno-function-sections.
+      # Doing so will break sanitizers.
+      check_c_compiler_flag("-Werror -ffunction-sections" C_SUPPORTS_FFUNCTION_SECTIONS)
+      check_cxx_compiler_flag("-Werror -ffunction-sections" CXX_SUPPORTS_FFUNCTION_SECTIONS)
+      append_if(C_SUPPORTS_FFUNCTION_SECTIONS "-ffunction-sections" CMAKE_C_FLAGS)
+      append_if(CXX_SUPPORTS_FFUNCTION_SECTIONS "-ffunction-sections" CMAKE_CXX_FLAGS)
+    endif()
+    check_c_compiler_flag("-Werror -fdata-sections" C_SUPPORTS_FDATA_SECTIONS)
+    check_cxx_compiler_flag("-Werror -fdata-sections" CXX_SUPPORTS_FDATA_SECTIONS)
+    append_if(C_SUPPORTS_FDATA_SECTIONS "-fdata-sections" CMAKE_C_FLAGS)
+    append_if(CXX_SUPPORTS_FDATA_SECTIONS "-fdata-sections" CMAKE_CXX_FLAGS)
+  endif()
+endif()
+
+if(CYGWIN OR MINGW)
+  # Prune --out-implib from executables. It doesn't make sense even
+  # with --export-all-symbols.
+  string(REGEX REPLACE "-Wl,--out-implib,[^ ]+ " " "
+    CMAKE_C_LINK_EXECUTABLE "${CMAKE_C_LINK_EXECUTABLE}")
+  string(REGEX REPLACE "-Wl,--out-implib,[^ ]+ " " "
+    CMAKE_CXX_LINK_EXECUTABLE "${CMAKE_CXX_LINK_EXECUTABLE}")
+endif()
+
+if(MSVC)
+  # Remove flags here, for exceptions and RTTI.
+  # Each target property or source property should be responsible to control
+  # them.
+  # CL.EXE complains to override flags like "/GR /GR-".
+  string(REGEX REPLACE "(^| ) */EH[-cs]+ *( |$)" "\\1 \\2" CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
+  string(REGEX REPLACE "(^| ) */GR-? *( |$)" "\\1 \\2" CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
 endif()

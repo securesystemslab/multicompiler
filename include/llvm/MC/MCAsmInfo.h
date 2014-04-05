@@ -116,6 +116,13 @@ namespace llvm {
     /// file.
     const char *PrivateGlobalPrefix;         // Defaults to "L"
 
+    /// This prefix is used for symbols that should be passed through the
+    /// assembler but be removed by the linker.  This is 'l' on Darwin,
+    /// currently used for some ObjC metadata.
+    /// The default of "" meast that for this system a plain private symbol
+    /// should be used.
+    const char *LinkerPrivateGlobalPrefix;    // Defaults to "".
+
     /// InlineAsmStart/End - If these are nonempty, they contain a directive to
     /// emit before and after an inline assembly statement.
     const char *InlineAsmStart;              // Defaults to "#APP\n"
@@ -188,11 +195,6 @@ namespace llvm {
     bool NeedsDwarfSectionOffsetDirective;
 
     //===--- Alignment Information ----------------------------------------===//
-
-    /// AlignDirective - The directive used to emit round up to an alignment
-    /// boundary.
-    ///
-    const char *AlignDirective;              // Defaults to "\t.align\t"
 
     /// AlignmentIsInBytes - If this is true (the default) then the asmprinter
     /// emits ".align N" directives, where N is the number of bytes to align to.
@@ -304,13 +306,20 @@ namespace llvm {
 
     std::vector<MCCFIInstruction> InitialFrameState;
 
+    //===--- Integrated Assembler State ----------------------------------===//
+    /// Should we use the integrated assembler?
+    /// The integrated assembler should be enabled by default (by the
+    /// constructors) when failing to parse a valid piece of assembly (inline
+    /// or otherwise) is considered a bug. It may then be overridden after
+    /// construction (see LLVMTargetMachine::initAsmInfo()).
+    bool UseIntegratedAssembler;
+
+    /// Compress DWARF debug sections. Defaults to false.
+    bool CompressDebugSections;
+
   public:
     explicit MCAsmInfo();
     virtual ~MCAsmInfo();
-
-    // FIXME: move these methods to DwarfPrinter when the JIT stops using them.
-    static unsigned getSLEB128Size(int64_t Value);
-    static unsigned getULEB128Size(uint64_t Value);
 
     /// getPointerSize - Get the pointer size in bytes.
     unsigned getPointerSize() const {
@@ -364,7 +373,7 @@ namespace llvm {
                                 unsigned Encoding,
                                 MCStreamer &Streamer) const;
 
-    const MCExpr *
+    virtual const MCExpr *
     getExprForFDESymbol(const MCSymbol *Sym,
                         unsigned Encoding,
                         MCStreamer &Streamer) const;
@@ -423,6 +432,14 @@ namespace llvm {
     const char *getPrivateGlobalPrefix() const {
       return PrivateGlobalPrefix;
     }
+    bool hasLinkerPrivateGlobalPrefix() const {
+      return LinkerPrivateGlobalPrefix[0] != '\0';
+    }
+    const char *getLinkerPrivateGlobalPrefix() const {
+      if (hasLinkerPrivateGlobalPrefix())
+        return LinkerPrivateGlobalPrefix;
+      return getPrivateGlobalPrefix();
+    }
     const char *getInlineAsmStart() const {
       return InlineAsmStart;
     }
@@ -455,9 +472,6 @@ namespace llvm {
     }
     const char *getAscizDirective() const {
       return AscizDirective;
-    }
-    const char *getAlignDirective() const {
-      return AlignDirective;
     }
     bool getAlignmentIsInBytes() const {
       return AlignmentIsInBytes;
@@ -533,6 +547,20 @@ namespace llvm {
 
     const std::vector<MCCFIInstruction> &getInitialFrameState() const {
       return InitialFrameState;
+    }
+
+    /// Return true if assembly (inline or otherwise) should be parsed.
+    bool useIntegratedAssembler() const { return UseIntegratedAssembler; }
+
+    /// Set whether assembly (inline or otherwise) should be parsed.
+    virtual void setUseIntegratedAssembler(bool Value) {
+      UseIntegratedAssembler = Value;
+    }
+
+    bool compressDebugSections() const { return CompressDebugSections; }
+
+    void setCompressDebugSections(bool CompressDebugSections) {
+      this->CompressDebugSections = CompressDebugSections;
     }
   };
 }

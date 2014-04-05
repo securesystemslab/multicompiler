@@ -17,11 +17,11 @@
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/Bitcode/BitstreamReader.h"
 #include "llvm/Bitcode/LLVMBitCodes.h"
-#include "llvm/GVMaterializer.h"
 #include "llvm/IR/Attributes.h"
+#include "llvm/IR/GVMaterializer.h"
 #include "llvm/IR/OperandTraits.h"
 #include "llvm/IR/Type.h"
-#include "llvm/Support/ValueHandle.h"
+#include "llvm/IR/ValueHandle.h"
 #include "llvm/Support/system_error.h"
 #include <vector>
 
@@ -127,7 +127,7 @@ class BitcodeReader : public GVMaterializer {
   Module *TheModule;
   MemoryBuffer *Buffer;
   bool BufferOwned;
-  OwningPtr<BitstreamReader> StreamFile;
+  std::unique_ptr<BitstreamReader> StreamFile;
   BitstreamCursor Stream;
   DataStreamer *LazyStreamer;
   uint64_t NextUnreadBit;
@@ -247,11 +247,11 @@ public:
   /// when the reader is destroyed.
   void setBufferOwned(bool Owned) { BufferOwned = Owned; }
 
-  virtual bool isMaterializable(const GlobalValue *GV) const;
-  virtual bool isDematerializable(const GlobalValue *GV) const;
-  virtual error_code Materialize(GlobalValue *GV);
-  virtual error_code MaterializeModule(Module *M);
-  virtual void Dematerialize(GlobalValue *GV);
+  bool isMaterializable(const GlobalValue *GV) const override;
+  bool isDematerializable(const GlobalValue *GV) const override;
+  error_code Materialize(GlobalValue *GV) override;
+  error_code MaterializeModule(Module *M) override;
+  void Dematerialize(GlobalValue *GV) override;
 
   /// @brief Main interface to parsing a bitcode buffer.
   /// @returns true if an error occurred.

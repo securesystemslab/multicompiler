@@ -19,6 +19,7 @@
 #include "llvm/Support/CodeGen.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Target/TargetMachine.h"
+#include "llvm/Target/TargetOptions.h"
 #include <string>
 using namespace llvm;
 
@@ -84,9 +85,6 @@ FileType("filetype", cl::init(TargetMachine::CGFT_AssemblyFile),
              clEnumValN(TargetMachine::CGFT_Null, "null",
                         "Emit nothing, for performance testing"),
              clEnumValEnd));
-
-cl::opt<bool> DisableDotLoc("disable-dot-loc", cl::Hidden,
-                            cl::desc("Do not use .loc entries"));
 
 cl::opt<bool> DisableCFI("disable-cfi", cl::Hidden,
                          cl::desc("Do not use .cfi_* directives"));
@@ -214,5 +212,33 @@ cl::opt<bool>
 NOPInsertion("nop-insertion",
              cl::desc("Randomly add NOPs."),
              cl::init(false));
+
+
+// Common utility function tightly tied to the options listed here. Initializes
+// a TargetOptions object with CodeGen flags and returns it.
+static inline TargetOptions InitTargetOptionsFromCodeGenFlags() {
+  TargetOptions Options;
+  Options.LessPreciseFPMADOption = EnableFPMAD;
+  Options.NoFramePointerElim = DisableFPElim;
+  Options.AllowFPOpFusion = FuseFPOps;
+  Options.UnsafeFPMath = EnableUnsafeFPMath;
+  Options.NoInfsFPMath = EnableNoInfsFPMath;
+  Options.NoNaNsFPMath = EnableNoNaNsFPMath;
+  Options.HonorSignDependentRoundingFPMathOption =
+      EnableHonorSignDependentRoundingFPMath;
+  Options.UseSoftFloat = GenerateSoftFloatCalls;
+  if (FloatABIForCalls != FloatABI::Default)
+    Options.FloatABIType = FloatABIForCalls;
+  Options.NoZerosInBSS = DontPlaceZerosInBSS;
+  Options.GuaranteedTailCallOpt = EnableGuaranteedTailCallOpt;
+  Options.DisableTailCalls = DisableTailCalls;
+  Options.StackAlignmentOverride = OverrideStackAlignment;
+  Options.TrapFuncName = TrapFuncName;
+  Options.PositionIndependentExecutable = EnablePIE;
+  Options.EnableSegmentedStacks = SegmentedStacks;
+  Options.UseInitArray = UseInitArray;
+  Options.NOPInsertion = NOPInsertion;
+  return Options;
+}
 
 #endif

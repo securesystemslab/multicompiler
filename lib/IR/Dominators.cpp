@@ -18,8 +18,8 @@
 #include "llvm/ADT/DepthFirstIterator.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/IR/CFG.h"
 #include "llvm/IR/Instructions.h"
-#include "llvm/Support/CFG.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Compiler.h"
 #include "llvm/Support/Debug.h"
@@ -63,6 +63,16 @@ bool BasicBlockEdge::isSingleEdge() const {
 
 TEMPLATE_INSTANTIATION(class llvm::DomTreeNodeBase<BasicBlock>);
 TEMPLATE_INSTANTIATION(class llvm::DominatorTreeBase<BasicBlock>);
+
+#define LLVM_COMMA ,
+TEMPLATE_INSTANTIATION(void llvm::Calculate<Function LLVM_COMMA BasicBlock *>(
+    DominatorTreeBase<GraphTraits<BasicBlock *>::NodeType> &DT LLVM_COMMA
+        Function &F));
+TEMPLATE_INSTANTIATION(
+    void llvm::Calculate<Function LLVM_COMMA Inverse<BasicBlock *> >(
+        DominatorTreeBase<GraphTraits<Inverse<BasicBlock *> >::NodeType> &DT
+            LLVM_COMMA Function &F));
+#undef LLVM_COMMA
 
 // dominates - Return true if Def dominates a use in User. This performs
 // the special checks necessary if Def and User are in the same basic block.

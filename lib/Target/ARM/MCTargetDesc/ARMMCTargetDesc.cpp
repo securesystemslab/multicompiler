@@ -89,11 +89,16 @@ std::string ARM_MC::ParseARMTriple(StringRef TT, StringRef CPU) {
   unsigned Idx = 0;
 
   // FIXME: Enhance Triple helper class to extract ARM version.
-  bool isThumb = triple.getArch() == Triple::thumb;
+  bool isThumb = triple.getArch() == Triple::thumb ||
+                 triple.getArch() == Triple::thumbeb;
   if (Len >= 5 && TT.substr(0, 4) == "armv")
     Idx = 4;
+  else if (Len >= 7 && TT.substr(0, 6) == "armebv")
+    Idx = 6;
   else if (Len >= 7 && TT.substr(0, 6) == "thumbv")
     Idx = 6;
+  else if (Len >= 9 && TT.substr(0, 8) == "thumbebv")
+    Idx = 8;
 
   bool NoCPU = CPU == "generic" || CPU.empty();
   std::string ARMArchFeature;
@@ -213,10 +218,31 @@ static MCAsmInfo *createARMMCAsmInfo(const MCRegisterInfo &MRI, StringRef TT) {
   Triple TheTriple(TT);
 
   MCAsmInfo *MAI;
-  if (TheTriple.isOSBinFormatMachO())
-    MAI = new ARMMCAsmInfoDarwin();
-  else
-    MAI = new ARMELFMCAsmInfo();
+  switch (TheTriple.getOS()) {
+  case llvm::Triple::Darwin:
+  case llvm::Triple::IOS:
+  case llvm::Triple::MacOSX:
+    MAI = new ARMMCAsmInfoDarwin(TT);
+    break;
+  case llvm::Triple::Win32:
+    switch (TheTriple.getEnvironment()) {
+    case llvm::Triple::Itanium:
+      MAI = new ARMCOFFMCAsmInfoGNU();
+      break;
+    case llvm::Triple::MSVC:
+      MAI = new ARMCOFFMCAsmInfoMicrosoft();
+      break;
+    default:
+      llvm_unreachable("invalid environment");
+    }
+    break;
+  default:
+    if (TheTriple.isOSBinFormatMachO())
+      MAI = new ARMMCAsmInfoDarwin(TT);
+    else
+      MAI = new ARMELFMCAsmInfo(TT);
+    break;
+  }
 
   unsigned Reg = MRI.getDwarfRegNum(ARM::SP, true);
   MAI->addInitialFrameState(MCCFIInstruction::createDefCfa(0, Reg, 0));
@@ -247,8 +273,11 @@ static MCStreamer *createMCStreamer(const Target &T, StringRef TT,
                                     bool NoExecStack) {
   Triple TheTriple(TT);
 
-  if (TheTriple.isOSBinFormatMachO())
-    return createMachOStreamer(Ctx, MAB, OS, Emitter, false);
+  if (TheTriple.isOSBinFormatMachO()) {
+    MCStreamer *S = createMachOStreamer(Ctx, MAB, OS, Emitter, false);
+    new ARMTargetStreamer(*S);
+    return S;
+  }
 
   if (TheTriple.isOSWindows()) {
     llvm_unreachable("ARM does not support Windows COFF format");
@@ -284,14 +313,14 @@ class ARMMCInstrAnalysis : public MCInstrAnalysis {
 public:
   ARMMCInstrAnalysis(const MCInstrInfo *Info) : MCInstrAnalysis(Info) {}
 
-  virtual bool isUnconditionalBranch(const MCInst &Inst) const {
+  bool isUnconditionalBranch(const MCInst &Inst) const override {
     // BCCs with the "always" predicate are unconditional branches.
     if (Inst.getOpcode() == ARM::Bcc && Inst.getOperand(1).getImm()==ARMCC::AL)
       return true;
     return MCInstrAnalysis::isUnconditionalBranch(Inst);
   }
 
-  virtual bool isConditionalBranch(const MCInst &Inst) const {
+  bool isConditionalBranch(const MCInst &Inst) const override {
     // BCCs with the "always" predicate are unconditional branches.
     if (Inst.getOpcode() == ARM::Bcc && Inst.getOperand(1).getImm()==ARMCC::AL)
       return false;
@@ -299,7 +328,7 @@ public:
   }
 
   bool evaluateBranch(const MCInst &Inst, uint64_t Addr,
-                      uint64_t Size, uint64_t &Target) const {
+                      uint64_t Size, uint64_t &Target) const override {
     // We only handle PCRel branches for now.
     if (Info->get(Inst.getOpcode()).OpInfo[0].OperandType!=MCOI::OPERAND_PCREL)
       return false;
@@ -320,56 +349,94 @@ static MCInstrAnalysis *createARMMCInstrAnalysis(const MCInstrInfo *Info) {
 // Force static initialization.
 extern "C" void LLVMInitializeARMTargetMC() {
   // Register the MC asm info.
-  RegisterMCAsmInfoFn A(TheARMTarget, createARMMCAsmInfo);
-  RegisterMCAsmInfoFn B(TheThumbTarget, createARMMCAsmInfo);
+  RegisterMCAsmInfoFn X(TheARMLETarget, createARMMCAsmInfo);
+  RegisterMCAsmInfoFn Y(TheARMBETarget, createARMMCAsmInfo);
+  RegisterMCAsmInfoFn A(TheThumbLETarget, createARMMCAsmInfo);
+  RegisterMCAsmInfoFn B(TheThumbBETarget, createARMMCAsmInfo);
 
   // Register the MC codegen info.
-  TargetRegistry::RegisterMCCodeGenInfo(TheARMTarget, createARMMCCodeGenInfo);
-  TargetRegistry::RegisterMCCodeGenInfo(TheThumbTarget, createARMMCCodeGenInfo);
+  TargetRegistry::RegisterMCCodeGenInfo(TheARMLETarget, createARMMCCodeGenInfo);
+  TargetRegistry::RegisterMCCodeGenInfo(TheARMBETarget, createARMMCCodeGenInfo);
+  TargetRegistry::RegisterMCCodeGenInfo(TheThumbLETarget, createARMMCCodeGenInfo);
+  TargetRegistry::RegisterMCCodeGenInfo(TheThumbBETarget, createARMMCCodeGenInfo);
 
   // Register the MC instruction info.
-  TargetRegistry::RegisterMCInstrInfo(TheARMTarget, createARMMCInstrInfo);
-  TargetRegistry::RegisterMCInstrInfo(TheThumbTarget, createARMMCInstrInfo);
+  TargetRegistry::RegisterMCInstrInfo(TheARMLETarget, createARMMCInstrInfo);
+  TargetRegistry::RegisterMCInstrInfo(TheARMBETarget, createARMMCInstrInfo);
+  TargetRegistry::RegisterMCInstrInfo(TheThumbLETarget, createARMMCInstrInfo);
+  TargetRegistry::RegisterMCInstrInfo(TheThumbBETarget, createARMMCInstrInfo);
 
   // Register the MC register info.
-  TargetRegistry::RegisterMCRegInfo(TheARMTarget, createARMMCRegisterInfo);
-  TargetRegistry::RegisterMCRegInfo(TheThumbTarget, createARMMCRegisterInfo);
+  TargetRegistry::RegisterMCRegInfo(TheARMLETarget, createARMMCRegisterInfo);
+  TargetRegistry::RegisterMCRegInfo(TheARMBETarget, createARMMCRegisterInfo);
+  TargetRegistry::RegisterMCRegInfo(TheThumbLETarget, createARMMCRegisterInfo);
+  TargetRegistry::RegisterMCRegInfo(TheThumbBETarget, createARMMCRegisterInfo);
 
   // Register the MC subtarget info.
-  TargetRegistry::RegisterMCSubtargetInfo(TheARMTarget,
+  TargetRegistry::RegisterMCSubtargetInfo(TheARMLETarget,
                                           ARM_MC::createARMMCSubtargetInfo);
-  TargetRegistry::RegisterMCSubtargetInfo(TheThumbTarget,
+  TargetRegistry::RegisterMCSubtargetInfo(TheARMBETarget,
+                                          ARM_MC::createARMMCSubtargetInfo);
+  TargetRegistry::RegisterMCSubtargetInfo(TheThumbLETarget,
+                                          ARM_MC::createARMMCSubtargetInfo);
+  TargetRegistry::RegisterMCSubtargetInfo(TheThumbBETarget,
                                           ARM_MC::createARMMCSubtargetInfo);
 
   // Register the MC instruction analyzer.
-  TargetRegistry::RegisterMCInstrAnalysis(TheARMTarget,
+  TargetRegistry::RegisterMCInstrAnalysis(TheARMLETarget,
                                           createARMMCInstrAnalysis);
-  TargetRegistry::RegisterMCInstrAnalysis(TheThumbTarget,
+  TargetRegistry::RegisterMCInstrAnalysis(TheARMBETarget,
+                                          createARMMCInstrAnalysis);
+  TargetRegistry::RegisterMCInstrAnalysis(TheThumbLETarget,
+                                          createARMMCInstrAnalysis);
+  TargetRegistry::RegisterMCInstrAnalysis(TheThumbBETarget,
                                           createARMMCInstrAnalysis);
 
   // Register the MC Code Emitter
-  TargetRegistry::RegisterMCCodeEmitter(TheARMTarget, createARMMCCodeEmitter);
-  TargetRegistry::RegisterMCCodeEmitter(TheThumbTarget, createARMMCCodeEmitter);
+  TargetRegistry::RegisterMCCodeEmitter(TheARMLETarget,
+                                        createARMLEMCCodeEmitter);
+  TargetRegistry::RegisterMCCodeEmitter(TheARMBETarget,
+                                        createARMBEMCCodeEmitter);
+  TargetRegistry::RegisterMCCodeEmitter(TheThumbLETarget,
+                                        createARMLEMCCodeEmitter);
+  TargetRegistry::RegisterMCCodeEmitter(TheThumbBETarget,
+                                        createARMBEMCCodeEmitter);
 
   // Register the asm backend.
-  TargetRegistry::RegisterMCAsmBackend(TheARMTarget, createARMAsmBackend);
-  TargetRegistry::RegisterMCAsmBackend(TheThumbTarget, createARMAsmBackend);
+  TargetRegistry::RegisterMCAsmBackend(TheARMLETarget, createARMLEAsmBackend);
+  TargetRegistry::RegisterMCAsmBackend(TheARMBETarget, createARMBEAsmBackend);
+  TargetRegistry::RegisterMCAsmBackend(TheThumbLETarget,
+                                       createThumbLEAsmBackend);
+  TargetRegistry::RegisterMCAsmBackend(TheThumbBETarget,
+                                       createThumbBEAsmBackend);
 
   // Register the object streamer.
-  TargetRegistry::RegisterMCObjectStreamer(TheARMTarget, createMCStreamer);
-  TargetRegistry::RegisterMCObjectStreamer(TheThumbTarget, createMCStreamer);
+  TargetRegistry::RegisterMCObjectStreamer(TheARMLETarget, createMCStreamer);
+  TargetRegistry::RegisterMCObjectStreamer(TheARMBETarget, createMCStreamer);
+  TargetRegistry::RegisterMCObjectStreamer(TheThumbLETarget, createMCStreamer);
+  TargetRegistry::RegisterMCObjectStreamer(TheThumbBETarget, createMCStreamer);
 
   // Register the asm streamer.
-  TargetRegistry::RegisterAsmStreamer(TheARMTarget, createMCAsmStreamer);
-  TargetRegistry::RegisterAsmStreamer(TheThumbTarget, createMCAsmStreamer);
+  TargetRegistry::RegisterAsmStreamer(TheARMLETarget, createMCAsmStreamer);
+  TargetRegistry::RegisterAsmStreamer(TheARMBETarget, createMCAsmStreamer);
+  TargetRegistry::RegisterAsmStreamer(TheThumbLETarget, createMCAsmStreamer);
+  TargetRegistry::RegisterAsmStreamer(TheThumbBETarget, createMCAsmStreamer);
 
   // Register the MCInstPrinter.
-  TargetRegistry::RegisterMCInstPrinter(TheARMTarget, createARMMCInstPrinter);
-  TargetRegistry::RegisterMCInstPrinter(TheThumbTarget, createARMMCInstPrinter);
+  TargetRegistry::RegisterMCInstPrinter(TheARMLETarget, createARMMCInstPrinter);
+  TargetRegistry::RegisterMCInstPrinter(TheARMBETarget, createARMMCInstPrinter);
+  TargetRegistry::RegisterMCInstPrinter(TheThumbLETarget,
+                                        createARMMCInstPrinter);
+  TargetRegistry::RegisterMCInstPrinter(TheThumbBETarget,
+                                        createARMMCInstPrinter);
 
   // Register the MC relocation info.
-  TargetRegistry::RegisterMCRelocationInfo(TheARMTarget,
+  TargetRegistry::RegisterMCRelocationInfo(TheARMLETarget,
                                            createARMMCRelocationInfo);
-  TargetRegistry::RegisterMCRelocationInfo(TheThumbTarget,
+  TargetRegistry::RegisterMCRelocationInfo(TheARMBETarget,
+                                           createARMMCRelocationInfo);
+  TargetRegistry::RegisterMCRelocationInfo(TheThumbLETarget,
+                                           createARMMCRelocationInfo);
+  TargetRegistry::RegisterMCRelocationInfo(TheThumbBETarget,
                                            createARMMCRelocationInfo);
 }

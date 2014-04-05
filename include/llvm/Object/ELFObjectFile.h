@@ -44,6 +44,7 @@ public:
 
   typedef typename ELFFile<ELFT>::Elf_Sym Elf_Sym;
   typedef typename ELFFile<ELFT>::Elf_Shdr Elf_Shdr;
+  typedef typename ELFFile<ELFT>::Elf_Ehdr Elf_Ehdr;
   typedef typename ELFFile<ELFT>::Elf_Rel Elf_Rel;
   typedef typename ELFFile<ELFT>::Elf_Rela Elf_Rela;
   typedef typename ELFFile<ELFT>::Elf_Dyn Elf_Dyn;
@@ -55,53 +56,51 @@ public:
 protected:
   ELFFile<ELFT> EF;
 
-  virtual error_code getSymbolNext(DataRefImpl Symb, SymbolRef &Res) const;
-  virtual error_code getSymbolName(DataRefImpl Symb, StringRef &Res) const;
-  virtual error_code getSymbolFileOffset(DataRefImpl Symb, uint64_t &Res) const;
-  virtual error_code getSymbolAddress(DataRefImpl Symb, uint64_t &Res) const;
-  virtual error_code getSymbolAlignment(DataRefImpl Symb, uint32_t &Res) const;
-  virtual error_code getSymbolSize(DataRefImpl Symb, uint64_t &Res) const;
-  virtual error_code getSymbolFlags(DataRefImpl Symb, uint32_t &Res) const;
-  virtual error_code getSymbolType(DataRefImpl Symb,
-                                   SymbolRef::Type &Res) const;
-  virtual error_code getSymbolSection(DataRefImpl Symb,
-                                      section_iterator &Res) const;
-  virtual error_code getSymbolValue(DataRefImpl Symb, uint64_t &Val) const;
+  void moveSymbolNext(DataRefImpl &Symb) const override;
+  error_code getSymbolName(DataRefImpl Symb, StringRef &Res) const override;
+  error_code getSymbolAddress(DataRefImpl Symb, uint64_t &Res) const override;
+  error_code getSymbolAlignment(DataRefImpl Symb, uint32_t &Res) const override;
+  error_code getSymbolSize(DataRefImpl Symb, uint64_t &Res) const override;
+  uint32_t getSymbolFlags(DataRefImpl Symb) const override;
+  error_code getSymbolType(DataRefImpl Symb,
+                           SymbolRef::Type &Res) const override;
+  error_code getSymbolSection(DataRefImpl Symb,
+                              section_iterator &Res) const override;
 
-  virtual error_code getLibraryNext(DataRefImpl Data, LibraryRef &Result) const;
-  virtual error_code getLibraryPath(DataRefImpl Data, StringRef &Res) const;
+  error_code getLibraryNext(DataRefImpl Data,
+                            LibraryRef &Result) const override;
+  error_code getLibraryPath(DataRefImpl Data, StringRef &Res) const override;
 
-  virtual error_code getSectionNext(DataRefImpl Sec, SectionRef &Res) const;
-  virtual error_code getSectionName(DataRefImpl Sec, StringRef &Res) const;
-  virtual error_code getSectionAddress(DataRefImpl Sec, uint64_t &Res) const;
-  virtual error_code getSectionSize(DataRefImpl Sec, uint64_t &Res) const;
-  virtual error_code getSectionContents(DataRefImpl Sec, StringRef &Res) const;
-  virtual error_code getSectionAlignment(DataRefImpl Sec, uint64_t &Res) const;
-  virtual error_code isSectionText(DataRefImpl Sec, bool &Res) const;
-  virtual error_code isSectionData(DataRefImpl Sec, bool &Res) const;
-  virtual error_code isSectionBSS(DataRefImpl Sec, bool &Res) const;
-  virtual error_code isSectionRequiredForExecution(DataRefImpl Sec,
-                                                   bool &Res) const;
-  virtual error_code isSectionVirtual(DataRefImpl Sec, bool &Res) const;
-  virtual error_code isSectionZeroInit(DataRefImpl Sec, bool &Res) const;
-  virtual error_code isSectionReadOnlyData(DataRefImpl Sec, bool &Res) const;
-  virtual error_code sectionContainsSymbol(DataRefImpl Sec, DataRefImpl Symb,
-                                           bool &Result) const;
-  virtual relocation_iterator section_rel_begin(DataRefImpl Sec) const;
-  virtual relocation_iterator section_rel_end(DataRefImpl Sec) const;
-  virtual section_iterator getRelocatedSection(DataRefImpl Sec) const;
+  void moveSectionNext(DataRefImpl &Sec) const override;
+  error_code getSectionName(DataRefImpl Sec, StringRef &Res) const override;
+  error_code getSectionAddress(DataRefImpl Sec, uint64_t &Res) const override;
+  error_code getSectionSize(DataRefImpl Sec, uint64_t &Res) const override;
+  error_code getSectionContents(DataRefImpl Sec, StringRef &Res) const override;
+  error_code getSectionAlignment(DataRefImpl Sec, uint64_t &Res) const override;
+  error_code isSectionText(DataRefImpl Sec, bool &Res) const override;
+  error_code isSectionData(DataRefImpl Sec, bool &Res) const override;
+  error_code isSectionBSS(DataRefImpl Sec, bool &Res) const override;
+  error_code isSectionRequiredForExecution(DataRefImpl Sec,
+                                           bool &Res) const override;
+  error_code isSectionVirtual(DataRefImpl Sec, bool &Res) const override;
+  error_code isSectionZeroInit(DataRefImpl Sec, bool &Res) const override;
+  error_code isSectionReadOnlyData(DataRefImpl Sec, bool &Res) const override;
+  error_code sectionContainsSymbol(DataRefImpl Sec, DataRefImpl Symb,
+                                   bool &Result) const override;
+  relocation_iterator section_rel_begin(DataRefImpl Sec) const override;
+  relocation_iterator section_rel_end(DataRefImpl Sec) const override;
+  section_iterator getRelocatedSection(DataRefImpl Sec) const override;
 
-  virtual error_code getRelocationNext(DataRefImpl Rel,
-                                       RelocationRef &Res) const;
-  virtual error_code getRelocationAddress(DataRefImpl Rel, uint64_t &Res) const;
-  virtual error_code getRelocationOffset(DataRefImpl Rel, uint64_t &Res) const;
-  virtual symbol_iterator getRelocationSymbol(DataRefImpl Rel) const;
-  virtual error_code getRelocationType(DataRefImpl Rel, uint64_t &Res) const;
-  virtual error_code getRelocationTypeName(DataRefImpl Rel,
-                                           SmallVectorImpl<char> &Result) const;
-  virtual error_code
-  getRelocationValueString(DataRefImpl Rel,
-                           SmallVectorImpl<char> &Result) const;
+  void moveRelocationNext(DataRefImpl &Rel) const override;
+  error_code getRelocationAddress(DataRefImpl Rel,
+                                  uint64_t &Res) const override;
+  error_code getRelocationOffset(DataRefImpl Rel, uint64_t &Res) const override;
+  symbol_iterator getRelocationSymbol(DataRefImpl Rel) const override;
+  error_code getRelocationType(DataRefImpl Rel, uint64_t &Res) const override;
+  error_code getRelocationTypeName(DataRefImpl Rel,
+                                  SmallVectorImpl<char> &Result) const override;
+  error_code getRelocationValueString(DataRefImpl Rel,
+                                  SmallVectorImpl<char> &Result) const override;
 
   uint64_t getROffset(DataRefImpl Rel) const;
   StringRef getRelocationTypeName(uint32_t Type) const;
@@ -169,27 +168,27 @@ public:
 
   const Elf_Sym *getSymbol(DataRefImpl Symb) const;
 
-  virtual symbol_iterator begin_symbols() const;
-  virtual symbol_iterator end_symbols() const;
+  basic_symbol_iterator symbol_begin_impl() const override;
+  basic_symbol_iterator symbol_end_impl() const override;
 
-  virtual symbol_iterator begin_dynamic_symbols() const;
-  virtual symbol_iterator end_dynamic_symbols() const;
+  symbol_iterator dynamic_symbol_begin() const;
+  symbol_iterator dynamic_symbol_end() const;
 
-  virtual section_iterator begin_sections() const;
-  virtual section_iterator end_sections() const;
+  section_iterator section_begin() const override;
+  section_iterator section_end() const override;
 
-  virtual library_iterator begin_libraries_needed() const;
-  virtual library_iterator end_libraries_needed() const;
+  library_iterator needed_library_begin() const override;
+  library_iterator needed_library_end() const override;
 
   error_code getRelocationAddend(DataRefImpl Rel, int64_t &Res) const;
   error_code getSymbolVersion(SymbolRef Symb, StringRef &Version,
                               bool &IsDefault) const;
 
-  virtual uint8_t getBytesInAddress() const;
-  virtual StringRef getFileFormatName() const;
-  virtual StringRef getObjectType() const { return "ELF"; }
-  virtual unsigned getArch() const;
-  virtual StringRef getLoadName() const;
+
+  uint8_t getBytesInAddress() const override;
+  StringRef getFileFormatName() const override;
+  unsigned getArch() const override;
+  StringRef getLoadName() const override;
 
   const ELFFile<ELFT> *getELFFile() const { return &EF; }
 
@@ -208,10 +207,8 @@ typedef ELFObjectFile<ELFType<support::big, 2, false> > ELF32BEObjectFile;
 typedef ELFObjectFile<ELFType<support::big, 2, true> > ELF64BEObjectFile;
 
 template <class ELFT>
-error_code ELFObjectFile<ELFT>::getSymbolNext(DataRefImpl Symb,
-                                              SymbolRef &Result) const {
-  Result = SymbolRef(toDRI(++toELFSymIter(Symb)), this);
-  return object_error::success;
+void ELFObjectFile<ELFT>::moveSymbolNext(DataRefImpl &Symb) const {
+  Symb = toDRI(++toELFSymIter(Symb));
 }
 
 template <class ELFT>
@@ -239,43 +236,9 @@ error_code ELFObjectFile<ELFT>::getSymbolVersion(SymbolRef SymRef,
 }
 
 template <class ELFT>
-error_code ELFObjectFile<ELFT>::getSymbolFileOffset(DataRefImpl Symb,
-                                                    uint64_t &Result) const {
-  const Elf_Sym *ESym = getSymbol(Symb);
-  const Elf_Shdr *ESec;
-  switch (EF.getSymbolTableIndex(ESym)) {
-  case ELF::SHN_COMMON:
-  // Unintialized symbols have no offset in the object file
-  case ELF::SHN_UNDEF:
-    Result = UnknownAddressOrSize;
-    return object_error::success;
-  case ELF::SHN_ABS:
-    Result = ESym->st_value;
-    return object_error::success;
-  default:
-    ESec = EF.getSection(ESym);
-  }
-
-  switch (ESym->getType()) {
-  case ELF::STT_SECTION:
-    Result = ESec ? ESec->sh_offset : UnknownAddressOrSize;
-    return object_error::success;
-  case ELF::STT_FUNC:
-  case ELF::STT_OBJECT:
-  case ELF::STT_NOTYPE:
-    Result = ESym->st_value + (ESec ? ESec->sh_offset : 0);
-    return object_error::success;
-  default:
-    Result = UnknownAddressOrSize;
-    return object_error::success;
-  }
-}
-
-template <class ELFT>
 error_code ELFObjectFile<ELFT>::getSymbolAddress(DataRefImpl Symb,
                                                  uint64_t &Result) const {
   const Elf_Sym *ESym = getSymbol(Symb);
-  const Elf_Shdr *ESec;
   switch (EF.getSymbolTableIndex(ESym)) {
   case ELF::SHN_COMMON:
   case ELF::SHN_UNDEF:
@@ -285,38 +248,20 @@ error_code ELFObjectFile<ELFT>::getSymbolAddress(DataRefImpl Symb,
     Result = ESym->st_value;
     return object_error::success;
   default:
-    ESec = EF.getSection(ESym);
+    break;
   }
 
-  switch (ESym->getType()) {
-  case ELF::STT_SECTION:
-    Result = ESec ? ESec->sh_addr : UnknownAddressOrSize;
-    return object_error::success;
-  case ELF::STT_FUNC:
-  case ELF::STT_OBJECT:
-  case ELF::STT_NOTYPE:
-    bool IsRelocatable;
-    switch (EF.getHeader()->e_type) {
-    case ELF::ET_EXEC:
-    case ELF::ET_DYN:
-      IsRelocatable = false;
-      break;
-    default:
-      IsRelocatable = true;
-    }
-    Result = ESym->st_value;
+  const Elf_Ehdr *Header = EF.getHeader();
+  Result = ESym->st_value;
 
-    // Clear the ARM/Thumb indicator flag.
-    if (EF.getHeader()->e_machine == ELF::EM_ARM)
-      Result &= ~1;
+  // Clear the ARM/Thumb indicator flag.
+  if (Header->e_machine == ELF::EM_ARM && ESym->getType() == ELF::STT_FUNC)
+    Result &= ~1;
 
-    if (IsRelocatable && ESec != 0)
-      Result += ESec->sh_addr;
-    return object_error::success;
-  default:
-    Result = UnknownAddressOrSize;
-    return object_error::success;
-  }
+  if (Header->e_type == ELF::ET_REL)
+    Result += EF.getSection(ESym)->sh_addr;
+
+  return object_error::success;
 }
 
 template <class ELFT>
@@ -368,11 +313,11 @@ error_code ELFObjectFile<ELFT>::getSymbolType(DataRefImpl Symb,
 }
 
 template <class ELFT>
-error_code ELFObjectFile<ELFT>::getSymbolFlags(DataRefImpl Symb,
-                                               uint32_t &Result) const {
-  const Elf_Sym *ESym = getSymbol(Symb);
+uint32_t ELFObjectFile<ELFT>::getSymbolFlags(DataRefImpl Symb) const {
+  Elf_Sym_Iter EIter = toELFSymIter(Symb);
+  const Elf_Sym *ESym = &*EIter;
 
-  Result = SymbolRef::SF_None;
+  uint32_t Result = SymbolRef::SF_None;
 
   if (ESym->getBinding() != ELF::STB_LOCAL)
     Result |= SymbolRef::SF_Global;
@@ -384,7 +329,7 @@ error_code ELFObjectFile<ELFT>::getSymbolFlags(DataRefImpl Symb,
     Result |= SymbolRef::SF_Absolute;
 
   if (ESym->getType() == ELF::STT_FILE || ESym->getType() == ELF::STT_SECTION ||
-      ESym == &*EF.begin_symbols())
+      EIter == EF.begin_symbols() || EIter == EF.begin_dynamic_symbols())
     Result |= SymbolRef::SF_FormatSpecific;
 
   if (EF.getSymbolTableIndex(ESym) == ELF::SHN_UNDEF)
@@ -394,10 +339,7 @@ error_code ELFObjectFile<ELFT>::getSymbolFlags(DataRefImpl Symb,
       EF.getSymbolTableIndex(ESym) == ELF::SHN_COMMON)
     Result |= SymbolRef::SF_Common;
 
-  if (ESym->getType() == ELF::STT_TLS)
-    Result |= SymbolRef::SF_ThreadLocal;
-
-  return object_error::success;
+  return Result;
 }
 
 template <class ELFT>
@@ -406,7 +348,7 @@ error_code ELFObjectFile<ELFT>::getSymbolSection(DataRefImpl Symb,
   const Elf_Sym *ESym = getSymbol(Symb);
   const Elf_Shdr *ESec = EF.getSection(ESym);
   if (!ESec)
-    Res = end_sections();
+    Res = section_end();
   else {
     DataRefImpl Sec;
     Sec.p = reinterpret_cast<intptr_t>(ESec);
@@ -416,18 +358,8 @@ error_code ELFObjectFile<ELFT>::getSymbolSection(DataRefImpl Symb,
 }
 
 template <class ELFT>
-error_code ELFObjectFile<ELFT>::getSymbolValue(DataRefImpl Symb,
-                                               uint64_t &Val) const {
-  const Elf_Sym *ESym = getSymbol(Symb);
-  Val = ESym->st_value;
-  return object_error::success;
-}
-
-template <class ELFT>
-error_code ELFObjectFile<ELFT>::getSectionNext(DataRefImpl Sec,
-                                               SectionRef &Result) const {
-  Result = SectionRef(toDRI(++toELFShdrIter(Sec)), this);
-  return object_error::success;
+void ELFObjectFile<ELFT>::moveSectionNext(DataRefImpl &Sec) const {
+  Sec = toDRI(++toELFShdrIter(Sec));
 }
 
 template <class ELFT>
@@ -566,12 +498,12 @@ template <class ELFT>
 section_iterator
 ELFObjectFile<ELFT>::getRelocatedSection(DataRefImpl Sec) const {
   if (EF.getHeader()->e_type != ELF::ET_REL)
-    return end_sections();
+    return section_end();
 
   Elf_Shdr_Iter EShdr = toELFShdrIter(Sec);
   uintX_t Type = EShdr->sh_type;
   if (Type != ELF::SHT_REL && Type != ELF::SHT_RELA)
-    return end_sections();
+    return section_end();
 
   const Elf_Shdr *R = EF.getSection(EShdr->sh_info);
   return section_iterator(SectionRef(toDRI(R), this));
@@ -579,11 +511,8 @@ ELFObjectFile<ELFT>::getRelocatedSection(DataRefImpl Sec) const {
 
 // Relocations
 template <class ELFT>
-error_code ELFObjectFile<ELFT>::getRelocationNext(DataRefImpl Rel,
-                                                  RelocationRef &Result) const {
+void ELFObjectFile<ELFT>::moveRelocationNext(DataRefImpl &Rel) const {
   ++Rel.d.b;
-  Result = RelocationRef(Rel, this);
-  return object_error::success;
 }
 
 template <class ELFT>
@@ -604,7 +533,7 @@ ELFObjectFile<ELFT>::getRelocationSymbol(DataRefImpl Rel) const {
   }
   }
   if (!symbolIdx)
-    return end_symbols();
+    return symbol_end();
 
   const Elf_Shdr *SymSec = EF.getSection(sec->sh_link);
 
@@ -626,13 +555,25 @@ ELFObjectFile<ELFT>::getRelocationSymbol(DataRefImpl Rel) const {
 template <class ELFT>
 error_code ELFObjectFile<ELFT>::getRelocationAddress(DataRefImpl Rel,
                                                      uint64_t &Result) const {
-  Result = getROffset(Rel);
+  uint64_t ROffset = getROffset(Rel);
+  const Elf_Ehdr *Header = EF.getHeader();
+
+  if (Header->e_type == ELF::ET_REL) {
+    const Elf_Shdr *RelocationSec = getRelSection(Rel);
+    const Elf_Shdr *RelocatedSec = EF.getSection(RelocationSec->sh_info);
+    Result = ROffset + RelocatedSec->sh_addr;
+  } else {
+    Result = ROffset;
+  }
+
   return object_error::success;
 }
 
 template <class ELFT>
 error_code ELFObjectFile<ELFT>::getRelocationOffset(DataRefImpl Rel,
                                                     uint64_t &Result) const {
+  assert(EF.getHeader()->e_type == ELF::ET_REL &&
+         "Only relocatable object files have relocation offsets");
   Result = getROffset(Rel);
   return object_error::success;
 }
@@ -822,32 +763,32 @@ ELFObjectFile<ELFT>::ELFObjectFile(MemoryBuffer *Object, error_code &ec,
       EF(Object, ec) {}
 
 template <class ELFT>
-symbol_iterator ELFObjectFile<ELFT>::begin_symbols() const {
-  return symbol_iterator(SymbolRef(toDRI(EF.begin_symbols()), this));
+basic_symbol_iterator ELFObjectFile<ELFT>::symbol_begin_impl() const {
+  return basic_symbol_iterator(SymbolRef(toDRI(EF.begin_symbols()), this));
 }
 
 template <class ELFT>
-symbol_iterator ELFObjectFile<ELFT>::end_symbols() const {
-  return symbol_iterator(SymbolRef(toDRI(EF.end_symbols()), this));
+basic_symbol_iterator ELFObjectFile<ELFT>::symbol_end_impl() const {
+  return basic_symbol_iterator(SymbolRef(toDRI(EF.end_symbols()), this));
 }
 
 template <class ELFT>
-symbol_iterator ELFObjectFile<ELFT>::begin_dynamic_symbols() const {
+symbol_iterator ELFObjectFile<ELFT>::dynamic_symbol_begin() const {
   return symbol_iterator(SymbolRef(toDRI(EF.begin_dynamic_symbols()), this));
 }
 
 template <class ELFT>
-symbol_iterator ELFObjectFile<ELFT>::end_dynamic_symbols() const {
+symbol_iterator ELFObjectFile<ELFT>::dynamic_symbol_end() const {
   return symbol_iterator(SymbolRef(toDRI(EF.end_dynamic_symbols()), this));
 }
 
 template <class ELFT>
-section_iterator ELFObjectFile<ELFT>::begin_sections() const {
+section_iterator ELFObjectFile<ELFT>::section_begin() const {
   return section_iterator(SectionRef(toDRI(EF.begin_sections()), this));
 }
 
 template <class ELFT>
-section_iterator ELFObjectFile<ELFT>::end_sections() const {
+section_iterator ELFObjectFile<ELFT>::section_end() const {
   return section_iterator(SectionRef(toDRI(EF.end_sections()), this));
 }
 
@@ -865,7 +806,7 @@ StringRef ELFObjectFile<ELFT>::getLoadName() const {
 }
 
 template <class ELFT>
-library_iterator ELFObjectFile<ELFT>::begin_libraries_needed() const {
+library_iterator ELFObjectFile<ELFT>::needed_library_begin() const {
   Elf_Dyn_Iter DI = EF.begin_dynamic_table();
   Elf_Dyn_Iter DE = EF.end_dynamic_table();
 
@@ -898,7 +839,7 @@ error_code ELFObjectFile<ELFT>::getLibraryPath(DataRefImpl Data,
 }
 
 template <class ELFT>
-library_iterator ELFObjectFile<ELFT>::end_libraries_needed() const {
+library_iterator ELFObjectFile<ELFT>::needed_library_end() const {
   return library_iterator(LibraryRef(toDRI(EF.end_dynamic_table()), this));
 }
 
@@ -944,6 +885,8 @@ StringRef ELFObjectFile<ELFT>::getFileFormatName() const {
       return "ELF64-s390";
     case ELF::EM_SPARCV9:
       return "ELF64-sparc";
+    case ELF::EM_MIPS:
+      return "ELF64-mips";
     default:
       return "ELF64-unknown";
     }
@@ -988,8 +931,8 @@ unsigned ELFObjectFile<ELFT>::getArch() const {
 
 /// FIXME: Maybe we should have a base ElfObjectFile that is not a template
 /// and make these member functions?
-static inline error_code getELFRelocationAddend(const RelocationRef R,
-                                                int64_t &Addend) {
+inline error_code getELFRelocationAddend(const RelocationRef R,
+                                         int64_t &Addend) {
   const ObjectFile *Obj = R.getObjectFile();
   DataRefImpl DRI = R.getRawDataRefImpl();
   // Little-endian 32-bit
@@ -1011,12 +954,30 @@ static inline error_code getELFRelocationAddend(const RelocationRef R,
   llvm_unreachable("Object passed to getELFRelocationAddend() is not ELF");
 }
 
+inline std::pair<symbol_iterator, symbol_iterator>
+getELFDynamicSymbolIterators(SymbolicFile *Obj) {
+  if (const ELF32LEObjectFile *ELF = dyn_cast<ELF32LEObjectFile>(Obj))
+    return std::make_pair(ELF->dynamic_symbol_begin(),
+                          ELF->dynamic_symbol_end());
+  if (const ELF64LEObjectFile *ELF = dyn_cast<ELF64LEObjectFile>(Obj))
+    return std::make_pair(ELF->dynamic_symbol_begin(),
+                          ELF->dynamic_symbol_end());
+  if (const ELF32BEObjectFile *ELF = dyn_cast<ELF32BEObjectFile>(Obj))
+    return std::make_pair(ELF->dynamic_symbol_begin(),
+                          ELF->dynamic_symbol_end());
+  if (const ELF64BEObjectFile *ELF = cast<ELF64BEObjectFile>(Obj))
+    return std::make_pair(ELF->dynamic_symbol_begin(),
+                          ELF->dynamic_symbol_end());
+
+  llvm_unreachable(
+      "Object passed to getELFDynamicSymbolIterators() is not ELF");
+}
+
 /// This is a generic interface for retrieving GNU symbol version
 /// information from an ELFObjectFile.
-static inline error_code GetELFSymbolVersion(const ObjectFile *Obj,
-                                             const SymbolRef &Sym,
-                                             StringRef &Version,
-                                             bool &IsDefault) {
+inline error_code GetELFSymbolVersion(const ObjectFile *Obj,
+                                      const SymbolRef &Sym, StringRef &Version,
+                                      bool &IsDefault) {
   // Little-endian 32-bit
   if (const ELF32LEObjectFile *ELFObj = dyn_cast<ELF32LEObjectFile>(Obj))
     return ELFObj->getSymbolVersion(Sym, Version, IsDefault);

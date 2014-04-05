@@ -12,10 +12,10 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/Object/ObjectFile.h"
-#include "llvm/ADT/OwningPtr.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/MemoryBuffer.h"
+#include "llvm/Support/raw_ostream.h"
 #include "llvm/Support/system_error.h"
 
 using namespace llvm;
@@ -25,7 +25,16 @@ void ObjectFile::anchor() { }
 
 ObjectFile::ObjectFile(unsigned int Type, MemoryBuffer *Source,
                        bool BufferOwned)
-    : Binary(Type, Source, BufferOwned) {}
+    : SymbolicFile(Type, Source, BufferOwned) {}
+
+error_code ObjectFile::printSymbolName(raw_ostream &OS,
+                                       DataRefImpl Symb) const {
+  StringRef Name;
+  if (error_code EC = getSymbolName(Symb, Name))
+    return EC;
+  OS << Name;
+  return object_error::success;
+}
 
 error_code ObjectFile::getSymbolAlignment(DataRefImpl DRI,
                                           uint32_t &Result) const {
@@ -77,8 +86,8 @@ ErrorOr<ObjectFile *> ObjectFile::createObjectFile(MemoryBuffer *Object,
 }
 
 ErrorOr<ObjectFile *> ObjectFile::createObjectFile(StringRef ObjectPath) {
-  OwningPtr<MemoryBuffer> File;
+  std::unique_ptr<MemoryBuffer> File;
   if (error_code EC = MemoryBuffer::getFile(ObjectPath, File))
     return EC;
-  return createObjectFile(File.take());
+  return createObjectFile(File.release());
 }

@@ -28,9 +28,9 @@
 #include "llvm/CodeGen/MachineFunctionPass.h"
 #include "llvm/CodeGen/MachineJumpTableInfo.h"
 #include "llvm/CodeGen/MachineModuleInfoImpls.h"
-#include "llvm/DebugInfo.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DataLayout.h"
+#include "llvm/IR/DebugInfo.h"
 #include "llvm/IR/Mangler.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Type.h"
@@ -54,70 +54,6 @@
 #include "llvm/Target/TargetMachine.h"
 #include <cctype>
 using namespace llvm;
-
-/// EmitDwarfRegOp - Emit dwarf register operation.
-void ARMAsmPrinter::EmitDwarfRegOp(const MachineLocation &MLoc,
-                                   bool Indirect) const {
-  const TargetRegisterInfo *RI = TM.getRegisterInfo();
-  if (RI->getDwarfRegNum(MLoc.getReg(), false) != -1) {
-    AsmPrinter::EmitDwarfRegOp(MLoc, Indirect);
-    return;
-  }
-  assert(MLoc.isReg() && !Indirect &&
-         "This doesn't support offset/indirection - implement it if needed");
-  unsigned Reg = MLoc.getReg();
-  if (Reg >= ARM::S0 && Reg <= ARM::S31) {
-    assert(ARM::S0 + 31 == ARM::S31 && "Unexpected ARM S register numbering");
-    // S registers are described as bit-pieces of a register
-    // S[2x] = DW_OP_regx(256 + (x>>1)) DW_OP_bit_piece(32, 0)
-    // S[2x+1] = DW_OP_regx(256 + (x>>1)) DW_OP_bit_piece(32, 32)
-
-    unsigned SReg = Reg - ARM::S0;
-    bool odd = SReg & 0x1;
-    unsigned Rx = 256 + (SReg >> 1);
-
-    OutStreamer.AddComment("DW_OP_regx for S register");
-    EmitInt8(dwarf::DW_OP_regx);
-
-    OutStreamer.AddComment(Twine(SReg));
-    EmitULEB128(Rx);
-
-    if (odd) {
-      OutStreamer.AddComment("DW_OP_bit_piece 32 32");
-      EmitInt8(dwarf::DW_OP_bit_piece);
-      EmitULEB128(32);
-      EmitULEB128(32);
-    } else {
-      OutStreamer.AddComment("DW_OP_bit_piece 32 0");
-      EmitInt8(dwarf::DW_OP_bit_piece);
-      EmitULEB128(32);
-      EmitULEB128(0);
-    }
-  } else if (Reg >= ARM::Q0 && Reg <= ARM::Q15) {
-    assert(ARM::Q0 + 15 == ARM::Q15 && "Unexpected ARM Q register numbering");
-    // Q registers Q0-Q15 are described by composing two D registers together.
-    // Qx = DW_OP_regx(256+2x) DW_OP_piece(8) DW_OP_regx(256+2x+1)
-    // DW_OP_piece(8)
-
-    unsigned QReg = Reg - ARM::Q0;
-    unsigned D1 = 256 + 2 * QReg;
-    unsigned D2 = D1 + 1;
-
-    OutStreamer.AddComment("DW_OP_regx for Q register: D1");
-    EmitInt8(dwarf::DW_OP_regx);
-    EmitULEB128(D1);
-    OutStreamer.AddComment("DW_OP_piece 8");
-    EmitInt8(dwarf::DW_OP_piece);
-    EmitULEB128(8);
-
-    OutStreamer.AddComment("DW_OP_regx for Q register: D2");
-    EmitInt8(dwarf::DW_OP_regx);
-    EmitULEB128(D2);
-    OutStreamer.AddComment("DW_OP_piece 8");
-    EmitInt8(dwarf::DW_OP_piece);
-    EmitULEB128(8);
-  }
-}
 
 void ARMAsmPrinter::EmitFunctionBodyEnd() {
   // Make sure to terminate any constant pools that were at the end
@@ -149,7 +85,7 @@ void ARMAsmPrinter::EmitXXStructor(const Constant *CV) {
                                              ? MCSymbolRefExpr::VK_ARM_TARGET1
                                              : MCSymbolRefExpr::VK_None),
                                             OutContext);
-  
+
   OutStreamer.EmitValue(E, Size);
 }
 
@@ -443,14 +379,12 @@ static bool isThumb(const MCSubtargetInfo& STI) {
 }
 
 void ARMAsmPrinter::emitInlineAsmEnd(const MCSubtargetInfo &StartInfo,
-                                     MCSubtargetInfo *EndInfo) const {
+                                     const MCSubtargetInfo *EndInfo) const {
   // If either end mode is unknown (EndInfo == NULL) or different than
   // the start mode, then restore the start mode.
   const bool WasThumb = isThumb(StartInfo);
   if (EndInfo == NULL || WasThumb != isThumb(*EndInfo)) {
     OutStreamer.EmitAssemblerFlag(WasThumb ? MCAF_Code16 : MCAF_Code32);
-    if (EndInfo)
-      EndInfo->ToggleFeature(ARM::ModeThumb);
   }
 }
 
@@ -476,7 +410,7 @@ void ARMAsmPrinter::EmitStartOfAsmFile(Module &M) {
       // Now any user defined text sections from function attributes.
       for (Module::iterator F = M.begin(), e = M.end(); F != e; ++F)
         if (!F->isDeclaration() && !F->hasAvailableExternallyLinkage())
-          TextSections.insert(TLOFMacho.SectionForGlobal(F, Mang, TM));
+          TextSections.insert(TLOFMacho.SectionForGlobal(F, *Mang, TM));
       // Now the coalescable sections.
       TextSections.insert(TLOFMacho.getTextCoalSection());
       TextSections.insert(TLOFMacho.getConstTextCoalSection());
@@ -488,20 +422,20 @@ void ARMAsmPrinter::EmitStartOfAsmFile(Module &M) {
       if (RelocM == Reloc::DynamicNoPIC) {
         const MCSection *sect =
           OutContext.getMachOSection("__TEXT", "__symbol_stub4",
-                                     MCSectionMachO::S_SYMBOL_STUBS,
+                                     MachO::S_SYMBOL_STUBS,
                                      12, SectionKind::getText());
         OutStreamer.SwitchSection(sect);
       } else {
         const MCSection *sect =
           OutContext.getMachOSection("__TEXT", "__picsymbolstub4",
-                                     MCSectionMachO::S_SYMBOL_STUBS,
+                                     MachO::S_SYMBOL_STUBS,
                                      16, SectionKind::getText());
         OutStreamer.SwitchSection(sect);
       }
       const MCSection *StaticInitSect =
         OutContext.getMachOSection("__TEXT", "__StaticInit",
-                                   MCSectionMachO::S_REGULAR |
-                                   MCSectionMachO::S_ATTR_PURE_INSTRUCTIONS,
+                                   MachO::S_REGULAR |
+                                   MachO::S_ATTR_PURE_INSTRUCTIONS,
                                    SectionKind::getText());
       OutStreamer.SwitchSection(StaticInitSect);
     }
@@ -641,7 +575,7 @@ void ARMAsmPrinter::emitAttributes() {
                     getArchForCPU(CPUString, Subtarget));
 
   // Tag_CPU_arch_profile must have the default value of 0 when "Architecture
-  // profile is not applicable (e.g. pre v7, or cross-profile code)". 
+  // profile is not applicable (e.g. pre v7, or cross-profile code)".
   if (Subtarget->hasV7Ops()) {
     if (Subtarget->isAClass()) {
       ATS.emitAttribute(ARMBuildAttrs::CPU_arch_profile,
@@ -939,7 +873,7 @@ void ARMAsmPrinter::EmitJump2Table(const MachineInstr *MI) {
                                                       OutContext);
     // If this isn't a TBB or TBH, the entries are direct branch instructions.
     if (OffsetWidth == 4) {
-      OutStreamer.EmitInstruction(MCInstBuilder(ARM::t2B)
+      EmitToStreamer(OutStreamer, MCInstBuilder(ARM::t2B)
         .addExpr(MBBSymbolExpr)
         .addImm(ARMCC::AL)
         .addReg(0));
@@ -1091,11 +1025,11 @@ void ARMAsmPrinter::EmitUnwindingInstruction(const MachineInstr *MI) {
         // instruction.
         ATS.emitPad(Offset);
       } else {
-        MI->dump();
-        llvm_unreachable("Unsupported opcode for unwinding information");
+        // Move of SP to a register.  Positive values correspond to an "add"
+        // instruction.
+        ATS.emitMovSP(DstReg, -Offset);
       }
     } else if (DstReg == ARM::SP) {
-      // FIXME: .movsp goes here
       MI->dump();
       llvm_unreachable("Unsupported opcode for unwinding information");
     }
@@ -1105,8 +1039,6 @@ void ARMAsmPrinter::EmitUnwindingInstruction(const MachineInstr *MI) {
     }
   }
 }
-
-extern cl::opt<bool> EnableARMEHABI;
 
 // Simple pseudo-instructions have their lowering (with expansion to real
 // instructions) auto-generated.
@@ -1122,7 +1054,8 @@ void ARMAsmPrinter::EmitInstruction(const MachineInstr *MI) {
   }
 
   // Emit unwinding stuff for frame-related instructions
-  if (EnableARMEHABI && MI->getFlag(MachineInstr::FrameSetup))
+  if (Subtarget->isTargetEHABICompatible() &&
+       MI->getFlag(MachineInstr::FrameSetup))
     EmitUnwindingInstruction(MI);
 
   // Do any auto-generated pseudo lowerings.
@@ -1142,7 +1075,7 @@ void ARMAsmPrinter::EmitInstruction(const MachineInstr *MI) {
   case ARM::t2LEApcrel: {
     // FIXME: Need to also handle globals and externals
     MCSymbol *CPISymbol = GetCPISymbol(MI->getOperand(1).getIndex());
-    OutStreamer.EmitInstruction(MCInstBuilder(MI->getOpcode() ==
+    EmitToStreamer(OutStreamer, MCInstBuilder(MI->getOpcode() ==
                                               ARM::t2LEApcrel ? ARM::t2ADR
                   : (MI->getOpcode() == ARM::tLEApcrel ? ARM::tADR
                      : ARM::ADR))
@@ -1159,7 +1092,7 @@ void ARMAsmPrinter::EmitInstruction(const MachineInstr *MI) {
     MCSymbol *JTIPICSymbol =
       GetARMJTIPICJumpTableLabel2(MI->getOperand(1).getIndex(),
                                   MI->getOperand(2).getImm());
-    OutStreamer.EmitInstruction(MCInstBuilder(MI->getOpcode() ==
+    EmitToStreamer(OutStreamer, MCInstBuilder(MI->getOpcode() ==
                                               ARM::t2LEApcrelJT ? ARM::t2ADR
                   : (MI->getOpcode() == ARM::tLEApcrelJT ? ARM::tADR
                      : ARM::ADR))
@@ -1173,7 +1106,7 @@ void ARMAsmPrinter::EmitInstruction(const MachineInstr *MI) {
   // Darwin call instructions are just normal call instructions with different
   // clobber semantics (they clobber R9).
   case ARM::BX_CALL: {
-    OutStreamer.EmitInstruction(MCInstBuilder(ARM::MOVr)
+    EmitToStreamer(OutStreamer, MCInstBuilder(ARM::MOVr)
       .addReg(ARM::LR)
       .addReg(ARM::PC)
       // Add predicate operands.
@@ -1182,19 +1115,19 @@ void ARMAsmPrinter::EmitInstruction(const MachineInstr *MI) {
       // Add 's' bit operand (always reg0 for this)
       .addReg(0));
 
-    OutStreamer.EmitInstruction(MCInstBuilder(ARM::BX)
+    EmitToStreamer(OutStreamer, MCInstBuilder(ARM::BX)
       .addReg(MI->getOperand(0).getReg()));
     return;
   }
   case ARM::tBX_CALL: {
-    OutStreamer.EmitInstruction(MCInstBuilder(ARM::tMOVr)
+    EmitToStreamer(OutStreamer, MCInstBuilder(ARM::tMOVr)
       .addReg(ARM::LR)
       .addReg(ARM::PC)
       // Add predicate operands.
       .addImm(ARMCC::AL)
       .addReg(0));
 
-    OutStreamer.EmitInstruction(MCInstBuilder(ARM::tBX)
+    EmitToStreamer(OutStreamer, MCInstBuilder(ARM::tBX)
       .addReg(MI->getOperand(0).getReg())
       // Add predicate operands.
       .addImm(ARMCC::AL)
@@ -1202,7 +1135,7 @@ void ARMAsmPrinter::EmitInstruction(const MachineInstr *MI) {
     return;
   }
   case ARM::BMOVPCRX_CALL: {
-    OutStreamer.EmitInstruction(MCInstBuilder(ARM::MOVr)
+    EmitToStreamer(OutStreamer, MCInstBuilder(ARM::MOVr)
       .addReg(ARM::LR)
       .addReg(ARM::PC)
       // Add predicate operands.
@@ -1211,7 +1144,7 @@ void ARMAsmPrinter::EmitInstruction(const MachineInstr *MI) {
       // Add 's' bit operand (always reg0 for this)
       .addReg(0));
 
-    OutStreamer.EmitInstruction(MCInstBuilder(ARM::MOVr)
+    EmitToStreamer(OutStreamer, MCInstBuilder(ARM::MOVr)
       .addReg(ARM::PC)
       .addReg(MI->getOperand(0).getReg())
       // Add predicate operands.
@@ -1222,7 +1155,7 @@ void ARMAsmPrinter::EmitInstruction(const MachineInstr *MI) {
     return;
   }
   case ARM::BMOVPCB_CALL: {
-    OutStreamer.EmitInstruction(MCInstBuilder(ARM::MOVr)
+    EmitToStreamer(OutStreamer, MCInstBuilder(ARM::MOVr)
       .addReg(ARM::LR)
       .addReg(ARM::PC)
       // Add predicate operands.
@@ -1234,7 +1167,7 @@ void ARMAsmPrinter::EmitInstruction(const MachineInstr *MI) {
     const GlobalValue *GV = MI->getOperand(0).getGlobal();
     MCSymbol *GVSym = getSymbol(GV);
     const MCExpr *GVSymExpr = MCSymbolRefExpr::Create(GVSym, OutContext);
-    OutStreamer.EmitInstruction(MCInstBuilder(ARM::Bcc)
+    EmitToStreamer(OutStreamer, MCInstBuilder(ARM::Bcc)
       .addExpr(GVSymExpr)
       // Add predicate operands.
       .addImm(ARMCC::AL)
@@ -1269,7 +1202,7 @@ void ARMAsmPrinter::EmitInstruction(const MachineInstr *MI) {
     TmpInst.addOperand(MCOperand::CreateReg(0));
     // Add 's' bit operand (always reg0 for this)
     TmpInst.addOperand(MCOperand::CreateReg(0));
-    OutStreamer.EmitInstruction(TmpInst);
+    EmitToStreamer(OutStreamer, TmpInst);
     return;
   }
   case ARM::MOVTi16_ga_pcrel:
@@ -1301,7 +1234,7 @@ void ARMAsmPrinter::EmitInstruction(const MachineInstr *MI) {
     TmpInst.addOperand(MCOperand::CreateReg(0));
     // Add 's' bit operand (always reg0 for this)
     TmpInst.addOperand(MCOperand::CreateReg(0));
-    OutStreamer.EmitInstruction(TmpInst);
+    EmitToStreamer(OutStreamer, TmpInst);
     return;
   }
   case ARM::tPICADD: {
@@ -1316,7 +1249,7 @@ void ARMAsmPrinter::EmitInstruction(const MachineInstr *MI) {
                           OutContext));
 
     // Form and emit the add.
-    OutStreamer.EmitInstruction(MCInstBuilder(ARM::tADDhirr)
+    EmitToStreamer(OutStreamer, MCInstBuilder(ARM::tADDhirr)
       .addReg(MI->getOperand(0).getReg())
       .addReg(MI->getOperand(0).getReg())
       .addReg(ARM::PC)
@@ -1337,7 +1270,7 @@ void ARMAsmPrinter::EmitInstruction(const MachineInstr *MI) {
                           OutContext));
 
     // Form and emit the add.
-    OutStreamer.EmitInstruction(MCInstBuilder(ARM::ADDrr)
+    EmitToStreamer(OutStreamer, MCInstBuilder(ARM::ADDrr)
       .addReg(MI->getOperand(0).getReg())
       .addReg(ARM::PC)
       .addReg(MI->getOperand(1).getReg())
@@ -1381,7 +1314,7 @@ void ARMAsmPrinter::EmitInstruction(const MachineInstr *MI) {
     case ARM::PICLDRSB: Opcode = ARM::LDRSB; break;
     case ARM::PICLDRSH: Opcode = ARM::LDRSH; break;
     }
-    OutStreamer.EmitInstruction(MCInstBuilder(Opcode)
+    EmitToStreamer(OutStreamer, MCInstBuilder(Opcode)
       .addReg(MI->getOperand(0).getReg())
       .addReg(ARM::PC)
       .addReg(MI->getOperand(1).getReg())
@@ -1418,7 +1351,7 @@ void ARMAsmPrinter::EmitInstruction(const MachineInstr *MI) {
   }
   case ARM::t2BR_JT: {
     // Lower and emit the instruction itself, then the jump table following it.
-    OutStreamer.EmitInstruction(MCInstBuilder(ARM::tMOVr)
+    EmitToStreamer(OutStreamer, MCInstBuilder(ARM::tMOVr)
       .addReg(ARM::PC)
       .addReg(MI->getOperand(0).getReg())
       // Add predicate operands.
@@ -1431,7 +1364,7 @@ void ARMAsmPrinter::EmitInstruction(const MachineInstr *MI) {
   }
   case ARM::t2TBB_JT: {
     // Lower and emit the instruction itself, then the jump table following it.
-    OutStreamer.EmitInstruction(MCInstBuilder(ARM::t2TBB)
+    EmitToStreamer(OutStreamer, MCInstBuilder(ARM::t2TBB)
       .addReg(ARM::PC)
       .addReg(MI->getOperand(0).getReg())
       // Add predicate operands.
@@ -1446,7 +1379,7 @@ void ARMAsmPrinter::EmitInstruction(const MachineInstr *MI) {
   }
   case ARM::t2TBH_JT: {
     // Lower and emit the instruction itself, then the jump table following it.
-    OutStreamer.EmitInstruction(MCInstBuilder(ARM::t2TBH)
+    EmitToStreamer(OutStreamer, MCInstBuilder(ARM::t2TBH)
       .addReg(ARM::PC)
       .addReg(MI->getOperand(0).getReg())
       // Add predicate operands.
@@ -1473,7 +1406,7 @@ void ARMAsmPrinter::EmitInstruction(const MachineInstr *MI) {
     // Add 's' bit operand (always reg0 for this)
     if (Opc == ARM::MOVr)
       TmpInst.addOperand(MCOperand::CreateReg(0));
-    OutStreamer.EmitInstruction(TmpInst);
+    EmitToStreamer(OutStreamer, TmpInst);
 
     // Make sure the Thumb jump table is 4-byte aligned.
     if (Opc == ARM::tMOVr)
@@ -1503,7 +1436,7 @@ void ARMAsmPrinter::EmitInstruction(const MachineInstr *MI) {
     // Add predicate operands.
     TmpInst.addOperand(MCOperand::CreateImm(ARMCC::AL));
     TmpInst.addOperand(MCOperand::CreateReg(0));
-    OutStreamer.EmitInstruction(TmpInst);
+    EmitToStreamer(OutStreamer, TmpInst);
 
     // Output the data for the jump table itself
     EmitJumpTable(MI);
@@ -1512,7 +1445,7 @@ void ARMAsmPrinter::EmitInstruction(const MachineInstr *MI) {
   case ARM::BR_JTadd: {
     // Lower and emit the instruction itself, then the jump table following it.
     // add pc, target, idx
-    OutStreamer.EmitInstruction(MCInstBuilder(ARM::ADDrr)
+    EmitToStreamer(OutStreamer, MCInstBuilder(ARM::ADDrr)
       .addReg(ARM::PC)
       .addReg(MI->getOperand(0).getReg())
       .addReg(MI->getOperand(1).getReg())
@@ -1572,14 +1505,14 @@ void ARMAsmPrinter::EmitInstruction(const MachineInstr *MI) {
     unsigned ValReg = MI->getOperand(1).getReg();
     MCSymbol *Label = GetARMSJLJEHLabel();
     OutStreamer.AddComment("eh_setjmp begin");
-    OutStreamer.EmitInstruction(MCInstBuilder(ARM::tMOVr)
+    EmitToStreamer(OutStreamer, MCInstBuilder(ARM::tMOVr)
       .addReg(ValReg)
       .addReg(ARM::PC)
       // Predicate.
       .addImm(ARMCC::AL)
       .addReg(0));
 
-    OutStreamer.EmitInstruction(MCInstBuilder(ARM::tADDi3)
+    EmitToStreamer(OutStreamer, MCInstBuilder(ARM::tADDi3)
       .addReg(ValReg)
       // 's' bit operand
       .addReg(ARM::CPSR)
@@ -1589,7 +1522,7 @@ void ARMAsmPrinter::EmitInstruction(const MachineInstr *MI) {
       .addImm(ARMCC::AL)
       .addReg(0));
 
-    OutStreamer.EmitInstruction(MCInstBuilder(ARM::tSTRi)
+    EmitToStreamer(OutStreamer, MCInstBuilder(ARM::tSTRi)
       .addReg(ValReg)
       .addReg(SrcReg)
       // The offset immediate is #4. The operand value is scaled by 4 for the
@@ -1599,7 +1532,7 @@ void ARMAsmPrinter::EmitInstruction(const MachineInstr *MI) {
       .addImm(ARMCC::AL)
       .addReg(0));
 
-    OutStreamer.EmitInstruction(MCInstBuilder(ARM::tMOVi8)
+    EmitToStreamer(OutStreamer, MCInstBuilder(ARM::tMOVi8)
       .addReg(ARM::R0)
       .addReg(ARM::CPSR)
       .addImm(0)
@@ -1608,13 +1541,13 @@ void ARMAsmPrinter::EmitInstruction(const MachineInstr *MI) {
       .addReg(0));
 
     const MCExpr *SymbolExpr = MCSymbolRefExpr::Create(Label, OutContext);
-    OutStreamer.EmitInstruction(MCInstBuilder(ARM::tB)
+    EmitToStreamer(OutStreamer, MCInstBuilder(ARM::tB)
       .addExpr(SymbolExpr)
       .addImm(ARMCC::AL)
       .addReg(0));
 
     OutStreamer.AddComment("eh_setjmp end");
-    OutStreamer.EmitInstruction(MCInstBuilder(ARM::tMOVi8)
+    EmitToStreamer(OutStreamer, MCInstBuilder(ARM::tMOVi8)
       .addReg(ARM::R0)
       .addReg(ARM::CPSR)
       .addImm(1)
@@ -1638,7 +1571,7 @@ void ARMAsmPrinter::EmitInstruction(const MachineInstr *MI) {
     unsigned ValReg = MI->getOperand(1).getReg();
 
     OutStreamer.AddComment("eh_setjmp begin");
-    OutStreamer.EmitInstruction(MCInstBuilder(ARM::ADDri)
+    EmitToStreamer(OutStreamer, MCInstBuilder(ARM::ADDri)
       .addReg(ValReg)
       .addReg(ARM::PC)
       .addImm(8)
@@ -1648,7 +1581,7 @@ void ARMAsmPrinter::EmitInstruction(const MachineInstr *MI) {
       // 's' bit operand (always reg0 for this).
       .addReg(0));
 
-    OutStreamer.EmitInstruction(MCInstBuilder(ARM::STRi12)
+    EmitToStreamer(OutStreamer, MCInstBuilder(ARM::STRi12)
       .addReg(ValReg)
       .addReg(SrcReg)
       .addImm(4)
@@ -1656,7 +1589,7 @@ void ARMAsmPrinter::EmitInstruction(const MachineInstr *MI) {
       .addImm(ARMCC::AL)
       .addReg(0));
 
-    OutStreamer.EmitInstruction(MCInstBuilder(ARM::MOVi)
+    EmitToStreamer(OutStreamer, MCInstBuilder(ARM::MOVi)
       .addReg(ARM::R0)
       .addImm(0)
       // Predicate.
@@ -1665,7 +1598,7 @@ void ARMAsmPrinter::EmitInstruction(const MachineInstr *MI) {
       // 's' bit operand (always reg0 for this).
       .addReg(0));
 
-    OutStreamer.EmitInstruction(MCInstBuilder(ARM::ADDri)
+    EmitToStreamer(OutStreamer, MCInstBuilder(ARM::ADDri)
       .addReg(ARM::PC)
       .addReg(ARM::PC)
       .addImm(0)
@@ -1676,7 +1609,7 @@ void ARMAsmPrinter::EmitInstruction(const MachineInstr *MI) {
       .addReg(0));
 
     OutStreamer.AddComment("eh_setjmp end");
-    OutStreamer.EmitInstruction(MCInstBuilder(ARM::MOVi)
+    EmitToStreamer(OutStreamer, MCInstBuilder(ARM::MOVi)
       .addReg(ARM::R0)
       .addImm(1)
       // Predicate.
@@ -1693,7 +1626,7 @@ void ARMAsmPrinter::EmitInstruction(const MachineInstr *MI) {
     // bx $scratch
     unsigned SrcReg = MI->getOperand(0).getReg();
     unsigned ScratchReg = MI->getOperand(1).getReg();
-    OutStreamer.EmitInstruction(MCInstBuilder(ARM::LDRi12)
+    EmitToStreamer(OutStreamer, MCInstBuilder(ARM::LDRi12)
       .addReg(ARM::SP)
       .addReg(SrcReg)
       .addImm(8)
@@ -1701,7 +1634,7 @@ void ARMAsmPrinter::EmitInstruction(const MachineInstr *MI) {
       .addImm(ARMCC::AL)
       .addReg(0));
 
-    OutStreamer.EmitInstruction(MCInstBuilder(ARM::LDRi12)
+    EmitToStreamer(OutStreamer, MCInstBuilder(ARM::LDRi12)
       .addReg(ScratchReg)
       .addReg(SrcReg)
       .addImm(4)
@@ -1709,7 +1642,7 @@ void ARMAsmPrinter::EmitInstruction(const MachineInstr *MI) {
       .addImm(ARMCC::AL)
       .addReg(0));
 
-    OutStreamer.EmitInstruction(MCInstBuilder(ARM::LDRi12)
+    EmitToStreamer(OutStreamer, MCInstBuilder(ARM::LDRi12)
       .addReg(ARM::R7)
       .addReg(SrcReg)
       .addImm(0)
@@ -1717,7 +1650,7 @@ void ARMAsmPrinter::EmitInstruction(const MachineInstr *MI) {
       .addImm(ARMCC::AL)
       .addReg(0));
 
-    OutStreamer.EmitInstruction(MCInstBuilder(ARM::BX)
+    EmitToStreamer(OutStreamer, MCInstBuilder(ARM::BX)
       .addReg(ScratchReg)
       // Predicate.
       .addImm(ARMCC::AL)
@@ -1732,7 +1665,7 @@ void ARMAsmPrinter::EmitInstruction(const MachineInstr *MI) {
     // bx $scratch
     unsigned SrcReg = MI->getOperand(0).getReg();
     unsigned ScratchReg = MI->getOperand(1).getReg();
-    OutStreamer.EmitInstruction(MCInstBuilder(ARM::tLDRi)
+    EmitToStreamer(OutStreamer, MCInstBuilder(ARM::tLDRi)
       .addReg(ScratchReg)
       .addReg(SrcReg)
       // The offset immediate is #8. The operand value is scaled by 4 for the
@@ -1742,14 +1675,14 @@ void ARMAsmPrinter::EmitInstruction(const MachineInstr *MI) {
       .addImm(ARMCC::AL)
       .addReg(0));
 
-    OutStreamer.EmitInstruction(MCInstBuilder(ARM::tMOVr)
+    EmitToStreamer(OutStreamer, MCInstBuilder(ARM::tMOVr)
       .addReg(ARM::SP)
       .addReg(ScratchReg)
       // Predicate.
       .addImm(ARMCC::AL)
       .addReg(0));
 
-    OutStreamer.EmitInstruction(MCInstBuilder(ARM::tLDRi)
+    EmitToStreamer(OutStreamer, MCInstBuilder(ARM::tLDRi)
       .addReg(ScratchReg)
       .addReg(SrcReg)
       .addImm(1)
@@ -1757,7 +1690,7 @@ void ARMAsmPrinter::EmitInstruction(const MachineInstr *MI) {
       .addImm(ARMCC::AL)
       .addReg(0));
 
-    OutStreamer.EmitInstruction(MCInstBuilder(ARM::tLDRi)
+    EmitToStreamer(OutStreamer, MCInstBuilder(ARM::tLDRi)
       .addReg(ARM::R7)
       .addReg(SrcReg)
       .addImm(0)
@@ -1765,7 +1698,7 @@ void ARMAsmPrinter::EmitInstruction(const MachineInstr *MI) {
       .addImm(ARMCC::AL)
       .addReg(0));
 
-    OutStreamer.EmitInstruction(MCInstBuilder(ARM::tBX)
+    EmitToStreamer(OutStreamer, MCInstBuilder(ARM::tBX)
       .addReg(ScratchReg)
       // Predicate.
       .addImm(ARMCC::AL)
@@ -1777,7 +1710,7 @@ void ARMAsmPrinter::EmitInstruction(const MachineInstr *MI) {
   MCInst TmpInst;
   LowerARMMachineInstrToMCInst(MI, TmpInst, *this);
 
-  OutStreamer.EmitInstruction(TmpInst);
+  EmitToStreamer(OutStreamer, TmpInst);
 }
 
 //===----------------------------------------------------------------------===//
@@ -1786,6 +1719,8 @@ void ARMAsmPrinter::EmitInstruction(const MachineInstr *MI) {
 
 // Force static initialization.
 extern "C" void LLVMInitializeARMAsmPrinter() {
-  RegisterAsmPrinter<ARMAsmPrinter> X(TheARMTarget);
-  RegisterAsmPrinter<ARMAsmPrinter> Y(TheThumbTarget);
+  RegisterAsmPrinter<ARMAsmPrinter> X(TheARMLETarget);
+  RegisterAsmPrinter<ARMAsmPrinter> Y(TheARMBETarget);
+  RegisterAsmPrinter<ARMAsmPrinter> A(TheThumbLETarget);
+  RegisterAsmPrinter<ARMAsmPrinter> B(TheThumbBETarget);
 }

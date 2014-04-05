@@ -12,9 +12,7 @@
 
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/PointerUnion.h"
-#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
-#include "llvm/Support/Compiler.h"
 
 namespace llvm {
   
@@ -70,7 +68,6 @@ public:
     return *this;
   }
 
-#if LLVM_HAS_RVALUE_REFERENCES
   TinyPtrVector(TinyPtrVector &&RHS) : Val(RHS.Val) {
     RHS.Val = (EltTy)0;
   }
@@ -98,7 +95,6 @@ public:
     RHS.Val = (EltTy)0;
     return *this;
   }
-#endif
 
   // implicit conversion operator to ArrayRef.
   operator ArrayRef<EltTy>() const {
@@ -250,7 +246,7 @@ public:
     assert(I <= this->end() && "Inserting past the end of the vector.");
     if (I == end()) {
       push_back(Elt);
-      return llvm::prior(end());
+      return std::prev(end());
     }
     assert(!Val.isNull() && "Null value with non-end insert iterator.");
     if (EltTy V = Val.template dyn_cast<EltTy>()) {
@@ -273,7 +269,7 @@ public:
     // If we have a single value, convert to a vector.
     ptrdiff_t Offset = I - begin();
     if (Val.isNull()) {
-      if (llvm::next(From) == To) {
+      if (std::next(From) == To) {
         Val = *From;
         return begin();
       }

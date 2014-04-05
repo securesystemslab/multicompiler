@@ -85,11 +85,11 @@ let test_target () =
   end;
   
   begin group "layout";
-    let layout = "bogus" in
+    let layout = "e" in
     set_data_layout layout m;
     insist (layout = data_layout m)
   end
-  (* CHECK: target datalayout = "bogus"
+  (* CHECK: target datalayout = "e"
    * CHECK: target triple = "i686-apple-darwin8"
    *)
 
@@ -581,7 +581,8 @@ let test_users () =
 let test_aliases () =
   (* CHECK: @alias = alias i32* @aliasee
    *)
-  let v = declare_global i32_type "aliasee" m in
+  let forty_two32 = const_int i32_type 42 in
+  let v = define_global "aliasee" forty_two32 m in
   ignore (add_alias m (pointer_type i32_type) v "alias")
 
 

@@ -8,7 +8,6 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/MC/MCStreamer.h"
-#include "llvm/ADT/OwningPtr.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/Twine.h"
@@ -41,16 +40,15 @@ protected:
   formatted_raw_ostream &OS;
   const MCAsmInfo *MAI;
 private:
-  OwningPtr<MCInstPrinter> InstPrinter;
-  OwningPtr<MCCodeEmitter> Emitter;
-  OwningPtr<MCAsmBackend> AsmBackend;
+  std::unique_ptr<MCInstPrinter> InstPrinter;
+  std::unique_ptr<MCCodeEmitter> Emitter;
+  std::unique_ptr<MCAsmBackend> AsmBackend;
 
   SmallString<128> CommentToEmit;
   raw_svector_ostream CommentStream;
 
   unsigned IsVerboseAsm : 1;
   unsigned ShowInst : 1;
-  unsigned UseLoc : 1;
   unsigned UseCFI : 1;
   unsigned UseDwarfDirectory : 1;
 
@@ -59,21 +57,21 @@ private:
                        EHPrivateExtern  = 1 << 2 };
   DenseMap<const MCSymbol*, unsigned> FlagMap;
 
-  bool needsSet(const MCExpr *Value);
+  DenseMap<const MCSymbol*, MCSymbolData*> SymbolMap;
 
   void EmitRegisterName(int64_t Register);
-  virtual void EmitCFIStartProcImpl(MCDwarfFrameInfo &Frame);
-  virtual void EmitCFIEndProcImpl(MCDwarfFrameInfo &Frame);
+  void EmitCFIStartProcImpl(MCDwarfFrameInfo &Frame) override;
+  void EmitCFIEndProcImpl(MCDwarfFrameInfo &Frame) override;
 
 public:
   MCAsmStreamer(MCContext &Context, formatted_raw_ostream &os,
-                bool isVerboseAsm, bool useLoc, bool useCFI,
-                bool useDwarfDirectory, MCInstPrinter *printer,
-                MCCodeEmitter *emitter, MCAsmBackend *asmbackend, bool showInst)
+                bool isVerboseAsm, bool useCFI, bool useDwarfDirectory,
+                MCInstPrinter *printer, MCCodeEmitter *emitter,
+                MCAsmBackend *asmbackend, bool showInst)
       : MCStreamer(Context), OS(os), MAI(Context.getAsmInfo()),
         InstPrinter(printer), Emitter(emitter), AsmBackend(asmbackend),
         CommentStream(CommentToEmit), IsVerboseAsm(isVerboseAsm),
-        ShowInst(showInst), UseLoc(useLoc), UseCFI(useCFI),
+        ShowInst(showInst), UseCFI(useCFI),
         UseDwarfDirectory(useDwarfDirectory) {
     if (InstPrinter && IsVerboseAsm)
       InstPrinter->setCommentStream(CommentStream);
@@ -92,172 +90,172 @@ public:
 
   /// isVerboseAsm - Return true if this streamer supports verbose assembly at
   /// all.
-  virtual bool isVerboseAsm() const { return IsVerboseAsm; }
+  bool isVerboseAsm() const override { return IsVerboseAsm; }
 
   /// hasRawTextSupport - We support EmitRawText.
-  virtual bool hasRawTextSupport() const { return true; }
+  bool hasRawTextSupport() const override { return true; }
 
   /// AddComment - Add a comment that can be emitted to the generated .s
   /// file if applicable as a QoI issue to make the output of the compiler
   /// more readable.  This only affects the MCAsmStreamer, and only when
   /// verbose assembly output is enabled.
-  virtual void AddComment(const Twine &T);
+  void AddComment(const Twine &T) override;
 
   /// AddEncodingComment - Add a comment showing the encoding of an instruction.
-  virtual void AddEncodingComment(const MCInst &Inst);
+  void AddEncodingComment(const MCInst &Inst, const MCSubtargetInfo &);
 
   /// GetCommentOS - Return a raw_ostream that comments can be written to.
   /// Unlike AddComment, you are required to terminate comments with \n if you
   /// use this method.
-  virtual raw_ostream &GetCommentOS() {
+  raw_ostream &GetCommentOS() override {
     if (!IsVerboseAsm)
       return nulls();  // Discard comments unless in verbose asm mode.
     return CommentStream;
   }
 
-  void emitRawComment(const Twine &T, bool TabPrefix = true) LLVM_OVERRIDE;
+  void emitRawComment(const Twine &T, bool TabPrefix = true) override;
 
   /// AddBlankLine - Emit a blank line to a .s file to pretty it up.
-  virtual void AddBlankLine() {
+  void AddBlankLine() override {
     EmitEOL();
   }
 
   /// @name MCStreamer Interface
   /// @{
 
-  virtual void ChangeSection(const MCSection *Section,
-                             const MCExpr *Subsection);
+  void ChangeSection(const MCSection *Section,
+                     const MCExpr *Subsection) override;
 
-  virtual void InitSections(bool Force) {
-    if (Force)
-      SwitchSection(getContext().getObjectFileInfo()->getTextSection());
-  }
+  void EmitLOHDirective(MCLOHType Kind, const MCLOHArgs &Args) override;
+  void EmitLabel(MCSymbol *Symbol) override;
+  void EmitDebugLabel(MCSymbol *Symbol) override;
 
-  virtual void EmitLabel(MCSymbol *Symbol);
-  virtual void EmitDebugLabel(MCSymbol *Symbol);
+  void EmitEHSymAttributes(const MCSymbol *Symbol, MCSymbol *EHSymbol) override;
+  void EmitAssemblerFlag(MCAssemblerFlag Flag) override;
+  void EmitLinkerOptions(ArrayRef<std::string> Options) override;
+  void EmitDataRegion(MCDataRegionType Kind) override;
+  void EmitVersionMin(MCVersionMinType Kind, unsigned Major, unsigned Minor,
+                      unsigned Update) override;
+  void EmitThumbFunc(MCSymbol *Func) override;
 
-  virtual void EmitEHSymAttributes(const MCSymbol *Symbol,
-                                   MCSymbol *EHSymbol);
-  virtual void EmitAssemblerFlag(MCAssemblerFlag Flag);
-  virtual void EmitLinkerOptions(ArrayRef<std::string> Options);
-  virtual void EmitDataRegion(MCDataRegionType Kind);
-  virtual void EmitThumbFunc(MCSymbol *Func);
+  void EmitAssignment(MCSymbol *Symbol, const MCExpr *Value) override;
+  void EmitWeakReference(MCSymbol *Alias, const MCSymbol *Symbol) override;
+  void EmitDwarfAdvanceLineAddr(int64_t LineDelta, const MCSymbol *LastLabel,
+                                const MCSymbol *Label,
+                                unsigned PointerSize) override;
+  void EmitDwarfAdvanceFrameAddr(const MCSymbol *LastLabel,
+                                 const MCSymbol *Label) override;
 
-  virtual void EmitAssignment(MCSymbol *Symbol, const MCExpr *Value);
-  virtual void EmitWeakReference(MCSymbol *Alias, const MCSymbol *Symbol);
-  virtual void EmitDwarfAdvanceLineAddr(int64_t LineDelta,
-                                        const MCSymbol *LastLabel,
-                                        const MCSymbol *Label,
-                                        unsigned PointerSize);
-  virtual void EmitDwarfAdvanceFrameAddr(const MCSymbol *LastLabel,
-                                         const MCSymbol *Label);
+  bool EmitSymbolAttribute(MCSymbol *Symbol, MCSymbolAttr Attribute) override;
 
-  virtual bool EmitSymbolAttribute(MCSymbol *Symbol, MCSymbolAttr Attribute);
-
-  virtual void EmitSymbolDesc(MCSymbol *Symbol, unsigned DescValue);
-  virtual void BeginCOFFSymbolDef(const MCSymbol *Symbol);
-  virtual void EmitCOFFSymbolStorageClass(int StorageClass);
-  virtual void EmitCOFFSymbolType(int Type);
-  virtual void EndCOFFSymbolDef();
-  virtual void EmitCOFFSectionIndex(MCSymbol const *Symbol);
-  virtual void EmitCOFFSecRel32(MCSymbol const *Symbol);
-  virtual void EmitELFSize(MCSymbol *Symbol, const MCExpr *Value);
-  virtual void EmitCommonSymbol(MCSymbol *Symbol, uint64_t Size,
-                                unsigned ByteAlignment);
+  void EmitSymbolDesc(MCSymbol *Symbol, unsigned DescValue) override;
+  void BeginCOFFSymbolDef(const MCSymbol *Symbol) override;
+  void EmitCOFFSymbolStorageClass(int StorageClass) override;
+  void EmitCOFFSymbolType(int Type) override;
+  void EndCOFFSymbolDef() override;
+  void EmitCOFFSectionIndex(MCSymbol const *Symbol) override;
+  void EmitCOFFSecRel32(MCSymbol const *Symbol) override;
+  void EmitELFSize(MCSymbol *Symbol, const MCExpr *Value) override;
+  void EmitCommonSymbol(MCSymbol *Symbol, uint64_t Size,
+                        unsigned ByteAlignment) override;
 
   /// EmitLocalCommonSymbol - Emit a local common (.lcomm) symbol.
   ///
   /// @param Symbol - The common symbol to emit.
   /// @param Size - The size of the common symbol.
   /// @param ByteAlignment - The alignment of the common symbol in bytes.
-  virtual void EmitLocalCommonSymbol(MCSymbol *Symbol, uint64_t Size,
-                                     unsigned ByteAlignment);
+  void EmitLocalCommonSymbol(MCSymbol *Symbol, uint64_t Size,
+                             unsigned ByteAlignment) override;
 
-  virtual void EmitZerofill(const MCSection *Section, MCSymbol *Symbol = 0,
-                            uint64_t Size = 0, unsigned ByteAlignment = 0);
+  void EmitZerofill(const MCSection *Section, MCSymbol *Symbol = 0,
+                    uint64_t Size = 0, unsigned ByteAlignment = 0) override;
 
-  virtual void EmitTBSSSymbol (const MCSection *Section, MCSymbol *Symbol,
-                               uint64_t Size, unsigned ByteAlignment = 0);
+  void EmitTBSSSymbol (const MCSection *Section, MCSymbol *Symbol,
+                       uint64_t Size, unsigned ByteAlignment = 0) override;
 
-  virtual void EmitBytes(StringRef Data);
+  void EmitBytes(StringRef Data) override;
 
-  virtual void EmitValueImpl(const MCExpr *Value, unsigned Size);
-  virtual void EmitIntValue(uint64_t Value, unsigned Size);
+  void EmitValueImpl(const MCExpr *Value, unsigned Size) override;
+  void EmitIntValue(uint64_t Value, unsigned Size) override;
 
-  virtual void EmitULEB128Value(const MCExpr *Value);
+  void EmitULEB128Value(const MCExpr *Value) override;
 
-  virtual void EmitSLEB128Value(const MCExpr *Value);
+  void EmitSLEB128Value(const MCExpr *Value) override;
 
-  virtual void EmitGPRel64Value(const MCExpr *Value);
+  void EmitGPRel64Value(const MCExpr *Value) override;
 
-  virtual void EmitGPRel32Value(const MCExpr *Value);
+  void EmitGPRel32Value(const MCExpr *Value) override;
 
 
-  virtual void EmitFill(uint64_t NumBytes, uint8_t FillValue);
+  void EmitFill(uint64_t NumBytes, uint8_t FillValue) override;
 
-  virtual void EmitValueToAlignment(unsigned ByteAlignment, int64_t Value = 0,
-                                    unsigned ValueSize = 1,
-                                    unsigned MaxBytesToEmit = 0);
+  void EmitValueToAlignment(unsigned ByteAlignment, int64_t Value = 0,
+                            unsigned ValueSize = 1,
+                            unsigned MaxBytesToEmit = 0) override;
 
-  virtual void EmitCodeAlignment(unsigned ByteAlignment,
-                                 unsigned MaxBytesToEmit = 0);
+  void EmitCodeAlignment(unsigned ByteAlignment,
+                         unsigned MaxBytesToEmit = 0) override;
 
-  virtual bool EmitValueToOffset(const MCExpr *Offset,
-                                 unsigned char Value = 0);
+  bool EmitValueToOffset(const MCExpr *Offset,
+                         unsigned char Value = 0) override;
 
-  virtual void EmitFileDirective(StringRef Filename);
-  virtual bool EmitDwarfFileDirective(unsigned FileNo, StringRef Directory,
-                                      StringRef Filename, unsigned CUID = 0);
-  virtual void EmitDwarfLocDirective(unsigned FileNo, unsigned Line,
-                                     unsigned Column, unsigned Flags,
-                                     unsigned Isa, unsigned Discriminator,
-                                     StringRef FileName);
+  void EmitFileDirective(StringRef Filename) override;
+  unsigned EmitDwarfFileDirective(unsigned FileNo, StringRef Directory,
+                                  StringRef Filename,
+                                  unsigned CUID = 0) override;
+  void EmitDwarfLocDirective(unsigned FileNo, unsigned Line,
+                             unsigned Column, unsigned Flags,
+                             unsigned Isa, unsigned Discriminator,
+                             StringRef FileName) override;
+  MCSymbol *getDwarfLineTableSymbol(unsigned CUID) override;
 
-  virtual void EmitIdent(StringRef IdentString);
-  virtual void EmitCFISections(bool EH, bool Debug);
-  virtual void EmitCFIDefCfa(int64_t Register, int64_t Offset);
-  virtual void EmitCFIDefCfaOffset(int64_t Offset);
-  virtual void EmitCFIDefCfaRegister(int64_t Register);
-  virtual void EmitCFIOffset(int64_t Register, int64_t Offset);
-  virtual void EmitCFIPersonality(const MCSymbol *Sym, unsigned Encoding);
-  virtual void EmitCFILsda(const MCSymbol *Sym, unsigned Encoding);
-  virtual void EmitCFIRememberState();
-  virtual void EmitCFIRestoreState();
-  virtual void EmitCFISameValue(int64_t Register);
-  virtual void EmitCFIRelOffset(int64_t Register, int64_t Offset);
-  virtual void EmitCFIAdjustCfaOffset(int64_t Adjustment);
-  virtual void EmitCFISignalFrame();
-  virtual void EmitCFIUndefined(int64_t Register);
-  virtual void EmitCFIRegister(int64_t Register1, int64_t Register2);
-  virtual void EmitCFIWindowSave();
+  void EmitIdent(StringRef IdentString) override;
+  void EmitCFISections(bool EH, bool Debug) override;
+  void EmitCFIDefCfa(int64_t Register, int64_t Offset) override;
+  void EmitCFIDefCfaOffset(int64_t Offset) override;
+  void EmitCFIDefCfaRegister(int64_t Register) override;
+  void EmitCFIOffset(int64_t Register, int64_t Offset) override;
+  void EmitCFIPersonality(const MCSymbol *Sym, unsigned Encoding) override;
+  void EmitCFILsda(const MCSymbol *Sym, unsigned Encoding) override;
+  void EmitCFIRememberState() override;
+  void EmitCFIRestoreState() override;
+  void EmitCFISameValue(int64_t Register) override;
+  void EmitCFIRelOffset(int64_t Register, int64_t Offset) override;
+  void EmitCFIAdjustCfaOffset(int64_t Adjustment) override;
+  void EmitCFISignalFrame() override;
+  void EmitCFIUndefined(int64_t Register) override;
+  void EmitCFIRegister(int64_t Register1, int64_t Register2) override;
+  void EmitCFIWindowSave() override;
 
-  virtual void EmitWin64EHStartProc(const MCSymbol *Symbol);
-  virtual void EmitWin64EHEndProc();
-  virtual void EmitWin64EHStartChained();
-  virtual void EmitWin64EHEndChained();
-  virtual void EmitWin64EHHandler(const MCSymbol *Sym, bool Unwind,
-                                  bool Except);
-  virtual void EmitWin64EHHandlerData();
-  virtual void EmitWin64EHPushReg(unsigned Register);
-  virtual void EmitWin64EHSetFrame(unsigned Register, unsigned Offset);
-  virtual void EmitWin64EHAllocStack(unsigned Size);
-  virtual void EmitWin64EHSaveReg(unsigned Register, unsigned Offset);
-  virtual void EmitWin64EHSaveXMM(unsigned Register, unsigned Offset);
-  virtual void EmitWin64EHPushFrame(bool Code);
-  virtual void EmitWin64EHEndProlog();
+  void EmitWin64EHStartProc(const MCSymbol *Symbol) override;
+  void EmitWin64EHEndProc() override;
+  void EmitWin64EHStartChained() override;
+  void EmitWin64EHEndChained() override;
+  void EmitWin64EHHandler(const MCSymbol *Sym, bool Unwind,
+                          bool Except) override;
+  void EmitWin64EHHandlerData() override;
+  void EmitWin64EHPushReg(unsigned Register) override;
+  void EmitWin64EHSetFrame(unsigned Register, unsigned Offset) override;
+  void EmitWin64EHAllocStack(unsigned Size) override;
+  void EmitWin64EHSaveReg(unsigned Register, unsigned Offset) override;
+  void EmitWin64EHSaveXMM(unsigned Register, unsigned Offset) override;
+  void EmitWin64EHPushFrame(bool Code) override;
+  void EmitWin64EHEndProlog() override;
 
-  virtual void EmitInstruction(const MCInst &Inst);
+  void EmitInstruction(const MCInst &Inst, const MCSubtargetInfo &STI) override;
 
-  virtual void EmitBundleAlignMode(unsigned AlignPow2);
-  virtual void EmitBundleLock(bool AlignToEnd);
-  virtual void EmitBundleUnlock();
+  void EmitBundleAlignMode(unsigned AlignPow2) override;
+  void EmitBundleLock(bool AlignToEnd) override;
+  void EmitBundleUnlock() override;
 
   /// EmitRawText - If this file is backed by an assembly streamer, this dumps
   /// the specified string in the output .s file.  This capability is
   /// indicated by the hasRawTextSupport() predicate.
-  virtual void EmitRawTextImpl(StringRef String);
+  void EmitRawTextImpl(StringRef String) override;
 
-  virtual void FinishImpl();
+  void FinishImpl() override;
+
+  virtual MCSymbolData &getOrCreateSymbolData(const MCSymbol *Symbol) override;
 };
 
 } // end anonymous namespace.
@@ -346,6 +344,27 @@ void MCAsmStreamer::EmitLabel(MCSymbol *Symbol) {
   EmitEOL();
 }
 
+void MCAsmStreamer::EmitLOHDirective(MCLOHType Kind, const MCLOHArgs &Args) {
+  StringRef str = MCLOHIdToName(Kind);
+
+#ifndef NDEBUG
+  int NbArgs = MCLOHIdToNbArgs(Kind);
+  assert(NbArgs != -1 && ((size_t)NbArgs) == Args.size() && "Malformed LOH!");
+  assert(str != "" && "Invalid LOH name");
+#endif
+
+  OS << "\t" << MCLOHDirectiveName() << " " << str << "\t";
+  bool IsFirst = true;
+  for (MCLOHArgs::const_iterator It = Args.begin(), EndIt = Args.end();
+       It != EndIt; ++It) {
+    if (!IsFirst)
+      OS << ", ";
+    IsFirst = false;
+    OS << **It;
+  }
+  EmitEOL();
+}
+
 void MCAsmStreamer::EmitDebugLabel(MCSymbol *Symbol) {
   assert(Symbol->isUndefined() && "Cannot define a symbol twice!");
   MCStreamer::EmitDebugLabel(Symbol);
@@ -388,6 +407,18 @@ void MCAsmStreamer::EmitDataRegion(MCDataRegionType Kind) {
   EmitEOL();
 }
 
+void MCAsmStreamer::EmitVersionMin(MCVersionMinType Kind, unsigned Major,
+                                   unsigned Minor, unsigned Update) {
+  switch (Kind) {
+  case MCVM_IOSVersionMin:        OS << "\t.ios_version_min"; break;
+  case MCVM_OSXVersionMin:        OS << "\t.macosx_version_min"; break;
+  }
+  OS << " " << Major << ", " << Minor;
+  if (Update)
+    OS << ", " << Update;
+  EmitEOL();
+}
+
 void MCAsmStreamer::EmitThumbFunc(MCSymbol *Func) {
   // This needs to emit to a temporary string to get properly quoted
   // MCSymbols when they have spaces in them.
@@ -402,8 +433,7 @@ void MCAsmStreamer::EmitAssignment(MCSymbol *Symbol, const MCExpr *Value) {
   OS << *Symbol << " = " << *Value;
   EmitEOL();
 
-  // FIXME: Lift context changes into super class.
-  Symbol->setVariableValue(Value);
+  MCStreamer::EmitAssignment(Symbol, Value);
 }
 
 void MCAsmStreamer::EmitWeakReference(MCSymbol *Alias, const MCSymbol *Symbol) {
@@ -673,6 +703,7 @@ void MCAsmStreamer::EmitIntValue(uint64_t Value, unsigned Size) {
 }
 
 void MCAsmStreamer::EmitValueImpl(const MCExpr *Value, unsigned Size) {
+  assert(Size <= 8 && "Invalid size");
   assert(getCurrentSection().first &&
          "Cannot emit contents before setting section!");
   const char *Directive = 0;
@@ -681,19 +712,37 @@ void MCAsmStreamer::EmitValueImpl(const MCExpr *Value, unsigned Size) {
   case 1: Directive = MAI->getData8bitsDirective();  break;
   case 2: Directive = MAI->getData16bitsDirective(); break;
   case 4: Directive = MAI->getData32bitsDirective(); break;
-  case 8:
-    Directive = MAI->getData64bitsDirective();
-    // If the target doesn't support 64-bit data, emit as two 32-bit halves.
-    if (Directive) break;
+  case 8: Directive = MAI->getData64bitsDirective(); break;
+  }
+
+  if (!Directive) {
     int64_t IntValue;
     if (!Value->EvaluateAsAbsolute(IntValue))
       report_fatal_error("Don't know how to emit this value.");
-    if (MAI->isLittleEndian()) {
-      EmitIntValue((uint32_t)(IntValue >> 0 ), 4);
-      EmitIntValue((uint32_t)(IntValue >> 32), 4);
-    } else {
-      EmitIntValue((uint32_t)(IntValue >> 32), 4);
-      EmitIntValue((uint32_t)(IntValue >> 0 ), 4);
+
+    // We couldn't handle the requested integer size so we fallback by breaking
+    // the request down into several, smaller, integers.  Since sizes greater
+    // than eight are invalid and size equivalent to eight should have been
+    // handled earlier, we use four bytes as our largest piece of granularity.
+    bool IsLittleEndian = MAI->isLittleEndian();
+    for (unsigned Emitted = 0; Emitted != Size;) {
+      unsigned Remaining = Size - Emitted;
+      // The size of our partial emission must be a power of two less than
+      // eight.
+      unsigned EmissionSize = PowerOf2Floor(Remaining);
+      if (EmissionSize > 4)
+        EmissionSize = 4;
+      // Calculate the byte offset of our partial emission taking into account
+      // the endianness of the target.
+      unsigned ByteOffset =
+          IsLittleEndian ? Emitted : (Remaining - EmissionSize);
+      uint64_t ValueToEmit = IntValue >> (ByteOffset * 8);
+      // We truncate our partial emission to fit within the bounds of the
+      // emission domain.  This produces nicer output and silences potential
+      // truncation warnings when round tripping through another assembler.
+      ValueToEmit &= ~0ULL >> (64 - EmissionSize * 8);
+      EmitIntValue(ValueToEmit, EmissionSize);
+      Emitted += EmissionSize;
     }
     return;
   }
@@ -762,12 +811,19 @@ void MCAsmStreamer::EmitValueToAlignment(unsigned ByteAlignment, int64_t Value,
   // emit alignments as a power of two if possible.
   if (isPowerOf2_32(ByteAlignment)) {
     switch (ValueSize) {
-    default: llvm_unreachable("Invalid size for machine code value!");
-    case 1: OS << MAI->getAlignDirective(); break;
-    // FIXME: use MAI for this!
-    case 2: OS << ".p2alignw "; break;
-    case 4: OS << ".p2alignl "; break;
-    case 8: llvm_unreachable("Unsupported alignment size!");
+    default:
+      llvm_unreachable("Invalid size for machine code value!");
+    case 1:
+      OS << "\t.align\t";
+      break;
+    case 2:
+      OS << ".p2alignw ";
+      break;
+    case 4:
+      OS << ".p2alignl ";
+      break;
+    case 8:
+      llvm_unreachable("Unsupported alignment size!");
     }
 
     if (MAI->getAlignmentIsInBytes())
@@ -826,30 +882,42 @@ void MCAsmStreamer::EmitFileDirective(StringRef Filename) {
   EmitEOL();
 }
 
-bool MCAsmStreamer::EmitDwarfFileDirective(unsigned FileNo, StringRef Directory,
-                                           StringRef Filename, unsigned CUID) {
+unsigned MCAsmStreamer::EmitDwarfFileDirective(unsigned FileNo,
+                                               StringRef Directory,
+                                               StringRef Filename,
+                                               unsigned CUID) {
+  assert(CUID == 0);
+
+  MCDwarfLineTable &Table = getContext().getMCDwarfLineTable(CUID);
+  unsigned NumFiles = Table.getMCDwarfFiles().size();
+  FileNo = Table.getFile(Directory, Filename, FileNo);
+  if (FileNo == 0)
+    return 0;
+  if (NumFiles == Table.getMCDwarfFiles().size())
+    return FileNo;
+
+  SmallString<128> FullPathName;
+
   if (!UseDwarfDirectory && !Directory.empty()) {
     if (sys::path::is_absolute(Filename))
-      return EmitDwarfFileDirective(FileNo, "", Filename, CUID);
-
-    SmallString<128> FullPathName = Directory;
-    sys::path::append(FullPathName, Filename);
-    return EmitDwarfFileDirective(FileNo, "", FullPathName, CUID);
-  }
-
-  if (UseLoc) {
-    OS << "\t.file\t" << FileNo << ' ';
-    if (!Directory.empty()) {
-      PrintQuotedString(Directory, OS);
-      OS << ' ';
+      Directory = "";
+    else {
+      FullPathName = Directory;
+      sys::path::append(FullPathName, Filename);
+      Directory = "";
+      Filename = FullPathName;
     }
-    PrintQuotedString(Filename, OS);
-    EmitEOL();
-    // All .file will belong to a single CUID.
-    CUID = 0;
   }
-  return this->MCStreamer::EmitDwarfFileDirective(FileNo, Directory, Filename,
-                                                  CUID);
+
+  OS << "\t.file\t" << FileNo << ' ';
+  if (!Directory.empty()) {
+    PrintQuotedString(Directory, OS);
+    OS << ' ';
+  }
+  PrintQuotedString(Filename, OS);
+  EmitEOL();
+
+  return FileNo;
 }
 
 void MCAsmStreamer::EmitDwarfLocDirective(unsigned FileNo, unsigned Line,
@@ -859,9 +927,6 @@ void MCAsmStreamer::EmitDwarfLocDirective(unsigned FileNo, unsigned Line,
                                           StringRef FileName) {
   this->MCStreamer::EmitDwarfLocDirective(FileNo, Line, Column, Flags,
                                           Isa, Discriminator, FileName);
-  if (!UseLoc)
-    return;
-
   OS << "\t.loc\t" << FileNo << " " << Line << " " << Column;
   if (Flags & DWARF2_FLAG_BASIC_BLOCK)
     OS << " basic_block";
@@ -881,9 +946,9 @@ void MCAsmStreamer::EmitDwarfLocDirective(unsigned FileNo, unsigned Line,
   }
 
   if (Isa)
-    OS << "isa " << Isa;
+    OS << " isa " << Isa;
   if (Discriminator)
-    OS << "discriminator " << Discriminator;
+    OS << " discriminator " << Discriminator;
 
   if (IsVerboseAsm) {
     OS.PadToColumn(MAI->getCommentColumn());
@@ -891,6 +956,12 @@ void MCAsmStreamer::EmitDwarfLocDirective(unsigned FileNo, unsigned Line,
        << Line << ':' << Column;
   }
   EmitEOL();
+}
+
+MCSymbol *MCAsmStreamer::getDwarfLineTableSymbol(unsigned CUID) {
+  // Always use the zeroth line table, since asm syntax only supports one line
+  // table for now.
+  return MCStreamer::getDwarfLineTableSymbol(0);
 }
 
 void MCAsmStreamer::EmitIdent(StringRef IdentString) {
@@ -1234,12 +1305,13 @@ void MCAsmStreamer::EmitWin64EHEndProlog(void) {
   EmitEOL();
 }
 
-void MCAsmStreamer::AddEncodingComment(const MCInst &Inst) {
+void MCAsmStreamer::AddEncodingComment(const MCInst &Inst,
+                                       const MCSubtargetInfo &STI) {
   raw_ostream &OS = GetCommentOS();
   SmallString<256> Code;
   SmallVector<MCFixup, 4> Fixups;
   raw_svector_ostream VecOS(Code);
-  Emitter->EncodeInstruction(Inst, VecOS, Fixups);
+  Emitter->EncodeInstruction(Inst, VecOS, Fixups, STI);
   VecOS.flush();
 
   // If we are showing fixups, create symbolic markers in the encoded
@@ -1318,13 +1390,13 @@ void MCAsmStreamer::AddEncodingComment(const MCInst &Inst) {
   }
 }
 
-void MCAsmStreamer::EmitInstruction(const MCInst &Inst) {
+void MCAsmStreamer::EmitInstruction(const MCInst &Inst, const MCSubtargetInfo &STI) {
   assert(getCurrentSection().first &&
          "Cannot emit contents before setting section!");
 
   // Show the encoding in a comment if we have a code emitter.
   if (Emitter)
-    AddEncodingComment(Inst);
+    AddEncodingComment(Inst, STI);
 
   // Show the MCInst if enabled.
   if (ShowInst) {
@@ -1368,26 +1440,41 @@ void MCAsmStreamer::EmitRawTextImpl(StringRef String) {
 }
 
 void MCAsmStreamer::FinishImpl() {
-  // FIXME: This header is duplicated with MCObjectStreamer
-  // Dump out the dwarf file & directory tables and line tables.
-  const MCSymbol *LineSectionSymbol = NULL;
-  if (getContext().hasDwarfFiles() && !UseLoc)
-    LineSectionSymbol = MCDwarfFileTable::Emit(this);
-
   // If we are generating dwarf for assembly source files dump out the sections.
   if (getContext().getGenDwarfForAssembly())
-    MCGenDwarfInfo::Emit(this, LineSectionSymbol);
+    MCGenDwarfInfo::Emit(this);
+
+  // Emit the label for the line table, if requested - since the rest of the
+  // line table will be defined by .loc/.file directives, and not emitted
+  // directly, the label is the only work required here.
+  auto &Tables = getContext().getMCDwarfLineTables();
+  if (!Tables.empty()) {
+    assert(Tables.size() == 1 && "asm output only supports one line table");
+    if (auto *Label = Tables.begin()->second.getLabel()) {
+      SwitchSection(getContext().getObjectFileInfo()->getDwarfLineSection());
+      EmitLabel(Label);
+    }
+  }
 
   if (!UseCFI)
     EmitFrames(AsmBackend.get(), false);
 }
 
+MCSymbolData &MCAsmStreamer::getOrCreateSymbolData(const MCSymbol *Symbol) {
+  MCSymbolData *&Entry = SymbolMap[Symbol];
+
+  if (!Entry)
+    Entry = new MCSymbolData(*Symbol, 0, 0, 0);
+
+  return *Entry;
+}
+
 MCStreamer *llvm::createAsmStreamer(MCContext &Context,
                                     formatted_raw_ostream &OS,
-                                    bool isVerboseAsm, bool useLoc, bool useCFI,
+                                    bool isVerboseAsm, bool useCFI,
                                     bool useDwarfDirectory, MCInstPrinter *IP,
                                     MCCodeEmitter *CE, MCAsmBackend *MAB,
                                     bool ShowInst) {
-  return new MCAsmStreamer(Context, OS, isVerboseAsm, useLoc,
-                           useCFI, useDwarfDirectory, IP, CE, MAB, ShowInst);
+  return new MCAsmStreamer(Context, OS, isVerboseAsm, useCFI, useDwarfDirectory,
+                           IP, CE, MAB, ShowInst);
 }

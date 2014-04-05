@@ -75,6 +75,7 @@ void TargetLowering::ArgListEntry::setAttributes(ImmutableCallSite *CS,
   isSRet     = CS->paramHasAttr(AttrIdx, Attribute::StructRet);
   isNest     = CS->paramHasAttr(AttrIdx, Attribute::Nest);
   isByVal    = CS->paramHasAttr(AttrIdx, Attribute::ByVal);
+  isInAlloca = CS->paramHasAttr(AttrIdx, Attribute::InAlloca);
   isReturned = CS->paramHasAttr(AttrIdx, Attribute::Returned);
   Alignment  = CS->getParamAlignment(AttrIdx);
 }
@@ -1073,6 +1074,7 @@ void TargetLowering::computeMaskedBitsForTargetNode(const SDValue Op,
 /// targets that want to expose additional information about sign bits to the
 /// DAG Combiner.
 unsigned TargetLowering::ComputeNumSignBitsForTargetNode(SDValue Op,
+                                                         const SelectionDAG &,
                                                          unsigned Depth) const {
   assert((Op.getOpcode() >= ISD::BUILTIN_OP_END ||
           Op.getOpcode() == ISD::INTRINSIC_WO_CHAIN ||
@@ -1114,6 +1116,54 @@ static bool ValueHasExactlyOneBitSet(SDValue Val, const SelectionDAG &DAG) {
   DAG.ComputeMaskedBits(Val, KnownZero, KnownOne);
   return (KnownZero.countPopulation() == BitWidth - 1) &&
          (KnownOne.countPopulation() == 1);
+}
+
+bool TargetLowering::isConstTrueVal(const SDNode *N) const {
+  if (!N)
+    return false;
+
+  bool IsVec = false;
+  const ConstantSDNode *CN = dyn_cast<ConstantSDNode>(N);
+  if (!CN) {
+    const BuildVectorSDNode *BV = dyn_cast<BuildVectorSDNode>(N);
+    if (!BV)
+      return false;
+
+    IsVec = true;
+    CN = BV->getConstantSplatValue();
+  }
+
+  switch (getBooleanContents(IsVec)) {
+  case UndefinedBooleanContent:
+    return CN->getAPIntValue()[0];
+  case ZeroOrOneBooleanContent:
+    return CN->isOne();
+  case ZeroOrNegativeOneBooleanContent:
+    return CN->isAllOnesValue();
+  }
+
+  llvm_unreachable("Invalid boolean contents");
+}
+
+bool TargetLowering::isConstFalseVal(const SDNode *N) const {
+  if (!N)
+    return false;
+
+  bool IsVec = false;
+  const ConstantSDNode *CN = dyn_cast<ConstantSDNode>(N);
+  if (!CN) {
+    const BuildVectorSDNode *BV = dyn_cast<BuildVectorSDNode>(N);
+    if (!BV)
+      return false;
+
+    IsVec = true;
+    CN = BV->getConstantSplatValue();
+  }
+
+  if (getBooleanContents(IsVec) == UndefinedBooleanContent)
+    return !CN->getAPIntValue()[0];
+
+  return CN->isNullValue();
 }
 
 /// SimplifySetCC - Try to simplify a setcc built with the specified operands
@@ -1469,24 +1519,32 @@ TargetLowering::SimplifySetCC(EVT VT, SDValue N0, SDValue N1,
     // Canonicalize GE/LE comparisons to use GT/LT comparisons.
     if (Cond == ISD::SETGE || Cond == ISD::SETUGE) {
       if (C1 == MinVal) return DAG.getConstant(1, VT);   // X >= MIN --> true
-      // X >= C0 --> X > (C0-1)
-      APInt C = C1-1;
-      if (!N1C->isOpaque() || (N1C->isOpaque() && C.getBitWidth() <= 64 &&
-                               isLegalICmpImmediate(C.getSExtValue())))
+      // X >= C0 --> X > (C0 - 1)
+      APInt C = C1 - 1;
+      ISD::CondCode NewCC = (Cond == ISD::SETGE) ? ISD::SETGT : ISD::SETUGT;
+      if ((DCI.isBeforeLegalizeOps() ||
+           isCondCodeLegal(NewCC, VT.getSimpleVT())) &&
+          (!N1C->isOpaque() || (N1C->isOpaque() && C.getBitWidth() <= 64 &&
+                                isLegalICmpImmediate(C.getSExtValue())))) {
         return DAG.getSetCC(dl, VT, N0,
                             DAG.getConstant(C, N1.getValueType()),
-                            (Cond == ISD::SETGE) ? ISD::SETGT : ISD::SETUGT);
+                            NewCC);
+      }
     }
 
     if (Cond == ISD::SETLE || Cond == ISD::SETULE) {
       if (C1 == MaxVal) return DAG.getConstant(1, VT);   // X <= MAX --> true
-      // X <= C0 --> X < (C0+1)
-      APInt C = C1+1;
-      if (!N1C->isOpaque() || (N1C->isOpaque() && C.getBitWidth() <= 64 &&
-                               isLegalICmpImmediate(C.getSExtValue())))
+      // X <= C0 --> X < (C0 + 1)
+      APInt C = C1 + 1;
+      ISD::CondCode NewCC = (Cond == ISD::SETLE) ? ISD::SETLT : ISD::SETULT;
+      if ((DCI.isBeforeLegalizeOps() ||
+           isCondCodeLegal(NewCC, VT.getSimpleVT())) &&
+          (!N1C->isOpaque() || (N1C->isOpaque() && C.getBitWidth() <= 64 &&
+                                isLegalICmpImmediate(C.getSExtValue())))) {
         return DAG.getSetCC(dl, VT, N0,
                             DAG.getConstant(C, N1.getValueType()),
-                            (Cond == ISD::SETLE) ? ISD::SETLT : ISD::SETULT);
+                            NewCC);
+      }
     }
 
     if ((Cond == ISD::SETLT || Cond == ISD::SETULT) && C1 == MinVal)

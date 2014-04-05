@@ -162,6 +162,9 @@ SDNode *NVPTXDAGToDAGISel::Select(SDNode *N) {
   case NVPTXISD::StoreParamU32:
     ResNode = SelectStoreParam(N);
     break;
+  case ISD::ADDRSPACECAST:
+    ResNode = SelectAddrSpaceCast(N);
+    break;
   default:
     break;
   }
@@ -189,6 +192,66 @@ static unsigned int getCodeAddrSpace(MemSDNode *N,
     }
   }
   return NVPTX::PTXLdStInstCode::GENERIC;
+}
+
+SDNode *NVPTXDAGToDAGISel::SelectAddrSpaceCast(SDNode *N) {
+  SDValue Src = N->getOperand(0);
+  AddrSpaceCastSDNode *CastN = cast<AddrSpaceCastSDNode>(N);
+  unsigned SrcAddrSpace = CastN->getSrcAddressSpace();
+  unsigned DstAddrSpace = CastN->getDestAddressSpace();
+
+  assert(SrcAddrSpace != DstAddrSpace &&
+         "addrspacecast must be between different address spaces");
+
+  if (DstAddrSpace == ADDRESS_SPACE_GENERIC) {
+    // Specific to generic
+    unsigned Opc;
+    switch (SrcAddrSpace) {
+    default: report_fatal_error("Bad address space in addrspacecast");
+    case ADDRESS_SPACE_GLOBAL:
+      Opc = Subtarget.is64Bit() ? NVPTX::cvta_global_yes_64
+                                : NVPTX::cvta_global_yes;
+      break;
+    case ADDRESS_SPACE_SHARED:
+      Opc = Subtarget.is64Bit() ? NVPTX::cvta_shared_yes_64
+                                : NVPTX::cvta_shared_yes;
+      break;
+    case ADDRESS_SPACE_CONST:
+      Opc = Subtarget.is64Bit() ? NVPTX::cvta_const_yes_64
+                                : NVPTX::cvta_const_yes;
+      break;
+    case ADDRESS_SPACE_LOCAL:
+      Opc = Subtarget.is64Bit() ? NVPTX::cvta_local_yes_64
+                                : NVPTX::cvta_local_yes;
+      break;
+    }
+    return CurDAG->getMachineNode(Opc, SDLoc(N), N->getValueType(0), Src);
+  } else {
+    // Generic to specific
+    if (SrcAddrSpace != 0)
+      report_fatal_error("Cannot cast between two non-generic address spaces");
+    unsigned Opc;
+    switch (DstAddrSpace) {
+    default: report_fatal_error("Bad address space in addrspacecast");
+    case ADDRESS_SPACE_GLOBAL:
+      Opc = Subtarget.is64Bit() ? NVPTX::cvta_to_global_yes_64
+                                : NVPTX::cvta_to_global_yes;
+      break;
+    case ADDRESS_SPACE_SHARED:
+      Opc = Subtarget.is64Bit() ? NVPTX::cvta_to_shared_yes_64
+                                : NVPTX::cvta_to_shared_yes;
+      break;
+    case ADDRESS_SPACE_CONST:
+      Opc = Subtarget.is64Bit() ? NVPTX::cvta_to_const_yes_64
+                                : NVPTX::cvta_to_const_yes;
+      break;
+    case ADDRESS_SPACE_LOCAL:
+      Opc = Subtarget.is64Bit() ? NVPTX::cvta_to_local_yes_64
+                                : NVPTX::cvta_to_local_yes;
+      break;
+    }
+    return CurDAG->getMachineNode(Opc, SDLoc(N), N->getValueType(0), Src);
+  }
 }
 
 SDNode *NVPTXDAGToDAGISel::SelectLoad(SDNode *N) {
@@ -2437,27 +2500,6 @@ bool NVPTXDAGToDAGISel::SelectInlineAsmMemoryOperand(
       return false;
     }
     break;
-  }
-  return true;
-}
-
-// Return true if N is a undef or a constant.
-// If N was undef, return a (i8imm 0) in Retval
-// If N was imm, convert it to i8imm and return in Retval
-// Note: The convert to i8imm is required, otherwise the
-// pattern matcher inserts a bunch of IMOVi8rr to convert
-// the imm to i8imm, and this causes instruction selection
-// to fail.
-bool NVPTXDAGToDAGISel::UndefOrImm(SDValue Op, SDValue N, SDValue &Retval) {
-  if (!(N.getOpcode() == ISD::UNDEF) && !(N.getOpcode() == ISD::Constant))
-    return false;
-
-  if (N.getOpcode() == ISD::UNDEF)
-    Retval = CurDAG->getTargetConstant(0, MVT::i8);
-  else {
-    ConstantSDNode *cn = cast<ConstantSDNode>(N.getNode());
-    unsigned retval = cn->getZExtValue();
-    Retval = CurDAG->getTargetConstant(retval, MVT::i8);
   }
   return true;
 }

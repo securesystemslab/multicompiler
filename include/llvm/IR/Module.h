@@ -15,7 +15,8 @@
 #ifndef LLVM_IR_MODULE_H
 #define LLVM_IR_MODULE_H
 
-#include "llvm/ADT/OwningPtr.h"
+#include "llvm/ADT/iterator_range.h"
+#include "llvm/IR/DataLayout.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/GlobalAlias.h"
 #include "llvm/IR/GlobalVariable.h"
@@ -196,11 +197,19 @@ private:
   NamedMDListType NamedMDList;    ///< The named metadata in the module
   std::string GlobalScopeAsm;     ///< Inline Asm at global scope.
   ValueSymbolTable *ValSymTab;    ///< Symbol table for values
-  OwningPtr<GVMaterializer> Materializer;  ///< Used to materialize GlobalValues
+  std::unique_ptr<GVMaterializer>
+  Materializer;                   ///< Used to materialize GlobalValues
   std::string ModuleID;           ///< Human readable identifier for the module
   std::string TargetTriple;       ///< Platform target triple Module compiled on
-  std::string DataLayout;         ///< Target data description
   void *NamedMDSymTab;            ///< NamedMDNode names.
+
+  // We need to keep the string because the C API expects us to own the string
+  // representation.
+  // Since we have it, we also use an empty string to represent a module without
+  // a DataLayout. If it has a DataLayout, these variables are in sync and the
+  // string is just a cache of getDataLayout()->getStringRepresentation().
+  std::string DataLayoutStr;
+  DataLayout DL;
 
   friend class Constant;
 
@@ -222,10 +231,12 @@ public:
   /// @returns the module identifier as a string
   const std::string &getModuleIdentifier() const { return ModuleID; }
 
-  /// Get the data layout string for the module's target platform.  This encodes
-  /// the type sizes and alignments expected by this module.
-  /// @returns the data layout as a string
-  const std::string &getDataLayout() const { return DataLayout; }
+  /// Get the data layout string for the module's target platform. This is
+  /// equivalent to getDataLayout()->getStringRepresentation().
+  const std::string &getDataLayoutStr() const { return DataLayoutStr; }
+
+  /// Get the data layout for the module's target platform.
+  const DataLayout *getDataLayout() const;
 
   /// Get the target triple which is a string describing the target host.
   /// @returns a string containing the target triple.
@@ -247,7 +258,8 @@ public:
   void setModuleIdentifier(StringRef ID) { ModuleID = ID; }
 
   /// Set the data layout
-  void setDataLayout(StringRef DL) { DataLayout = DL; }
+  void setDataLayout(StringRef Desc);
+  void setDataLayout(const DataLayout *Other);
 
   /// Set the target triple.
   void setTargetTriple(StringRef T) { TargetTriple = T; }
@@ -506,6 +518,13 @@ public:
   const_global_iterator global_end  () const { return GlobalList.end(); }
   bool                  global_empty() const { return GlobalList.empty(); }
 
+  iterator_range<global_iterator> globals() {
+    return iterator_range<global_iterator>(global_begin(), global_end());
+  }
+  iterator_range<const_global_iterator> globals() const {
+    return iterator_range<const_global_iterator>(global_begin(), global_end());
+  }
+
 /// @}
 /// @name Function Iteration
 /// @{
@@ -528,6 +547,12 @@ public:
   size_t               alias_size () const      { return AliasList.size();  }
   bool                 alias_empty() const      { return AliasList.empty(); }
 
+  iterator_range<alias_iterator> aliases() {
+    return iterator_range<alias_iterator>(alias_begin(), alias_end());
+  }
+  iterator_range<const_alias_iterator> aliases() const {
+    return iterator_range<const_alias_iterator>(alias_begin(), alias_end());
+  }
 
 /// @}
 /// @name Named Metadata Iteration
@@ -546,6 +571,14 @@ public:
   size_t named_metadata_size() const { return NamedMDList.size();  }
   bool named_metadata_empty() const { return NamedMDList.empty(); }
 
+  iterator_range<named_metadata_iterator> named_metadata() {
+    return iterator_range<named_metadata_iterator>(named_metadata_begin(),
+                                                   named_metadata_end());
+  }
+  iterator_range<const_named_metadata_iterator> named_metadata() const {
+    return iterator_range<const_named_metadata_iterator>(named_metadata_begin(),
+                                                         named_metadata_end());
+  }
 
 /// @}
 /// @name Utility functions for printing and dumping Module objects

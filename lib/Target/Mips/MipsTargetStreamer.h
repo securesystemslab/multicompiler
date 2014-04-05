@@ -35,10 +35,16 @@ public:
   virtual void emitDirectiveEnt(const MCSymbol &Symbol) = 0;
   virtual void emitDirectiveAbiCalls() = 0;
   virtual void emitDirectiveOptionPic0() = 0;
+  virtual void emitDirectiveOptionPic2() = 0;
   virtual void emitFrame(unsigned StackReg, unsigned StackSize,
                          unsigned ReturnReg) = 0;
   virtual void emitMask(unsigned CPUBitmask, int CPUTopSavedRegOff) = 0;
   virtual void emitFMask(unsigned FPUBitmask, int FPUTopSavedRegOff) = 0;
+
+  virtual void emitDirectiveSetMips32R2() = 0;
+  virtual void emitDirectiveSetMips64() = 0;
+  virtual void emitDirectiveSetMips64R2() = 0;
+  virtual void emitDirectiveSetDsp() = 0;
 };
 
 // This part is for ascii assembly output
@@ -63,22 +69,32 @@ public:
   virtual void emitDirectiveEnt(const MCSymbol &Symbol);
   virtual void emitDirectiveAbiCalls();
   virtual void emitDirectiveOptionPic0();
+  virtual void emitDirectiveOptionPic2();
   virtual void emitFrame(unsigned StackReg, unsigned StackSize,
                          unsigned ReturnReg);
   virtual void emitMask(unsigned CPUBitmask, int CPUTopSavedRegOff);
   virtual void emitFMask(unsigned FPUBitmask, int FPUTopSavedRegOff);
+
+  virtual void emitDirectiveSetMips32R2();
+  virtual void emitDirectiveSetMips64();
+  virtual void emitDirectiveSetMips64R2();
+  virtual void emitDirectiveSetDsp();
 };
 
 // This part is for ELF object output
 class MipsTargetELFStreamer : public MipsTargetStreamer {
   bool MicroMipsEnabled;
+  const MCSubtargetInfo &STI;
+  bool Pic;
 
 public:
   bool isMicroMipsEnabled() const { return MicroMipsEnabled; }
   MCELFStreamer &getStreamer();
   MipsTargetELFStreamer(MCStreamer &S, const MCSubtargetInfo &STI);
 
-  virtual void emitLabel(MCSymbol *Symbol) LLVM_OVERRIDE;
+  virtual void emitLabel(MCSymbol *Symbol) override;
+  virtual void emitAssignment(MCSymbol *Symbol, const MCExpr *Value) override;
+  void finish() override;
 
   virtual void emitDirectiveSetMicroMips();
   virtual void emitDirectiveSetNoMicroMips();
@@ -96,10 +112,16 @@ public:
   virtual void emitDirectiveEnt(const MCSymbol &Symbol);
   virtual void emitDirectiveAbiCalls();
   virtual void emitDirectiveOptionPic0();
+  virtual void emitDirectiveOptionPic2();
   virtual void emitFrame(unsigned StackReg, unsigned StackSize,
                          unsigned ReturnReg);
   virtual void emitMask(unsigned CPUBitmask, int CPUTopSavedRegOff);
   virtual void emitFMask(unsigned FPUBitmask, int FPUTopSavedRegOff);
+
+  virtual void emitDirectiveSetMips32R2();
+  virtual void emitDirectiveSetMips64();
+  virtual void emitDirectiveSetMips64R2();
+  virtual void emitDirectiveSetDsp();
 };
 }
 #endif

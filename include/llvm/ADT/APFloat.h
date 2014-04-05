@@ -1,4 +1,4 @@
-//== llvm/Support/APFloat.h - Arbitrary Precision Floating Point -*- C++ -*-==//
+//===- llvm/ADT/APFloat.h - Arbitrary Precision Floating Point ---*- C++ -*-==//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -196,6 +196,7 @@ public:
   explicit APFloat(double d);
   explicit APFloat(float f);
   APFloat(const APFloat &);
+  APFloat(APFloat &&);
   ~APFloat();
 
   /// @}
@@ -411,6 +412,7 @@ public:
   /// @}
 
   APFloat &operator=(const APFloat &);
+  APFloat &operator=(APFloat &&);
 
   /// \brief Overload to compute a hash code for an APFloat value.
   ///

@@ -15,13 +15,13 @@
 #include "llvm/Transforms/IPO.h"
 #include "llvm/Analysis/CallGraph.h"
 #include "llvm/Analysis/InlineCost.h"
+#include "llvm/IR/CallSite.h"
 #include "llvm/IR/CallingConv.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Type.h"
-#include "llvm/Support/CallSite.h"
 #include "llvm/Transforms/IPO/InlinerPass.h"
 
 using namespace llvm;
@@ -48,13 +48,24 @@ public:
 
   static char ID; // Pass identification, replacement for typeid
 
-  InlineCost getInlineCost(CallSite CS) {
+  InlineCost getInlineCost(CallSite CS) override {
     return ICA->getInlineCost(CS, getInlineThreshold(CS));
   }
 
-  virtual bool runOnSCC(CallGraphSCC &SCC);
-  virtual void getAnalysisUsage(AnalysisUsage &AU) const;
+  bool runOnSCC(CallGraphSCC &SCC) override;
+  void getAnalysisUsage(AnalysisUsage &AU) const override;
 };
+
+static int computeThresholdFromOptLevels(unsigned OptLevel,
+                                         unsigned SizeOptLevel) {
+  if (OptLevel > 2)
+    return 275;
+  if (SizeOptLevel == 1) // -Os
+    return 75;
+  if (SizeOptLevel == 2) // -Oz
+    return 25;
+  return 225;
+}
 
 } // end anonymous namespace
 
@@ -70,6 +81,12 @@ Pass *llvm::createFunctionInliningPass() { return new SimpleInliner(); }
 
 Pass *llvm::createFunctionInliningPass(int Threshold) {
   return new SimpleInliner(Threshold);
+}
+
+Pass *llvm::createFunctionInliningPass(unsigned OptLevel,
+                                       unsigned SizeOptLevel) {
+  return new SimpleInliner(
+      computeThresholdFromOptLevels(OptLevel, SizeOptLevel));
 }
 
 bool SimpleInliner::runOnSCC(CallGraphSCC &SCC) {

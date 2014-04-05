@@ -262,7 +262,7 @@ public:
   }
   virtual ~LLIObjectCache() {}
 
-  virtual void notifyObjectCompiled(const Module *M, const MemoryBuffer *Obj) {
+  void notifyObjectCompiled(const Module *M, const MemoryBuffer *Obj) override {
     const std::string ModuleID = M->getModuleIdentifier();
     std::string CacheName;
     if (!getCacheFilename(ModuleID, CacheName))
@@ -273,18 +273,18 @@ public:
       sys::path::remove_filename(dir);
       sys::fs::create_directories(Twine(dir));
     }
-    raw_fd_ostream outfile(CacheName.c_str(), errStr, sys::fs::F_Binary);
+    raw_fd_ostream outfile(CacheName.c_str(), errStr, sys::fs::F_None);
     outfile.write(Obj->getBufferStart(), Obj->getBufferSize());
     outfile.close();
   }
 
-  virtual MemoryBuffer* getObject(const Module* M) {
+  MemoryBuffer* getObject(const Module* M) override {
     const std::string ModuleID = M->getModuleIdentifier();
     std::string CacheName;
     if (!getCacheFilename(ModuleID, CacheName))
       return NULL;
     // Load the object from the cache filename
-    OwningPtr<MemoryBuffer> IRObjectBuffer;
+    std::unique_ptr<MemoryBuffer> IRObjectBuffer;
     MemoryBuffer::getFile(CacheName.c_str(), IRObjectBuffer, -1, false);
     // If the file isn't there, that's OK.
     if (!IRObjectBuffer)
@@ -537,14 +537,14 @@ int main(int argc, char **argv, char * const *envp) {
   }
 
   for (unsigned i = 0, e = ExtraArchives.size(); i != e; ++i) {
-    OwningPtr<MemoryBuffer> ArBuf;
+    std::unique_ptr<MemoryBuffer> ArBuf;
     error_code ec;
     ec = MemoryBuffer::getFileOrSTDIN(ExtraArchives[i], ArBuf);
     if (ec) {
       Err.print(argv[0], errs());
       return 1;
     }
-    object::Archive *Ar = new object::Archive(ArBuf.take(), ec);
+    object::Archive *Ar = new object::Archive(ArBuf.release(), ec);
     if (ec || !Ar) {
       Err.print(argv[0], errs());
       return 1;
@@ -662,7 +662,7 @@ int main(int argc, char **argv, char * const *envp) {
     // address space, assign the section addresses to resolve any relocations,
     // and send it to the target.
 
-    OwningPtr<RemoteTarget> Target;
+    std::unique_ptr<RemoteTarget> Target;
     if (!ChildExecPath.empty()) { // Remote execution on a child process
 #ifndef LLVM_ON_UNIX
       // FIXME: Remove this pointless fallback mode which causes tests to "pass"

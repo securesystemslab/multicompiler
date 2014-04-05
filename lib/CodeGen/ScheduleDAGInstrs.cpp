@@ -148,31 +148,32 @@ static void getUnderlyingObjectsForInstr(const MachineInstr *MI,
   if (!V)
     return;
 
+  if (const PseudoSourceValue *PSV = dyn_cast<PseudoSourceValue>(V)) {
+    // For now, ignore PseudoSourceValues which may alias LLVM IR values
+    // because the code that uses this function has no way to cope with
+    // such aliases.
+    if (!PSV->isAliased(MFI)) {
+      bool MayAlias = PSV->mayAlias(MFI);
+      Objects.push_back(UnderlyingObjectsVector::value_type(V, MayAlias));
+    }
+    return;
+  }
+
   SmallVector<Value *, 4> Objs;
   getUnderlyingObjects(V, Objs);
 
   for (SmallVectorImpl<Value *>::iterator I = Objs.begin(), IE = Objs.end();
          I != IE; ++I) {
-    bool MayAlias = true;
     V = *I;
 
-    if (const PseudoSourceValue *PSV = dyn_cast<PseudoSourceValue>(V)) {
-      // For now, ignore PseudoSourceValues which may alias LLVM IR values
-      // because the code that uses this function has no way to cope with
-      // such aliases.
+    assert(!isa<PseudoSourceValue>(V) && "Underlying value is a stack slot!");
 
-      if (PSV->isAliased(MFI)) {
-        Objects.clear();
-        return;
-      }
-
-      MayAlias = PSV->mayAlias(MFI);
-    } else if (!isIdentifiedObject(V)) {
+    if (!isIdentifiedObject(V)) {
       Objects.clear();
       return;
     }
 
-    Objects.push_back(UnderlyingObjectsVector::value_type(V, MayAlias));
+    Objects.push_back(UnderlyingObjectsVector::value_type(V, true));
   }
 }
 
@@ -564,10 +565,10 @@ static bool MIsNeedChainEdge(AliasAnalysis *AA, const MachineFrameInfo *MFI,
   int64_t Overlapb = MMOb->getSize() + MMOb->getOffset() - MinOffset;
 
   AliasAnalysis::AliasResult AAResult = AA->alias(
-  AliasAnalysis::Location(MMOa->getValue(), Overlapa,
-                          UseTBAA ? MMOa->getTBAAInfo() : 0),
-  AliasAnalysis::Location(MMOb->getValue(), Overlapb,
-                          UseTBAA ? MMOb->getTBAAInfo() : 0));
+      AliasAnalysis::Location(MMOa->getValue(), Overlapa,
+                              UseTBAA ? MMOa->getTBAAInfo() : 0),
+      AliasAnalysis::Location(MMOb->getValue(), Overlapb,
+                              UseTBAA ? MMOb->getTBAAInfo() : 0));
 
   return (AAResult != AliasAnalysis::NoAlias);
 }
@@ -783,7 +784,7 @@ void ScheduleDAGInstrs::buildSchedGraph(AliasAnalysis *AA,
   MachineInstr *DbgMI = NULL;
   for (MachineBasicBlock::iterator MII = RegionEnd, MIE = RegionBegin;
        MII != MIE; --MII) {
-    MachineInstr *MI = prior(MII);
+    MachineInstr *MI = std::prev(MII);
     if (MI && DbgMI) {
       DbgValues.push_back(std::make_pair(DbgMI, MI));
       DbgMI = NULL;
@@ -799,11 +800,13 @@ void ScheduleDAGInstrs::buildSchedGraph(AliasAnalysis *AA,
     if (RPTracker) {
       PressureDiff *PDiff = PDiffs ? &(*PDiffs)[SU->NodeNum] : 0;
       RPTracker->recede(/*LiveUses=*/0, PDiff);
-      assert(RPTracker->getPos() == prior(MII) && "RPTracker can't find MI");
+      assert(RPTracker->getPos() == std::prev(MII) &&
+             "RPTracker can't find MI");
     }
 
-    assert((CanHandleTerminators || (!MI->isTerminator() && !MI->isLabel())) &&
-           "Cannot schedule terminators or labels!");
+    assert(
+        (CanHandleTerminators || (!MI->isTerminator() && !MI->isPosition())) &&
+        "Cannot schedule terminators or labels!");
 
     // Add register-based dependencies (data, anti, and output).
     bool HasVRegDef = false;
@@ -1426,7 +1429,7 @@ public:
 
   const SDep *backtrack() {
     DFSStack.pop_back();
-    return DFSStack.empty() ? 0 : llvm::prior(DFSStack.back().second);
+    return DFSStack.empty() ? 0 : std::prev(DFSStack.back().second);
   }
 
   const SUnit *getCurr() const { return DFSStack.back().first; }

@@ -78,12 +78,12 @@ namespace {
 struct ThreadSanitizer : public FunctionPass {
   ThreadSanitizer(StringRef BlacklistFile = StringRef())
       : FunctionPass(ID),
-        TD(0),
+        DL(0),
         BlacklistFile(BlacklistFile.empty() ? ClBlacklistFile
                                             : BlacklistFile) { }
-  const char *getPassName() const;
-  bool runOnFunction(Function &F);
-  bool doInitialization(Module &M);
+  const char *getPassName() const override;
+  bool runOnFunction(Function &F) override;
+  bool doInitialization(Module &M) override;
   static char ID;  // Pass identification, replacement for typeid.
 
  private:
@@ -96,10 +96,10 @@ struct ThreadSanitizer : public FunctionPass {
   bool addrPointsToConstantData(Value *Addr);
   int getMemoryAccessFuncIndex(Value *Addr);
 
-  DataLayout *TD;
+  const DataLayout *DL;
   Type *IntptrTy;
   SmallString<64> BlacklistFile;
-  OwningPtr<SpecialCaseList> BL;
+  std::unique_ptr<SpecialCaseList> BL;
   IntegerType *OrdTy;
   // Callbacks to run-time library are computed in doInitialization.
   Function *TsanFuncEntry;
@@ -224,14 +224,15 @@ void ThreadSanitizer::initializeCallbacks(Module &M) {
 }
 
 bool ThreadSanitizer::doInitialization(Module &M) {
-  TD = getAnalysisIfAvailable<DataLayout>();
-  if (!TD)
+  DataLayoutPass *DLP = getAnalysisIfAvailable<DataLayoutPass>();
+  if (!DLP)
     return false;
+  DL = &DLP->getDataLayout();
   BL.reset(SpecialCaseList::createOrDie(BlacklistFile));
 
   // Always insert a call to __tsan_init into the module's CTORs.
   IRBuilder<> IRB(M.getContext());
-  IntptrTy = IRB.getIntPtrTy(TD);
+  IntptrTy = IRB.getIntPtrTy(DL);
   Value *TsanInit = M.getOrInsertFunction("__tsan_init",
                                           IRB.getVoidTy(), NULL);
   appendToGlobalCtors(M, cast<Function>(TsanInit), 0);
@@ -320,7 +321,7 @@ static bool isAtomic(Instruction *I) {
 }
 
 bool ThreadSanitizer::runOnFunction(Function &F) {
-  if (!TD) return false;
+  if (!DL) return false;
   if (BL->isIn(F)) return false;
   initializeCallbacks(*F.getParent());
   SmallVector<Instruction*, 8> RetVec;
@@ -445,21 +446,6 @@ static ConstantInt *createOrdering(IRBuilder<> *IRB, AtomicOrdering ord) {
   return IRB->getInt32(v);
 }
 
-static ConstantInt *createFailOrdering(IRBuilder<> *IRB, AtomicOrdering ord) {
-  uint32_t v = 0;
-  switch (ord) {
-    case NotAtomic:              assert(false);
-    case Unordered:              // Fall-through.
-    case Monotonic:              v = 0; break;
-    // case Consume:                v = 1; break;  // Not specified yet.
-    case Acquire:                v = 2; break;
-    case Release:                v = 0; break;
-    case AcquireRelease:         v = 2; break;
-    case SequentiallyConsistent: v = 5; break;
-  }
-  return IRB->getInt32(v);
-}
-
 // If a memset intrinsic gets inlined by the code gen, we will miss races on it.
 // So, we either need to ensure the intrinsic is not inlined, or instrument it.
 // We do not instrument memset/memmove/memcpy intrinsics (too complicated),
@@ -555,8 +541,8 @@ bool ThreadSanitizer::instrumentAtomic(Instruction *I) {
     Value *Args[] = {IRB.CreatePointerCast(Addr, PtrTy),
                      IRB.CreateIntCast(CASI->getCompareOperand(), Ty, false),
                      IRB.CreateIntCast(CASI->getNewValOperand(), Ty, false),
-                     createOrdering(&IRB, CASI->getOrdering()),
-                     createFailOrdering(&IRB, CASI->getOrdering())};
+                     createOrdering(&IRB, CASI->getSuccessOrdering()),
+                     createOrdering(&IRB, CASI->getFailureOrdering())};
     CallInst *C = CallInst::Create(TsanAtomicCAS[Idx], ArrayRef<Value*>(Args));
     ReplaceInstWithInst(I, C);
   } else if (FenceInst *FI = dyn_cast<FenceInst>(I)) {
@@ -573,7 +559,7 @@ int ThreadSanitizer::getMemoryAccessFuncIndex(Value *Addr) {
   Type *OrigPtrTy = Addr->getType();
   Type *OrigTy = cast<PointerType>(OrigPtrTy)->getElementType();
   assert(OrigTy->isSized());
-  uint32_t TypeSize = TD->getTypeStoreSizeInBits(OrigTy);
+  uint32_t TypeSize = DL->getTypeStoreSizeInBits(OrigTy);
   if (TypeSize != 8  && TypeSize != 16 &&
       TypeSize != 32 && TypeSize != 64 && TypeSize != 128) {
     NumAccessesWithBadSize++;

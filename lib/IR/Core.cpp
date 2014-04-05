@@ -15,6 +15,7 @@
 #include "llvm-c/Core.h"
 #include "llvm/Bitcode/ReaderWriter.h"
 #include "llvm/IR/Attributes.h"
+#include "llvm/IR/CallSite.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/GlobalAlias.h"
@@ -25,7 +26,6 @@
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Module.h"
 #include "llvm/PassManager.h"
-#include "llvm/Support/CallSite.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/ManagedStatic.h"
@@ -107,7 +107,7 @@ void LLVMDisposeModule(LLVMModuleRef M) {
 
 /*--.. Data layout .........................................................--*/
 const char * LLVMGetDataLayout(LLVMModuleRef M) {
-  return unwrap(M)->getDataLayout().c_str();
+  return unwrap(M)->getDataLayoutStr().c_str();
 }
 
 void LLVMSetDataLayout(LLVMModuleRef M, const char *Triple) {
@@ -130,7 +130,7 @@ void LLVMDumpModule(LLVMModuleRef M) {
 LLVMBool LLVMPrintModuleToFile(LLVMModuleRef M, const char *Filename,
                                char **ErrorMessage) {
   std::string error;
-  raw_fd_ostream dest(Filename, error);
+  raw_fd_ostream dest(Filename, error, sys::fs::F_Text);
   if (!error.empty()) {
     *ErrorMessage = strdup(error.c_str());
     return true;
@@ -514,7 +514,7 @@ LLVMUseRef LLVMGetFirstUse(LLVMValueRef Val) {
   Value::use_iterator I = V->use_begin();
   if (I == V->use_end())
     return 0;
-  return wrap(&(I.getUse()));
+  return wrap(&*I);
 }
 
 LLVMUseRef LLVMGetNextUse(LLVMUseRef U) {
@@ -1159,10 +1159,6 @@ LLVMLinkage LLVMGetLinkage(LLVMValueRef Global) {
     return LLVMInternalLinkage;
   case GlobalValue::PrivateLinkage:
     return LLVMPrivateLinkage;
-  case GlobalValue::LinkerPrivateLinkage:
-    return LLVMLinkerPrivateLinkage;
-  case GlobalValue::LinkerPrivateWeakLinkage:
-    return LLVMLinkerPrivateWeakLinkage;
   case GlobalValue::ExternalWeakLinkage:
     return LLVMExternalWeakLinkage;
   case GlobalValue::CommonLinkage:
@@ -1208,10 +1204,10 @@ void LLVMSetLinkage(LLVMValueRef Global, LLVMLinkage Linkage) {
     GV->setLinkage(GlobalValue::PrivateLinkage);
     break;
   case LLVMLinkerPrivateLinkage:
-    GV->setLinkage(GlobalValue::LinkerPrivateLinkage);
+    GV->setLinkage(GlobalValue::PrivateLinkage);
     break;
   case LLVMLinkerPrivateWeakLinkage:
-    GV->setLinkage(GlobalValue::LinkerPrivateWeakLinkage);
+    GV->setLinkage(GlobalValue::PrivateLinkage);
     break;
   case LLVMDLLImportLinkage:
     DEBUG(errs()
@@ -1252,30 +1248,54 @@ void LLVMSetVisibility(LLVMValueRef Global, LLVMVisibility Viz) {
     ->setVisibility(static_cast<GlobalValue::VisibilityTypes>(Viz));
 }
 
+LLVMDLLStorageClass LLVMGetDLLStorageClass(LLVMValueRef Global) {
+  return static_cast<LLVMDLLStorageClass>(
+      unwrap<GlobalValue>(Global)->getDLLStorageClass());
+}
+
+void LLVMSetDLLStorageClass(LLVMValueRef Global, LLVMDLLStorageClass Class) {
+  unwrap<GlobalValue>(Global)->setDLLStorageClass(
+      static_cast<GlobalValue::DLLStorageClassTypes>(Class));
+}
+
+LLVMBool LLVMHasUnnamedAddr(LLVMValueRef Global) {
+  return unwrap<GlobalValue>(Global)->hasUnnamedAddr();
+}
+
+void LLVMSetUnnamedAddr(LLVMValueRef Global, LLVMBool HasUnnamedAddr) {
+  unwrap<GlobalValue>(Global)->setUnnamedAddr(HasUnnamedAddr);
+}
+
 /*--.. Operations on global variables, load and store instructions .........--*/
 
 unsigned LLVMGetAlignment(LLVMValueRef V) {
   Value *P = unwrap<Value>(V);
   if (GlobalValue *GV = dyn_cast<GlobalValue>(P))
     return GV->getAlignment();
+  if (AllocaInst *AI = dyn_cast<AllocaInst>(P))
+    return AI->getAlignment();
   if (LoadInst *LI = dyn_cast<LoadInst>(P))
     return LI->getAlignment();
   if (StoreInst *SI = dyn_cast<StoreInst>(P))
     return SI->getAlignment();
 
-  llvm_unreachable("only GlobalValue, LoadInst and StoreInst have alignment");
+  llvm_unreachable(
+      "only GlobalValue, AllocaInst, LoadInst and StoreInst have alignment");
 }
 
 void LLVMSetAlignment(LLVMValueRef V, unsigned Bytes) {
   Value *P = unwrap<Value>(V);
   if (GlobalValue *GV = dyn_cast<GlobalValue>(P))
     GV->setAlignment(Bytes);
+  else if (AllocaInst *AI = dyn_cast<AllocaInst>(P))
+    AI->setAlignment(Bytes);
   else if (LoadInst *LI = dyn_cast<LoadInst>(P))
     LI->setAlignment(Bytes);
   else if (StoreInst *SI = dyn_cast<StoreInst>(P))
     SI->setAlignment(Bytes);
   else
-    llvm_unreachable("only GlobalValue, LoadInst and StoreInst have alignment");
+    llvm_unreachable(
+        "only GlobalValue, AllocaInst, LoadInst and StoreInst have alignment");
 }
 
 /*--.. Operations on global variables ......................................--*/
@@ -2520,10 +2540,10 @@ LLVMBool LLVMCreateMemoryBufferWithContentsOfFile(
     LLVMMemoryBufferRef *OutMemBuf,
     char **OutMessage) {
 
-  OwningPtr<MemoryBuffer> MB;
+  std::unique_ptr<MemoryBuffer> MB;
   error_code ec;
   if (!(ec = MemoryBuffer::getFile(Path, MB))) {
-    *OutMemBuf = wrap(MB.take());
+    *OutMemBuf = wrap(MB.release());
     return 0;
   }
 
@@ -2533,10 +2553,10 @@ LLVMBool LLVMCreateMemoryBufferWithContentsOfFile(
 
 LLVMBool LLVMCreateMemoryBufferWithSTDIN(LLVMMemoryBufferRef *OutMemBuf,
                                          char **OutMessage) {
-  OwningPtr<MemoryBuffer> MB;
+  std::unique_ptr<MemoryBuffer> MB;
   error_code ec;
   if (!(ec = MemoryBuffer::getSTDIN(MB))) {
-    *OutMemBuf = wrap(MB.take());
+    *OutMemBuf = wrap(MB.release());
     return 0;
   }
 

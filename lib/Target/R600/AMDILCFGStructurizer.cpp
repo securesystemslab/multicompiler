@@ -790,7 +790,7 @@ bool AMDGPUCFGStructurizer::prepare() {
 bool AMDGPUCFGStructurizer::run() {
 
   //Assume reducible CFG...
-  DEBUG(dbgs() << "AMDGPUCFGStructurizer::run\n";FuncRep->viewCFG(););
+  DEBUG(dbgs() << "AMDGPUCFGStructurizer::run\n");
 
 #ifdef STRESSTEST
   //Use the worse block ordering to test the algorithm.
@@ -862,8 +862,7 @@ bool AMDGPUCFGStructurizer::run() {
           ContNextScc = false;
           DEBUG(
             dbgs() << "repeat processing SCC" << getSCCNum(MBB)
-                   << "sccNumIter = " << SccNumIter << "\n";
-            FuncRep->viewCFG();
+                   << "sccNumIter = " << SccNumIter << '\n';
           );
         } else {
           // Finish the current scc.
@@ -919,12 +918,10 @@ bool AMDGPUCFGStructurizer::run() {
   BlockInfoMap.clear();
   LLInfoMap.clear();
 
-  DEBUG(
-    FuncRep->viewCFG();
-  );
-
-  if (!Finish)
-    llvm_unreachable("IRREDUCIBL_CF");
+  if (!Finish) {
+    DEBUG(FuncRep->viewCFG());
+    llvm_unreachable("IRREDUCIBLE_CFG");
+  }
 
   return true;
 }
@@ -934,8 +931,8 @@ bool AMDGPUCFGStructurizer::run() {
 void AMDGPUCFGStructurizer::orderBlocks(MachineFunction *MF) {
   int SccNum = 0;
   MachineBasicBlock *MBB;
-  for (scc_iterator<MachineFunction *> It = scc_begin(MF), E = scc_end(MF);
-      It != E; ++It, ++SccNum) {
+  for (scc_iterator<MachineFunction *> It = scc_begin(MF); !It.isAtEnd();
+       ++It, ++SccNum) {
     std::vector<MachineBasicBlock *> &SccNext = *It;
     for (std::vector<MachineBasicBlock *>::const_iterator
          blockIter = SccNext.begin(), blockEnd = SccNext.end();
@@ -1238,7 +1235,7 @@ int AMDGPUCFGStructurizer::handleJumpintoIfImp(MachineBasicBlock *HeadMBB,
 
       numClonedBlock += Num;
       Num += serialPatternMatch(*HeadMBB->succ_begin());
-      Num += serialPatternMatch(*llvm::next(HeadMBB->succ_begin()));
+      Num += serialPatternMatch(*std::next(HeadMBB->succ_begin()));
       Num += ifPatternMatch(HeadMBB);
       assert(Num > 0);
 
@@ -1767,7 +1764,7 @@ void AMDGPUCFGStructurizer::removeRedundantConditionalBranch(
   if (MBB->succ_size() != 2)
     return;
   MachineBasicBlock *MBB1 = *MBB->succ_begin();
-  MachineBasicBlock *MBB2 = *llvm::next(MBB->succ_begin());
+  MachineBasicBlock *MBB2 = *std::next(MBB->succ_begin());
   if (MBB1 != MBB2)
     return;
 

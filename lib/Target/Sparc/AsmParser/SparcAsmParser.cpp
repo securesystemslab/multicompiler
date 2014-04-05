@@ -12,9 +12,11 @@
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCInst.h"
+#include "llvm/MC/MCObjectFileInfo.h"
 #include "llvm/MC/MCParser/MCParsedAsmOperand.h"
 #include "llvm/MC/MCStreamer.h"
 #include "llvm/MC/MCSubtargetInfo.h"
+#include "llvm/MC/MCSymbol.h"
 #include "llvm/MC/MCTargetAsmParser.h"
 #include "llvm/Support/TargetRegistry.h"
 
@@ -66,14 +68,19 @@ class SparcAsmParser : public MCTargetAsmParser {
                StringRef Name);
 
   OperandMatchResultTy
-  parseSparcAsmOperand(SparcOperand *&Operand);
+  parseSparcAsmOperand(SparcOperand *&Operand, bool isCall = false);
+
+  OperandMatchResultTy
+  parseBranchModifiers(SmallVectorImpl<MCParsedAsmOperand*> &Operands);
 
   // returns true if Tok is matched to a register and returns register in RegNo.
   bool matchRegisterName(const AsmToken &Tok, unsigned &RegNo,
                          unsigned &RegKind);
 
   bool matchSparcAsmModifiers(const MCExpr *&EVal, SMLoc &EndLoc);
+  bool parseDirectiveWord(unsigned Size, SMLoc L);
 
+  bool is64Bit() const { return STI.getTargetTriple().startswith("sparcv9"); }
 public:
   SparcAsmParser(MCSubtargetInfo &sti, MCAsmParser &parser,
                 const MCInstrInfo &MII)
@@ -393,7 +400,7 @@ MatchAndEmitInstruction(SMLoc IDLoc, unsigned &Opcode,
 
   case Match_Success: {
     Inst.setLoc(IDLoc);
-    Out.EmitInstruction(Inst);
+    Out.EmitInstruction(Inst, STI);
     return false;
   }
 
@@ -415,7 +422,7 @@ MatchAndEmitInstruction(SMLoc IDLoc, unsigned &Opcode,
     return Error(ErrorLoc, "invalid operand for instruction");
   }
   case Match_MnemonicFail:
-    return Error(IDLoc, "invalid instruction");
+    return Error(IDLoc, "invalid instruction mnemonic");
   }
   return true;
 }
@@ -439,21 +446,30 @@ ParseRegister(unsigned &RegNo, SMLoc &StartLoc, SMLoc &EndLoc)
   return Error(StartLoc, "invalid register name");
 }
 
+static void applyMnemonicAliases(StringRef &Mnemonic, unsigned Features,
+                                 unsigned VariantID);
+
 bool SparcAsmParser::
 ParseInstruction(ParseInstructionInfo &Info, StringRef Name,
                  SMLoc NameLoc,
                  SmallVectorImpl<MCParsedAsmOperand*> &Operands)
 {
-  // Check if we have valid mnemonic.
-  if (!mnemonicIsValid(Name, 0)) {
-    Parser.eatToEndOfStatement();
-    return Error(NameLoc, "Unknown instruction");
-  }
+
   // First operand in MCInst is instruction mnemonic.
   Operands.push_back(SparcOperand::CreateToken(Name, NameLoc));
 
+  // apply mnemonic aliases, if any, so that we can parse operands correctly.
+  applyMnemonicAliases(Name, getAvailableFeatures(), 0);
+
   if (getLexer().isNot(AsmToken::EndOfStatement)) {
     // Read the first operand.
+    if (getLexer().is(AsmToken::Comma)) {
+      if (parseBranchModifiers(Operands) != MatchOperand_Success) {
+        SMLoc Loc = getLexer().getLoc();
+        Parser.eatToEndOfStatement();
+        return Error(Loc, "unexpected token");
+      }
+    }
     if (parseOperand(Operands, Name) != MatchOperand_Success) {
       SMLoc Loc = getLexer().getLoc();
       Parser.eatToEndOfStatement();
@@ -482,8 +498,52 @@ ParseInstruction(ParseInstructionInfo &Info, StringRef Name,
 bool SparcAsmParser::
 ParseDirective(AsmToken DirectiveID)
 {
-  // Ignore all directives for now.
-  Parser.eatToEndOfStatement();
+  StringRef IDVal = DirectiveID.getString();
+
+  if (IDVal == ".byte")
+    return parseDirectiveWord(1, DirectiveID.getLoc());
+
+  if (IDVal == ".half")
+    return parseDirectiveWord(2, DirectiveID.getLoc());
+
+  if (IDVal == ".word")
+    return parseDirectiveWord(4, DirectiveID.getLoc());
+
+  if (IDVal == ".nword")
+    return parseDirectiveWord(is64Bit() ? 8 : 4, DirectiveID.getLoc());
+
+  if (is64Bit() && IDVal == ".xword")
+    return parseDirectiveWord(8, DirectiveID.getLoc());
+
+  if (IDVal == ".register") {
+    // For now, ignore .register directive.
+    Parser.eatToEndOfStatement();
+    return false;
+  }
+
+  // Let the MC layer to handle other directives.
+  return true;
+}
+
+bool SparcAsmParser:: parseDirectiveWord(unsigned Size, SMLoc L) {
+  if (getLexer().isNot(AsmToken::EndOfStatement)) {
+    for (;;) {
+      const MCExpr *Value;
+      if (getParser().parseExpression(Value))
+        return true;
+
+      getParser().getStreamer().EmitValue(Value, Size);
+
+      if (getLexer().is(AsmToken::EndOfStatement))
+        break;
+
+      // FIXME: Improve diagnostic.
+      if (getLexer().isNot(AsmToken::Comma))
+        return Error(L, "unexpected token in directive");
+      Parser.Lex();
+    }
+  }
+  Parser.Lex();
   return false;
 }
 
@@ -546,7 +606,24 @@ parseOperand(SmallVectorImpl<MCParsedAsmOperand*> &Operands,
                                                  Parser.getTok().getLoc()));
     Parser.Lex(); // Eat the [
 
-    ResTy = parseMEMOperand(Operands);
+    if (Mnemonic == "cas" || Mnemonic == "casx") {
+      SMLoc S = Parser.getTok().getLoc();
+      if (getLexer().getKind() != AsmToken::Percent)
+        return MatchOperand_NoMatch;
+      Parser.Lex(); // eat %
+
+      unsigned RegNo, RegKind;
+      if (!matchRegisterName(Parser.getTok(), RegNo, RegKind))
+        return MatchOperand_NoMatch;
+
+      Parser.Lex(); // Eat the identifier token.
+      SMLoc E = SMLoc::getFromPointer(Parser.getTok().getLoc().getPointer()-1);
+      Operands.push_back(SparcOperand::CreateReg(RegNo, RegKind, S, E));
+      ResTy = MatchOperand_Success;
+    } else {
+      ResTy = parseMEMOperand(Operands);
+    }
+
     if (ResTy != MatchOperand_Success)
       return ResTy;
 
@@ -560,7 +637,8 @@ parseOperand(SmallVectorImpl<MCParsedAsmOperand*> &Operands,
   }
 
   SparcOperand *Op = 0;
-  ResTy = parseSparcAsmOperand(Op);
+
+  ResTy = parseSparcAsmOperand(Op, (Mnemonic == "call"));
   if (ResTy != MatchOperand_Success || !Op)
     return MatchOperand_ParseFail;
 
@@ -571,7 +649,7 @@ parseOperand(SmallVectorImpl<MCParsedAsmOperand*> &Operands,
 }
 
 SparcAsmParser::OperandMatchResultTy
-SparcAsmParser::parseSparcAsmOperand(SparcOperand *&Op)
+SparcAsmParser::parseSparcAsmOperand(SparcOperand *&Op, bool isCall)
 {
 
   SMLoc S = Parser.getTok().getLoc();
@@ -604,11 +682,6 @@ SparcAsmParser::parseSparcAsmOperand(SparcOperand *&Op)
         else
           Op = SparcOperand::CreateToken("%icc", S);
         break;
-
-      case Sparc::FCC:
-        assert(name == "fcc0" && "Cannot handle %fcc other than %fcc0 yet");
-        Op = SparcOperand::CreateToken("%fcc0", S);
-        break;
       }
       break;
     }
@@ -632,12 +705,37 @@ SparcAsmParser::parseSparcAsmOperand(SparcOperand *&Op)
 
       const MCExpr *Res = MCSymbolRefExpr::Create(Sym, MCSymbolRefExpr::VK_None,
                                                   getContext());
+      if (isCall &&
+          getContext().getObjectFileInfo()->getRelocM() == Reloc::PIC_)
+        Res = SparcMCExpr::Create(SparcMCExpr::VK_Sparc_WPLT30, Res,
+                                  getContext());
       Op = SparcOperand::CreateImm(Res, S, E);
     }
     break;
   }
   }
   return (Op) ? MatchOperand_Success : MatchOperand_ParseFail;
+}
+
+SparcAsmParser::OperandMatchResultTy SparcAsmParser::
+parseBranchModifiers(SmallVectorImpl<MCParsedAsmOperand*> &Operands) {
+
+  // parse (,a|,pn|,pt)+
+
+  while (getLexer().is(AsmToken::Comma)) {
+
+    Parser.Lex(); // Eat the comma
+
+    if (!getLexer().is(AsmToken::Identifier))
+      return MatchOperand_ParseFail;
+    StringRef modName = Parser.getTok().getString();
+    if (modName == "a" || modName == "pn" || modName == "pt") {
+      Operands.push_back(SparcOperand::CreateToken(modName,
+                                                   Parser.getTok().getLoc()));
+      Parser.Lex(); // eat the identifier.
+    }
+  }
+  return MatchOperand_Success;
 }
 
 bool SparcAsmParser::matchRegisterName(const AsmToken &Tok,
@@ -687,7 +785,7 @@ bool SparcAsmParser::matchRegisterName(const AsmToken &Tok,
         && !name.substr(3).getAsInteger(10, intVal)
         && intVal < 4) {
       // FIXME: check 64bit and  handle %fcc1 - %fcc3
-      RegNo = Sparc::FCC;
+      RegNo = Sparc::FCC0 + intVal;
       RegKind = SparcOperand::rk_CCReg;
       return true;
     }
@@ -750,6 +848,31 @@ bool SparcAsmParser::matchRegisterName(const AsmToken &Tok,
   return false;
 }
 
+static bool hasGOTReference(const MCExpr *Expr) {
+  switch (Expr->getKind()) {
+  case MCExpr::Target:
+    if (const SparcMCExpr *SE = dyn_cast<SparcMCExpr>(Expr))
+      return hasGOTReference(SE->getSubExpr());
+    break;
+
+  case MCExpr::Constant:
+    break;
+
+  case MCExpr::Binary: {
+    const MCBinaryExpr *BE = cast<MCBinaryExpr>(Expr);
+    return hasGOTReference(BE->getLHS()) || hasGOTReference(BE->getRHS());
+  }
+
+  case MCExpr::SymbolRef: {
+    const MCSymbolRefExpr &SymRef = *cast<MCSymbolRefExpr>(Expr);
+    return (SymRef.getSymbol().getName() == "_GLOBAL_OFFSET_TABLE_");
+  }
+
+  case MCExpr::Unary:
+    return hasGOTReference(cast<MCUnaryExpr>(Expr)->getSubExpr());
+  }
+  return false;
+}
 
 bool SparcAsmParser::matchSparcAsmModifiers(const MCExpr *&EVal,
                                             SMLoc &EndLoc)
@@ -773,6 +896,23 @@ bool SparcAsmParser::matchSparcAsmModifiers(const MCExpr *&EVal,
   const MCExpr *subExpr;
   if (Parser.parseParenExpression(subExpr, EndLoc))
     return false;
+
+  bool isPIC = getContext().getObjectFileInfo()->getRelocM() == Reloc::PIC_;
+
+  switch(VK) {
+  default: break;
+  case SparcMCExpr::VK_Sparc_LO:
+    VK =  (hasGOTReference(subExpr)
+           ? SparcMCExpr::VK_Sparc_PC10
+           : (isPIC ? SparcMCExpr::VK_Sparc_GOT10 : VK));
+    break;
+  case SparcMCExpr::VK_Sparc_HI:
+    VK =  (hasGOTReference(subExpr)
+           ? SparcMCExpr::VK_Sparc_PC22
+           : (isPIC ? SparcMCExpr::VK_Sparc_GOT22 : VK));
+    break;
+  }
+
   EVal = SparcMCExpr::Create(VK, subExpr, getContext());
   return true;
 }

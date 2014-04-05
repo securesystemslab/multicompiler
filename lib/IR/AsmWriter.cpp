@@ -19,10 +19,11 @@
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/StringExtras.h"
-#include "llvm/DebugInfo.h"
 #include "llvm/IR/AssemblyAnnotationWriter.h"
+#include "llvm/IR/CFG.h"
 #include "llvm/IR/CallingConv.h"
 #include "llvm/IR/Constants.h"
+#include "llvm/IR/DebugInfo.h"
 #include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/IRPrintingPasses.h"
 #include "llvm/IR/InlineAsm.h"
@@ -32,7 +33,6 @@
 #include "llvm/IR/Operator.h"
 #include "llvm/IR/TypeFinder.h"
 #include "llvm/IR/ValueSymbolTable.h"
-#include "llvm/Support/CFG.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/Dwarf.h"
 #include "llvm/Support/ErrorHandling.h"
@@ -78,6 +78,7 @@ static void PrintCallingConv(unsigned cc, raw_ostream &Out) {
   case CallingConv::X86_StdCall:   Out << "x86_stdcallcc"; break;
   case CallingConv::X86_FastCall:  Out << "x86_fastcallcc"; break;
   case CallingConv::X86_ThisCall:  Out << "x86_thiscallcc"; break;
+  case CallingConv::X86_CDeclMethod:Out << "x86_cdeclmethodcc"; break;
   case CallingConv::Intel_OCL_BI:  Out << "intel_ocl_bicc"; break;
   case CallingConv::ARM_APCS:      Out << "arm_apcscc"; break;
   case CallingConv::ARM_AAPCS:     Out << "arm_aapcscc"; break;
@@ -810,8 +811,8 @@ static void WriteConstantInternal(raw_ostream &Out, const Constant *CV,
       // output the string in hexadecimal format!  Note that loading and storing
       // floating point types changes the bits of NaNs on some hosts, notably
       // x86, so we must not use these types.
-      assert(sizeof(double) == sizeof(uint64_t) &&
-             "assuming that double is 64 bits!");
+      static_assert(sizeof(double) == sizeof(uint64_t),
+                    "assuming that double is 64 bits!");
       char Buffer[40];
       APFloat apf = CFP->getValueAPF();
       // Halves and floats are represented in ASCII IR as double, convert.
@@ -1225,6 +1226,37 @@ void AssemblyWriter::writeAtomic(AtomicOrdering Ordering,
   }
 }
 
+void AssemblyWriter::writeAtomicCmpXchg(AtomicOrdering SuccessOrdering,
+                                        AtomicOrdering FailureOrdering,
+                                        SynchronizationScope SynchScope) {
+  assert(SuccessOrdering != NotAtomic && FailureOrdering != NotAtomic);
+
+  switch (SynchScope) {
+  case SingleThread: Out << " singlethread"; break;
+  case CrossThread: break;
+  }
+
+  switch (SuccessOrdering) {
+  default: Out << " <bad ordering " << int(SuccessOrdering) << ">"; break;
+  case Unordered: Out << " unordered"; break;
+  case Monotonic: Out << " monotonic"; break;
+  case Acquire: Out << " acquire"; break;
+  case Release: Out << " release"; break;
+  case AcquireRelease: Out << " acq_rel"; break;
+  case SequentiallyConsistent: Out << " seq_cst"; break;
+  }
+
+  switch (FailureOrdering) {
+  default: Out << " <bad ordering " << int(FailureOrdering) << ">"; break;
+  case Unordered: Out << " unordered"; break;
+  case Monotonic: Out << " monotonic"; break;
+  case Acquire: Out << " acquire"; break;
+  case Release: Out << " release"; break;
+  case AcquireRelease: Out << " acq_rel"; break;
+  case SequentiallyConsistent: Out << " seq_cst"; break;
+  }
+}
+
 void AssemblyWriter::writeParamOperand(const Value *Operand,
                                        AttributeSet Attrs, unsigned Idx) {
   if (Operand == 0) {
@@ -1251,8 +1283,9 @@ void AssemblyWriter::printModule(const Module *M) {
       M->getModuleIdentifier().find('\n') == std::string::npos)
     Out << "; ModuleID = '" << M->getModuleIdentifier() << "'\n";
 
-  if (!M->getDataLayout().empty())
-    Out << "target datalayout = \"" << M->getDataLayout() << "\"\n";
+  const std::string &DL = M->getDataLayoutStr();
+  if (!DL.empty())
+    Out << "target datalayout = \"" << DL << "\"\n";
   if (!M->getTargetTriple().empty())
     Out << "target triple = \"" << M->getTargetTriple() << "\"\n";
 
@@ -1358,10 +1391,6 @@ static void PrintLinkage(GlobalValue::LinkageTypes LT,
   switch (LT) {
   case GlobalValue::ExternalLinkage: break;
   case GlobalValue::PrivateLinkage:       Out << "private ";        break;
-  case GlobalValue::LinkerPrivateLinkage: Out << "linker_private "; break;
-  case GlobalValue::LinkerPrivateWeakLinkage:
-    Out << "linker_private_weak ";
-    break;
   case GlobalValue::InternalLinkage:      Out << "internal ";       break;
   case GlobalValue::LinkOnceAnyLinkage:   Out << "linkonce ";       break;
   case GlobalValue::LinkOnceODRLinkage:   Out << "linkonce_odr ";   break;
@@ -1944,9 +1973,9 @@ void AssemblyWriter::printInstruction(const Instruction &I) {
 
   } else if (const AllocaInst *AI = dyn_cast<AllocaInst>(&I)) {
     Out << ' ';
-    TypePrinter.print(AI->getAllocatedType(), Out);
     if (AI->isUsedWithInAlloca())
-      Out << ", inalloca";
+      Out << "inalloca ";
+    TypePrinter.print(AI->getAllocatedType(), Out);
     if (!AI->getArraySize() || AI->isArrayAllocation()) {
       Out << ", ";
       writeOperand(AI->getArraySize(), true);
@@ -2016,7 +2045,8 @@ void AssemblyWriter::printInstruction(const Instruction &I) {
     if (SI->getAlignment())
       Out << ", align " << SI->getAlignment();
   } else if (const AtomicCmpXchgInst *CXI = dyn_cast<AtomicCmpXchgInst>(&I)) {
-    writeAtomic(CXI->getOrdering(), CXI->getSynchScope());
+    writeAtomicCmpXchg(CXI->getSuccessOrdering(), CXI->getFailureOrdering(),
+                       CXI->getSynchScope());
   } else if (const AtomicRMWInst *RMWI = dyn_cast<AtomicRMWInst>(&I)) {
     writeAtomic(RMWI->getOrdering(), RMWI->getSynchScope());
   } else if (const FenceInst *FI = dyn_cast<FenceInst>(&I)) {

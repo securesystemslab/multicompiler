@@ -15,6 +15,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "Passes.h"
+#include "llvm/Analysis/LazyCallGraph.h"
 #include "llvm/IR/IRPrintingPasses.h"
 #include "llvm/IR/PassManager.h"
 #include "llvm/IR/Verifier.h"
@@ -43,6 +44,7 @@ struct NoOpFunctionPass {
 static bool isModulePassName(StringRef Name) {
   if (Name == "no-op-module") return true;
   if (Name == "print") return true;
+  if (Name == "print-cg") return true;
 
   return false;
 }
@@ -61,6 +63,10 @@ static bool parseModulePassName(ModulePassManager &MPM, StringRef Name) {
   }
   if (Name == "print") {
     MPM.addPass(PrintModulePass(dbgs()));
+    return true;
+  }
+  if (Name == "print-cg") {
+    MPM.addPass(LazyCallGraphPrinterPass(dbgs()));
     return true;
   }
   return false;
@@ -95,7 +101,7 @@ static bool parseFunctionPassPipeline(FunctionPassManager &FPM,
       PipelineText = PipelineText.substr(1);
 
       // Add the nested pass manager with the appropriate adaptor.
-      FPM.addPass(NestedFPM);
+      FPM.addPass(std::move(NestedFPM));
     } else {
       // Otherwise try to parse a pass name.
       size_t End = PipelineText.find_first_of(",)");
@@ -132,7 +138,7 @@ static bool parseModulePassPipeline(ModulePassManager &MPM,
       PipelineText = PipelineText.substr(1);
 
       // Now add the nested manager as a module pass.
-      MPM.addPass(NestedMPM);
+      MPM.addPass(std::move(NestedMPM));
     } else if (PipelineText.startswith("function(")) {
       FunctionPassManager NestedFPM;
 
@@ -145,7 +151,7 @@ static bool parseModulePassPipeline(ModulePassManager &MPM,
       PipelineText = PipelineText.substr(1);
 
       // Add the nested pass manager with the appropriate adaptor.
-      MPM.addPass(createModuleToFunctionPassAdaptor(NestedFPM));
+      MPM.addPass(createModuleToFunctionPassAdaptor(std::move(NestedFPM)));
     } else {
       // Otherwise try to parse a pass name.
       size_t End = PipelineText.find_first_of(",)");
@@ -179,7 +185,7 @@ bool llvm::parsePassPipeline(ModulePassManager &MPM, StringRef PipelineText,
     if (!parseFunctionPassPipeline(FPM, PipelineText, VerifyEachPass) ||
         !PipelineText.empty())
       return false;
-    MPM.addPass(createModuleToFunctionPassAdaptor(FPM));
+    MPM.addPass(createModuleToFunctionPassAdaptor(std::move(FPM)));
     return true;
   }
 
@@ -195,7 +201,7 @@ bool llvm::parsePassPipeline(ModulePassManager &MPM, StringRef PipelineText,
     if (!parseFunctionPassPipeline(FPM, PipelineText, VerifyEachPass) ||
         !PipelineText.empty())
       return false;
-    MPM.addPass(createModuleToFunctionPassAdaptor(FPM));
+    MPM.addPass(createModuleToFunctionPassAdaptor(std::move(FPM)));
     return true;
   }
 

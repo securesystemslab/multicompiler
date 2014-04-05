@@ -322,7 +322,7 @@ static void doExtract(StringRef Name, object::Archive::child_iterator I) {
 
   int FD;
   failIfError(
-      sys::fs::openFileForWrite(Storage.c_str(), FD, sys::fs::F_Binary, Mode),
+      sys::fs::openFileForWrite(Storage.c_str(), FD, sys::fs::F_None, Mode),
       Storage.c_str());
 
   {
@@ -475,16 +475,6 @@ void addMember(std::vector<NewArchiveIterator> &Members, T I, StringRef Name,
     Members[Pos] = NI;
 }
 
-namespace {
-class HasName {
-  StringRef Name;
-
-public:
-  HasName(StringRef Name) : Name(Name) {}
-  bool operator()(StringRef Path) { return Name == sys::path::filename(Path); }
-};
-}
-
 enum InsertAction {
   IA_AddOldMember,
   IA_AddNewMeber,
@@ -500,8 +490,9 @@ computeInsertAction(ArchiveOperation Operation,
   if (Operation == QuickAppend || Members.empty())
     return IA_AddOldMember;
 
-  std::vector<std::string>::iterator MI =
-      std::find_if(Members.begin(), Members.end(), HasName(Name));
+  std::vector<std::string>::iterator MI = std::find_if(
+      Members.begin(), Members.end(),
+      [Name](StringRef Path) { return Name == sys::path::filename(Path); });
 
   if (MI == Members.end())
     return IA_AddOldMember;
@@ -696,17 +687,21 @@ static void writeSymbolTable(
     std::vector<std::pair<unsigned, unsigned> > &MemberOffsetRefs) {
   unsigned StartOffset = 0;
   unsigned MemberNum = 0;
-  std::vector<StringRef> SymNames;
-  std::vector<object::ObjectFile *> DeleteIt;
+  std::string NameBuf;
+  raw_string_ostream NameOS(NameBuf);
+  unsigned NumSyms = 0;
+  std::vector<object::SymbolicFile *> DeleteIt;
+  LLVMContext &Context = getGlobalContext();
   for (ArrayRef<NewArchiveIterator>::iterator I = Members.begin(),
                                               E = Members.end();
        I != E; ++I, ++MemberNum) {
     MemoryBuffer *MemberBuffer = Buffers[MemberNum];
-    ErrorOr<object::ObjectFile *> ObjOrErr =
-        object::ObjectFile::createObjectFile(MemberBuffer, false);
+    ErrorOr<object::SymbolicFile *> ObjOrErr =
+        object::SymbolicFile::createSymbolicFile(
+            MemberBuffer, false, sys::fs::file_magic::unknown, &Context);
     if (!ObjOrErr)
       continue;  // FIXME: check only for "not an object file" errors.
-    object::ObjectFile *Obj = ObjOrErr.get();
+    object::SymbolicFile *Obj = ObjOrErr.get();
 
     DeleteIt.push_back(Obj);
     if (!StartOffset) {
@@ -715,36 +710,29 @@ static void writeSymbolTable(
       print32BE(Out, 0);
     }
 
-    error_code Err;
-    for (object::symbol_iterator I = Obj->begin_symbols(),
-                                 E = Obj->end_symbols();
-         I != E; I.increment(Err), failIfError(Err)) {
-      uint32_t Symflags;
-      failIfError(I->getFlags(Symflags));
+    for (object::basic_symbol_iterator I = Obj->symbol_begin(),
+                                       E = Obj->symbol_end();
+         I != E; ++I) {
+      uint32_t Symflags = I->getFlags();
       if (Symflags & object::SymbolRef::SF_FormatSpecific)
         continue;
       if (!(Symflags & object::SymbolRef::SF_Global))
         continue;
       if (Symflags & object::SymbolRef::SF_Undefined)
         continue;
-      StringRef Name;
-      failIfError(I->getName(Name));
-      SymNames.push_back(Name);
+      failIfError(I->printName(NameOS));
+      NameOS << '\0';
+      ++NumSyms;
       MemberOffsetRefs.push_back(std::make_pair(Out.tell(), MemberNum));
       print32BE(Out, 0);
     }
   }
-  for (std::vector<StringRef>::iterator I = SymNames.begin(),
-                                        E = SymNames.end();
-       I != E; ++I) {
-    Out << *I;
-    Out << '\0';
-  }
+  Out << NameOS.str();
 
-  for (std::vector<object::ObjectFile *>::iterator I = DeleteIt.begin(),
-                                                   E = DeleteIt.end();
+  for (std::vector<object::SymbolicFile *>::iterator I = DeleteIt.begin(),
+                                                     E = DeleteIt.end();
        I != E; ++I) {
-    object::ObjectFile *O = *I;
+    object::SymbolicFile *O = *I;
     delete O;
   }
 
@@ -758,7 +746,7 @@ static void writeSymbolTable(
   Out.seek(StartOffset - 12);
   printWithSpacePadding(Out, Pos - StartOffset, 10);
   Out.seek(StartOffset);
-  print32BE(Out, SymNames.size());
+  print32BE(Out, NumSyms);
   Out.seek(Pos);
 }
 
@@ -782,7 +770,7 @@ static void performWriteOperation(ArchiveOperation Operation,
   MemberBuffers.resize(NewMembers.size());
 
   for (unsigned I = 0, N = NewMembers.size(); I < N; ++I) {
-    OwningPtr<MemoryBuffer> MemberBuffer;
+    std::unique_ptr<MemoryBuffer> MemberBuffer;
     NewArchiveIterator &Member = NewMembers[I];
 
     if (Member.isNewMember()) {
@@ -797,7 +785,7 @@ static void performWriteOperation(ArchiveOperation Operation,
       object::Archive::child_iterator OldMember = Member.getOld();
       failIfError(OldMember->getMemoryBuffer(MemberBuffer));
     }
-    MemberBuffers[I] = MemberBuffer.take();
+    MemberBuffers[I] = MemberBuffer.release();
   }
 
   if (Symtab) {
@@ -950,7 +938,7 @@ int ar_main(char **argv) {
 
 static int performOperation(ArchiveOperation Operation) {
   // Create or open the archive object.
-  OwningPtr<MemoryBuffer> Buf;
+  std::unique_ptr<MemoryBuffer> Buf;
   error_code EC = MemoryBuffer::getFile(ArchiveName, Buf, -1, false);
   if (EC && EC != llvm::errc::no_such_file_or_directory) {
     errs() << ToolName << ": error opening '" << ArchiveName
@@ -959,7 +947,7 @@ static int performOperation(ArchiveOperation Operation) {
   }
 
   if (!EC) {
-    object::Archive Archive(Buf.take(), EC);
+    object::Archive Archive(Buf.release(), EC);
 
     if (EC) {
       errs() << ToolName << ": error loading '" << ArchiveName

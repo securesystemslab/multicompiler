@@ -45,8 +45,8 @@ public:
 
   void setMap(MMIAddrLabelMap *map) { Map = map; }
 
-  virtual void deleted();
-  virtual void allUsesReplacedWith(Value *V2);
+  void deleted() override;
+  void allUsesReplacedWith(Value *V2) override;
 };
 
 class MMIAddrLabelMap {
@@ -313,7 +313,7 @@ void MachineModuleInfo::EndFunction() {
   CallsEHReturn = 0;
   CallsUnwindInit = 0;
   CompactUnwindEncoding = 0;
-  VariableDbgInfo.clear();
+  VariableDbgInfos.clear();
 }
 
 /// AnalyzeModule - Scan the module for global debug information.

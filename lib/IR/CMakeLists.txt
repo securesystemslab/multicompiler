@@ -4,6 +4,7 @@ add_llvm_library(LLVMCore
   AutoUpgrade.cpp
   BasicBlock.cpp
   ConstantFold.cpp
+  ConstantRange.cpp
   Constants.cpp
   Core.cpp
   DiagnosticInfo.cpp
@@ -42,14 +43,5 @@ add_llvm_library(LLVMCore
   ValueTypes.cpp
   Verifier.cpp
   )
-
-# Workaround: It takes over 20 minutes to compile with msvc10.
-# FIXME: Suppressing optimizations to core libraries would not be good thing.
-if( MSVC_VERSION LESS 1700 )
-set_property(
-  SOURCE Function.cpp
-  PROPERTY COMPILE_FLAGS "/Og-"
-  )
-endif()
 
 add_dependencies(LLVMCore intrinsics_gen)

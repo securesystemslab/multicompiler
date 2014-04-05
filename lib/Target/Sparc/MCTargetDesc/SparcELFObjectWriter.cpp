@@ -7,8 +7,9 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "MCTargetDesc/SparcMCTargetDesc.h"
 #include "MCTargetDesc/SparcFixupKinds.h"
+#include "MCTargetDesc/SparcMCExpr.h"
+#include "MCTargetDesc/SparcMCTargetDesc.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/MC/MCELFObjectWriter.h"
 #include "llvm/MC/MCExpr.h"
@@ -27,19 +28,20 @@ namespace {
 
     virtual ~SparcELFObjectWriter() {}
   protected:
-    virtual unsigned GetRelocType(const MCValue &Target, const MCFixup &Fixup,
-                                  bool IsPCRel, bool IsRelocWithSymbol,
-                                  int64_t Addend) const;
-
+    unsigned GetRelocType(const MCValue &Target, const MCFixup &Fixup,
+                          bool IsPCRel) const override;
   };
 }
 
-
 unsigned SparcELFObjectWriter::GetRelocType(const MCValue &Target,
                                             const MCFixup &Fixup,
-                                            bool IsPCRel,
-                                            bool IsRelocWithSymbol,
-                                            int64_t Addend) const {
+                                            bool IsPCRel) const {
+
+  if (const SparcMCExpr *SExpr = dyn_cast<SparcMCExpr>(Fixup.getValue())) {
+    if (SExpr->getKind() == SparcMCExpr::VK_Sparc_R_DISP32)
+      return ELF::R_SPARC_DISP32;
+  }
+
   if (IsPCRel) {
     switch((unsigned)Fixup.getKind()) {
     default:
@@ -51,6 +53,9 @@ unsigned SparcELFObjectWriter::GetRelocType(const MCValue &Target,
     case Sparc::fixup_sparc_call30:  return ELF::R_SPARC_WDISP30;
     case Sparc::fixup_sparc_br22:    return ELF::R_SPARC_WDISP22;
     case Sparc::fixup_sparc_br19:    return ELF::R_SPARC_WDISP19;
+    case Sparc::fixup_sparc_pc22:    return ELF::R_SPARC_PC22;
+    case Sparc::fixup_sparc_pc10:    return ELF::R_SPARC_PC10;
+    case Sparc::fixup_sparc_wplt30:  return ELF::R_SPARC_WPLT30;
     }
   }
 
@@ -74,7 +79,28 @@ unsigned SparcELFObjectWriter::GetRelocType(const MCValue &Target,
   case Sparc::fixup_sparc_l44:   return ELF::R_SPARC_L44;
   case Sparc::fixup_sparc_hh:    return ELF::R_SPARC_HH22;
   case Sparc::fixup_sparc_hm:    return ELF::R_SPARC_HM10;
+  case Sparc::fixup_sparc_got22: return ELF::R_SPARC_GOT22;
+  case Sparc::fixup_sparc_got10: return ELF::R_SPARC_GOT10;
+  case Sparc::fixup_sparc_tls_gd_hi22:   return ELF::R_SPARC_TLS_GD_HI22;
+  case Sparc::fixup_sparc_tls_gd_lo10:   return ELF::R_SPARC_TLS_GD_LO10;
+  case Sparc::fixup_sparc_tls_gd_add:    return ELF::R_SPARC_TLS_GD_ADD;
+  case Sparc::fixup_sparc_tls_gd_call:   return ELF::R_SPARC_TLS_GD_CALL;
+  case Sparc::fixup_sparc_tls_ldm_hi22:  return ELF::R_SPARC_TLS_LDM_HI22;
+  case Sparc::fixup_sparc_tls_ldm_lo10:  return ELF::R_SPARC_TLS_LDM_LO10;
+  case Sparc::fixup_sparc_tls_ldm_add:   return ELF::R_SPARC_TLS_LDM_ADD;
+  case Sparc::fixup_sparc_tls_ldm_call:  return ELF::R_SPARC_TLS_LDM_CALL;
+  case Sparc::fixup_sparc_tls_ldo_hix22: return ELF::R_SPARC_TLS_LDO_HIX22;
+  case Sparc::fixup_sparc_tls_ldo_lox10: return ELF::R_SPARC_TLS_LDO_LOX10;
+  case Sparc::fixup_sparc_tls_ldo_add:   return ELF::R_SPARC_TLS_LDO_ADD;
+  case Sparc::fixup_sparc_tls_ie_hi22:   return ELF::R_SPARC_TLS_IE_HI22;
+  case Sparc::fixup_sparc_tls_ie_lo10:   return ELF::R_SPARC_TLS_IE_LO10;
+  case Sparc::fixup_sparc_tls_ie_ld:     return ELF::R_SPARC_TLS_IE_LD;
+  case Sparc::fixup_sparc_tls_ie_ldx:    return ELF::R_SPARC_TLS_IE_LDX;
+  case Sparc::fixup_sparc_tls_ie_add:    return ELF::R_SPARC_TLS_IE_ADD;
+  case Sparc::fixup_sparc_tls_le_hix22:  return ELF::R_SPARC_TLS_LE_HIX22;
+  case Sparc::fixup_sparc_tls_le_lox10:  return ELF::R_SPARC_TLS_LE_LOX10;
   }
+
   return ELF::R_SPARC_NONE;
 }
 

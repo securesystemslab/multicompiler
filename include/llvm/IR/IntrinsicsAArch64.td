@@ -68,7 +68,7 @@ class Neon_N3V_Intrinsic
               [IntrNoMem]>;
 class Neon_N2V_Narrow_Intrinsic
   : Intrinsic<[llvm_anyvector_ty],
-              [LLVMExtendedElementVectorType<0>, llvm_i32_ty],
+              [LLVMExtendedType<0>, llvm_i32_ty],
               [IntrNoMem]>;
 
 // Vector rounding shift right by immediate (Signed)
@@ -110,22 +110,22 @@ def int_aarch64_neon_vminnmv :
 // Vector Table Lookup.
 def int_aarch64_neon_vtbl1 :
   Intrinsic<[llvm_anyvector_ty],
-            [llvm_anyvector_ty, LLVMMatchType<0>], [IntrNoMem]>;
+            [llvm_v16i8_ty, LLVMMatchType<0>], [IntrNoMem]>;
 
 def int_aarch64_neon_vtbl2 :
   Intrinsic<[llvm_anyvector_ty],
-            [llvm_anyvector_ty, LLVMMatchType<1>, LLVMMatchType<0>],
+            [llvm_v16i8_ty, llvm_v16i8_ty, LLVMMatchType<0>],
             [IntrNoMem]>;
 
 def int_aarch64_neon_vtbl3 :
   Intrinsic<[llvm_anyvector_ty],
-            [llvm_anyvector_ty, LLVMMatchType<1>, LLVMMatchType<1>,
+            [llvm_v16i8_ty, llvm_v16i8_ty, llvm_v16i8_ty,
             LLVMMatchType<0>], [IntrNoMem]>;
 
 def int_aarch64_neon_vtbl4 :
   Intrinsic<[llvm_anyvector_ty],
-            [llvm_anyvector_ty, LLVMMatchType<1>, LLVMMatchType<1>,
-            LLVMMatchType<1>, LLVMMatchType<0>], [IntrNoMem]>;
+            [llvm_v16i8_ty, llvm_v16i8_ty, llvm_v16i8_ty,
+            llvm_v16i8_ty, LLVMMatchType<0>], [IntrNoMem]>;
 
 // Vector Table Extension.
 // Some elements of the destination vector may not be updated, so the original
@@ -133,23 +133,23 @@ def int_aarch64_neon_vtbl4 :
 // arguments after that are the table.
 def int_aarch64_neon_vtbx1 :
   Intrinsic<[llvm_anyvector_ty],
-            [LLVMMatchType<0>, llvm_anyvector_ty, LLVMMatchType<0>],
+            [LLVMMatchType<0>, llvm_v16i8_ty, LLVMMatchType<0>],
             [IntrNoMem]>;
 
 def int_aarch64_neon_vtbx2 :
   Intrinsic<[llvm_anyvector_ty],
-            [LLVMMatchType<0>, llvm_anyvector_ty, LLVMMatchType<1>,
-            LLVMMatchType<0>], [IntrNoMem]>;
+            [LLVMMatchType<0>, llvm_v16i8_ty, llvm_v16i8_ty,
+             LLVMMatchType<0>], [IntrNoMem]>;
 
 def int_aarch64_neon_vtbx3 :
   Intrinsic<[llvm_anyvector_ty],
-            [LLVMMatchType<0>, llvm_anyvector_ty, LLVMMatchType<1>,
-            LLVMMatchType<1>, LLVMMatchType<0>], [IntrNoMem]>;
+            [LLVMMatchType<0>, llvm_v16i8_ty, llvm_v16i8_ty,
+             llvm_v16i8_ty, LLVMMatchType<0>], [IntrNoMem]>;
 
 def int_aarch64_neon_vtbx4 :
   Intrinsic<[llvm_anyvector_ty],
-            [LLVMMatchType<0>, llvm_anyvector_ty,  LLVMMatchType<1>,
-            LLVMMatchType<1>,  LLVMMatchType<1>, LLVMMatchType<0>],
+            [LLVMMatchType<0>, llvm_v16i8_ty, llvm_v16i8_ty,
+             llvm_v16i8_ty, llvm_v16i8_ty, LLVMMatchType<0>],
             [IntrNoMem]>;
 
 // Vector Load/store
@@ -404,11 +404,4 @@ def int_aarch64_neon_vcvtfp2fxs_n :
 def int_aarch64_neon_vcvtfp2fxu_n :
   Intrinsic<[llvm_anyvector_ty], [llvm_anyfloat_ty, llvm_i32_ty], [IntrNoMem]>;
 
-class Neon_SHA_Intrinsic
-  : Intrinsic<[llvm_v4i32_ty], [llvm_v4i32_ty, llvm_v1i32_ty, llvm_v4i32_ty],
-              [IntrNoMem]>;
-
-def int_aarch64_neon_sha1c : Neon_SHA_Intrinsic;
-def int_aarch64_neon_sha1m : Neon_SHA_Intrinsic;
-def int_aarch64_neon_sha1p : Neon_SHA_Intrinsic;
 }

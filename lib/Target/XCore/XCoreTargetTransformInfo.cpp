@@ -31,7 +31,7 @@ void initializeXCoreTTIPass(PassRegistry &);
 
 namespace {
 
-class XCoreTTI LLVM_FINAL : public ImmutablePass, public TargetTransformInfo {
+class XCoreTTI final : public ImmutablePass, public TargetTransformInfo {
 public:
   XCoreTTI() : ImmutablePass(ID) {
     llvm_unreachable("This pass cannot be directly constructed");
@@ -42,27 +42,23 @@ public:
     initializeXCoreTTIPass(*PassRegistry::getPassRegistry());
   }
 
-  virtual void initializePass() LLVM_OVERRIDE {
+  virtual void initializePass() override {
     pushTTIStack(this);
   }
 
-  virtual void finalizePass() {
-    popTTIStack();
-  }
-
-  virtual void getAnalysisUsage(AnalysisUsage &AU) const LLVM_OVERRIDE {
+  virtual void getAnalysisUsage(AnalysisUsage &AU) const override {
     TargetTransformInfo::getAnalysisUsage(AU);
   }
 
   static char ID;
 
-  virtual void *getAdjustedAnalysisPointer(const void *ID) LLVM_OVERRIDE {
+  virtual void *getAdjustedAnalysisPointer(const void *ID) override {
     if (ID == &TargetTransformInfo::ID)
       return (TargetTransformInfo*)this;
     return this;
   }
 
-  unsigned getNumberOfRegisters(bool Vector) const LLVM_OVERRIDE {
+  unsigned getNumberOfRegisters(bool Vector) const override {
     if (Vector) {
        return 0;
     }

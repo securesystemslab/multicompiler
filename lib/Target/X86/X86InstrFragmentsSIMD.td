@@ -87,16 +87,6 @@ def X86insrtps : SDNode<"X86ISD::INSERTPS",
 def X86vzmovl  : SDNode<"X86ISD::VZEXT_MOVL",
                  SDTypeProfile<1, 1, [SDTCisSameAs<0,1>]>>;
 
-def X86vzmovly  : SDNode<"X86ISD::VZEXT_MOVL",
-                 SDTypeProfile<1, 1, [SDTCisVec<0>, SDTCisVec<1>,
-                                      SDTCisInt<0>, SDTCisInt<1>,
-                                      SDTCisOpSmallerThanOp<1, 0> ]>>;
-
-def X86vsmovl  : SDNode<"X86ISD::VSEXT_MOVL",
-                 SDTypeProfile<1, 1,
-                 [SDTCisVec<0>, SDTCisVec<1>, SDTCisInt<0>, SDTCisInt<1>,
-                  SDTCisOpSmallerThanOp<1, 0>]>>;
-
 def X86vzload  : SDNode<"X86ISD::VZEXT_LOAD", SDTLoad,
                         [SDNPHasChain, SDNPMayLoad, SDNPMemOperand]>;
 
@@ -177,6 +167,9 @@ def X86kortest : SDNode<"X86ISD::KORTEST", SDTX86CmpPTest>;
 def X86testm   : SDNode<"X86ISD::TESTM", SDTypeProfile<1, 2, [SDTCisVec<0>,
                                           SDTCisVec<1>,
                                           SDTCisSameAs<2, 1>]>>;
+def X86testnm  : SDNode<"X86ISD::TESTNM", SDTypeProfile<1, 2, [SDTCisVec<0>,
+                                          SDTCisVec<1>,
+                                          SDTCisSameAs<2, 1>]>>;
 def X86select  : SDNode<"X86ISD::SELECT"     , SDTSelect>;
 
 def X86pmuludq : SDNode<"X86ISD::PMULUDQ",
@@ -243,6 +236,8 @@ def X86VBroadcast : SDNode<"X86ISD::VBROADCAST", SDTVBroadcast>;
 def X86VBroadcastm : SDNode<"X86ISD::VBROADCASTM", SDTVBroadcastm>;
 def X86Vinsert   : SDNode<"X86ISD::VINSERT",  SDTypeProfile<1, 3,
                               [SDTCisSameAs<0, 1>, SDTCisPtrTy<3>]>, []>;
+def X86Vextract   : SDNode<"X86ISD::VEXTRACT",  SDTypeProfile<1, 2,
+                              [SDTCisVec<1>, SDTCisPtrTy<2>]>, []>;
 
 def X86Blendi    : SDNode<"X86ISD::BLENDI",   SDTBlend>;
 def X86Fmadd     : SDNode<"X86ISD::FMADD",     SDTFma>;

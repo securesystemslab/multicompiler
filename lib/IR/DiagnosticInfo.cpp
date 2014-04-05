@@ -53,6 +53,14 @@ void DiagnosticInfoStackSize::print(DiagnosticPrinter &DP) const {
 }
 
 void DiagnosticInfoDebugMetadataVersion::print(DiagnosticPrinter &DP) const {
-  DP << "invalid debug metadata version (" << getMetadataVersion() << ") in "
-     << getModule();
+  DP << "ignoring debug info with an invalid version (" << getMetadataVersion()
+     << ") in " << getModule();
+}
+
+void DiagnosticInfoSampleProfile::print(DiagnosticPrinter &DP) const {
+  if (getFileName() && getLineNum() > 0)
+    DP << getFileName() << ":" << getLineNum() << ": ";
+  else if (getFileName())
+    DP << getFileName() << ": ";
+  DP << getMsg();
 }

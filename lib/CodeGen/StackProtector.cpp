@@ -150,9 +150,7 @@ bool StackProtector::ContainsProtectableArray(Type *Ty, bool &IsLarge,
 }
 
 bool StackProtector::HasAddressTaken(const Instruction *AI) {
-  for (Value::const_use_iterator UI = AI->use_begin(), UE = AI->use_end();
-       UI != UE; ++UI) {
-    const User *U = *UI;
+  for (const User *U : AI->users()) {
     if (const StoreInst *SI = dyn_cast<StoreInst>(U)) {
       if (AI == SI->getValueOperand())
         return true;
@@ -284,8 +282,7 @@ static CallInst *FindPotentialTailCall(BasicBlock *BB, ReturnInst *RI,
   const unsigned MaxSearch = 4;
   bool NoInterposingChain = true;
 
-  for (BasicBlock::reverse_iterator I = llvm::next(BB->rbegin()),
-                                    E = BB->rend();
+  for (BasicBlock::reverse_iterator I = std::next(BB->rbegin()), E = BB->rend();
        I != E && SearchCounter < MaxSearch; ++I) {
     Instruction *Inst = &*I;
 

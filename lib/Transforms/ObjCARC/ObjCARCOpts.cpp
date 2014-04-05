@@ -35,9 +35,9 @@
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/Statistic.h"
+#include "llvm/IR/CFG.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/LLVMContext.h"
-#include "llvm/Support/CFG.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
 
@@ -163,12 +163,9 @@ static const Value *FindSingleUseIdentifiedObject(const Value *Arg) {
   // If we found an identifiable object but it has multiple uses, but they are
   // trivial uses, we can still consider this to be a single-use value.
   if (IsObjCIdentifiedObject(Arg)) {
-    for (Value::const_use_iterator UI = Arg->use_begin(), UE = Arg->use_end();
-         UI != UE; ++UI) {
-      const User *U = *UI;
+    for (const User *U : Arg->users())
       if (!U->use_empty() || StripPointerCastsAndObjCCalls(U) != Arg)
          return 0;
-    }
 
     return Arg;
   }
@@ -958,7 +955,7 @@ static void GenerateARCBBTerminatorAnnotation(const char *Name, BasicBlock *BB,
                                         /*isVarArg=*/false);
   Constant *Callee = M->getOrInsertFunction(Name, FTy);
 
-  IRBuilder<> Builder(BB, llvm::prior(BB->end()));
+  IRBuilder<> Builder(BB, std::prev(BB->end()));
 
   Value *PtrName;
   StringRef Tmp = Ptr->getName();
@@ -1163,10 +1160,10 @@ namespace {
     void GatherStatistics(Function &F, bool AfterOptimization = false);
 #endif
 
-    virtual void getAnalysisUsage(AnalysisUsage &AU) const;
-    virtual bool doInitialization(Module &M);
-    virtual bool runOnFunction(Function &F);
-    virtual void releaseMemory();
+    void getAnalysisUsage(AnalysisUsage &AU) const override;
+    bool doInitialization(Module &M) override;
+    bool runOnFunction(Function &F) override;
+    void releaseMemory() override;
 
   public:
     static char ID;
@@ -1266,13 +1263,11 @@ ObjCARCOpt::OptimizeAutoreleaseRVCall(Function &F, Instruction *AutoreleaseRV,
   Users.push_back(Ptr);
   do {
     Ptr = Users.pop_back_val();
-    for (Value::const_use_iterator UI = Ptr->use_begin(), UE = Ptr->use_end();
-         UI != UE; ++UI) {
-      const User *I = *UI;
-      if (isa<ReturnInst>(I) || GetBasicInstructionClass(I) == IC_RetainRV)
+    for (const User *U : Ptr->users()) {
+      if (isa<ReturnInst>(U) || GetBasicInstructionClass(U) == IC_RetainRV)
         return;
-      if (isa<BitCastInst>(I))
-        Users.push_back(I);
+      if (isa<BitCastInst>(U))
+        Users.push_back(U);
     }
   } while (!Users.empty());
 
@@ -1874,7 +1869,7 @@ ObjCARCOpt::VisitInstructionBottomUp(Instruction *Inst,
         if (isa<InvokeInst>(Inst))
           S.InsertReverseInsertPt(BB->getFirstInsertionPt());
         else
-          S.InsertReverseInsertPt(llvm::next(BasicBlock::iterator(Inst)));
+          S.InsertReverseInsertPt(std::next(BasicBlock::iterator(Inst)));
         S.SetSeq(S_Use);
         ANNOTATE_BOTTOMUP(Inst, Ptr, Seq, S_Use);
       } else if (Seq == S_Release && IsUser(Class)) {
@@ -1888,7 +1883,7 @@ ObjCARCOpt::VisitInstructionBottomUp(Instruction *Inst,
         if (isa<InvokeInst>(Inst))
           S.InsertReverseInsertPt(BB->getFirstInsertionPt());
         else
-          S.InsertReverseInsertPt(llvm::next(BasicBlock::iterator(Inst)));
+          S.InsertReverseInsertPt(std::next(BasicBlock::iterator(Inst)));
       }
       break;
     case S_Stop:
@@ -1945,7 +1940,7 @@ ObjCARCOpt::VisitBottomUp(BasicBlock *BB,
 
   // Visit all the instructions, bottom-up.
   for (BasicBlock::iterator I = BB->end(), E = BB->begin(); I != E; --I) {
-    Instruction *Inst = llvm::prior(I);
+    Instruction *Inst = std::prev(I);
 
     // Invoke instructions are visited as part of their successors (below).
     if (isa<InvokeInst>(Inst))
@@ -2691,12 +2686,12 @@ void ObjCARCOpt::OptimizeWeakCalls(Function &F) {
     // within the same block. Theoretically, we could do memdep-style non-local
     // analysis too, but that would want caching. A better approach would be to
     // use the technique that EarlyCSE uses.
-    inst_iterator Current = llvm::prior(I);
+    inst_iterator Current = std::prev(I);
     BasicBlock *CurrentBB = Current.getBasicBlockIterator();
     for (BasicBlock::iterator B = CurrentBB->begin(),
                               J = Current.getInstructionIterator();
          J != B; --J) {
-      Instruction *EarlierInst = &*llvm::prior(J);
+      Instruction *EarlierInst = &*std::prev(J);
       InstructionClass EarlierClass = GetInstructionClass(EarlierInst);
       switch (EarlierClass) {
       case IC_LoadWeak:
@@ -2787,9 +2782,8 @@ void ObjCARCOpt::OptimizeWeakCalls(Function &F) {
     CallInst *Call = cast<CallInst>(Inst);
     Value *Arg = Call->getArgOperand(0);
     if (AllocaInst *Alloca = dyn_cast<AllocaInst>(Arg)) {
-      for (Value::use_iterator UI = Alloca->use_begin(),
-           UE = Alloca->use_end(); UI != UE; ++UI) {
-        const Instruction *UserInst = cast<Instruction>(*UI);
+      for (User *U : Alloca->users()) {
+        const Instruction *UserInst = cast<Instruction>(U);
         switch (GetBasicInstructionClass(UserInst)) {
         case IC_InitWeak:
         case IC_StoreWeak:
@@ -2800,8 +2794,7 @@ void ObjCARCOpt::OptimizeWeakCalls(Function &F) {
         }
       }
       Changed = true;
-      for (Value::use_iterator UI = Alloca->use_begin(),
-           UE = Alloca->use_end(); UI != UE; ) {
+      for (auto UI = Alloca->user_begin(), UE = Alloca->user_end(); UI != UE;) {
         CallInst *UserInst = cast<CallInst>(*UI++);
         switch (GetBasicInstructionClass(UserInst)) {
         case IC_InitWeak:

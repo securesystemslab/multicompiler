@@ -1481,12 +1481,14 @@ AArch64AsmParser::ParseRelocPrefix(AArch64MCExpr::VariantKind &RefKind) {
 AArch64AsmParser::OperandMatchResultTy
 AArch64AsmParser::ParseImmWithLSLOperand(
                                SmallVectorImpl<MCParsedAsmOperand*> &Operands) {
-  // FIXME?: I want to live in a world where immediates must start with
-  // #. Please don't dash my hopes (well, do if you have a good reason).
-  if (Parser.getTok().isNot(AsmToken::Hash)) return MatchOperand_NoMatch;
 
   SMLoc S = Parser.getTok().getLoc();
-  Parser.Lex(); // Eat '#'
+
+  if (Parser.getTok().is(AsmToken::Hash))
+    Parser.Lex(); // Eat '#'
+  else if (Parser.getTok().isNot(AsmToken::Integer))
+    // Operand should start from # or should be integer, emit error otherwise.
+    return MatchOperand_NoMatch;
 
   const MCExpr *Imm;
   if (ParseImmediate(Imm) != MatchOperand_Success)
@@ -1585,12 +1587,13 @@ AArch64AsmParser::OperandMatchResultTy
 AArch64AsmParser::ParseFPImmOperand(
                                SmallVectorImpl<MCParsedAsmOperand*> &Operands) {
 
-  // FIXME?: I want to live in a world where immediates must start with
-  // #. Please don't dash my hopes (well, do if you have a good reason).
-  if (Parser.getTok().isNot(AsmToken::Hash)) return MatchOperand_NoMatch;
-
   SMLoc S = Parser.getTok().getLoc();
-  Parser.Lex(); // Eat '#'
+
+  bool Hash = false;
+  if (Parser.getTok().is(AsmToken::Hash)) {
+    Parser.Lex(); // Eat '#'
+    Hash = true;
+  }
 
   bool Negative = false;
   if (Parser.getTok().is(AsmToken::Minus)) {
@@ -1601,6 +1604,8 @@ AArch64AsmParser::ParseFPImmOperand(
   }
 
   if (Parser.getTok().isNot(AsmToken::Real)) {
+    if (!Hash)
+      return MatchOperand_NoMatch;
     Error(S, "Expected floating-point immediate");
     return MatchOperand_ParseFail;
   }
@@ -1619,15 +1624,14 @@ AArch64AsmParser::ParseFPImmOperand(
 AArch64AsmParser::OperandMatchResultTy
 AArch64AsmParser::ParseFPImm0AndImm0Operand(
                                SmallVectorImpl<MCParsedAsmOperand*> &Operands) {
-  // FIXME?: I want to live in a world where immediates must start with
-  // #. Please don't dash my hopes (well, do if you have a good reason).
-
-  //This function is only used in floating compare with zero instructions to get
-  //those instructions accept both #0.0 and #0.
-  if (Parser.getTok().isNot(AsmToken::Hash)) return MatchOperand_NoMatch;
 
   SMLoc S = Parser.getTok().getLoc();
-  Parser.Lex(); // Eat '#'
+
+  bool Hash = false;
+  if (Parser.getTok().is(AsmToken::Hash)) {
+    Parser.Lex(); // Eat '#'
+    Hash = true;
+  }
 
   APFloat RealVal(0.0);
   if (Parser.getTok().is(AsmToken::Real)) {
@@ -1643,6 +1647,8 @@ AArch64AsmParser::ParseFPImm0AndImm0Operand(
     }
   }
   else {
+    if (!Hash)
+      return MatchOperand_NoMatch;
     Error(S, "only #0.0 is acceptable as immediate");
     return MatchOperand_ParseFail;
   }
@@ -2240,15 +2246,36 @@ validateInstruction(MCInst &Inst,
 bool AArch64AsmParser::ParseInstruction(ParseInstructionInfo &Info,
                                         StringRef Name, SMLoc NameLoc,
                                SmallVectorImpl<MCParsedAsmOperand*> &Operands) {
-  size_t CondCodePos = Name.find('.');
+  StringRef PatchedName = StringSwitch<StringRef>(Name.lower())
+    .Case("beq", "b.eq")
+    .Case("bne", "b.ne")
+    .Case("bhs", "b.hs")
+    .Case("bcs", "b.cs")
+    .Case("blo", "b.lo")
+    .Case("bcc", "b.cc")
+    .Case("bmi", "b.mi")
+    .Case("bpl", "b.pl")
+    .Case("bvs", "b.vs")
+    .Case("bvc", "b.vc")
+    .Case("bhi", "b.hi")
+    .Case("bls", "b.ls")
+    .Case("bge", "b.ge")
+    .Case("blt", "b.lt")
+    .Case("bgt", "b.gt")
+    .Case("ble", "b.le")
+    .Case("bal", "b.al")
+    .Case("bnv", "b.nv")
+    .Default(Name);
 
-  StringRef Mnemonic = Name.substr(0, CondCodePos);
+  size_t CondCodePos = PatchedName.find('.');
+
+  StringRef Mnemonic = PatchedName.substr(0, CondCodePos);
   Operands.push_back(AArch64Operand::CreateToken(Mnemonic, NameLoc));
 
   if (CondCodePos != StringRef::npos) {
     // We have a condition code
     SMLoc S = SMLoc::getFromPointer(NameLoc.getPointer() + CondCodePos + 1);
-    StringRef CondStr = Name.substr(CondCodePos + 1, StringRef::npos);
+    StringRef CondStr = PatchedName.substr(CondCodePos + 1, StringRef::npos);
     A64CC::CondCodes Code;
 
     Code = A64StringToCondCode(CondStr);
@@ -2375,7 +2402,7 @@ bool AArch64AsmParser::ParseDirectiveTLSDescCall(SMLoc L) {
   Inst.setOpcode(AArch64::TLSDESCCALL);
   Inst.addOperand(MCOperand::CreateExpr(Expr));
 
-  getParser().getStreamer().EmitInstruction(Inst);
+  getParser().getStreamer().EmitInstruction(Inst, STI);
   return false;
 }
 
@@ -2398,7 +2425,7 @@ bool AArch64AsmParser::MatchAndEmitInstruction(SMLoc IDLoc, unsigned &Opcode,
     if (validateInstruction(Inst, Operands))
       return true;
 
-    Out.EmitInstruction(Inst);
+    Out.EmitInstruction(Inst, STI);
     return false;
   case Match_MissingFeature:
     Error(IDLoc, "instruction requires a CPU feature not currently enabled");
@@ -2488,10 +2515,10 @@ bool AArch64AsmParser::MatchAndEmitInstruction(SMLoc IDLoc, unsigned &Opcode,
                  "expected integer multiple of 4 in range [-256, 252]");
   case Match_LoadStoreSImm7_8:
     return Error(((AArch64Operand*)Operands[ErrorInfo])->getStartLoc(),
-                 "expected integer multiple of 8 in range [-512, 508]");
+                 "expected integer multiple of 8 in range [-512, 504]");
   case Match_LoadStoreSImm7_16:
     return Error(((AArch64Operand*)Operands[ErrorInfo])->getStartLoc(),
-                 "expected integer multiple of 16 in range [-1024, 1016]");
+                 "expected integer multiple of 16 in range [-1024, 1008]");
   case Match_LoadStoreSImm9:
     return Error(((AArch64Operand*)Operands[ErrorInfo])->getStartLoc(),
                  "expected integer in range [-256, 255]");
@@ -2640,7 +2667,8 @@ void AArch64Operand::dump() const {
 
 /// Force static initialization.
 extern "C" void LLVMInitializeAArch64AsmParser() {
-  RegisterMCAsmParser<AArch64AsmParser> X(TheAArch64Target);
+  RegisterMCAsmParser<AArch64AsmParser> X(TheAArch64leTarget);
+  RegisterMCAsmParser<AArch64AsmParser> Y(TheAArch64beTarget);
 }
 
 #define GET_REGISTER_MATCHER

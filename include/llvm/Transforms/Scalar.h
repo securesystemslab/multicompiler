@@ -142,6 +142,8 @@ Pass *createLoopInstSimplifyPass();
 //
 Pass *createLoopUnrollPass(int Threshold = -1, int Count = -1,
                            int AllowPartial = -1, int Runtime = -1);
+// Create an unrolling pass for full unrolling only.
+Pass *createSimpleLoopUnrollPass();
 
 //===----------------------------------------------------------------------===//
 //
@@ -262,16 +264,10 @@ extern char &LowerSwitchID;
 
 //===----------------------------------------------------------------------===//
 //
-// LowerInvoke - This pass converts invoke and unwind instructions to use sjlj
-// exception handling mechanisms.  Note that after this pass runs the CFG is not
-// entirely accurate (exceptional control flow edges are not correct anymore) so
-// only very simple things should be done after the lowerinvoke pass has run
-// (like generation of native code).  This should *NOT* be used as a general
-// purpose "my LLVM-to-LLVM pass doesn't support the invoke instruction yet"
-// lowering pass.
+// LowerInvoke - This pass removes invoke instructions, converting them to call
+// instructions.
 //
-FunctionPass *createLowerInvokePass(const TargetMachine *TM = 0,
-                                    bool useExpensiveEHSupport = false);
+FunctionPass *createLowerInvokePass();
 extern char &LowerInvokePassID;
 
 //===----------------------------------------------------------------------===//
@@ -315,12 +311,6 @@ Pass *createLoopDeletionPass();
 // ConstantHoisting - This pass prepares a function for expensive constants.
 //
 FunctionPass *createConstantHoistingPass();
-
-//===----------------------------------------------------------------------===//
-//
-// CodeGenPrepare - This pass prepares a function for instruction selection.
-//
-FunctionPass *createCodeGenPreparePass(const TargetMachine *TM = 0);
 
 //===----------------------------------------------------------------------===//
 //
@@ -381,6 +371,11 @@ FunctionPass *createSampleProfileLoaderPass(StringRef Name);
 // ScalarizerPass - Converts vector operations into scalar operations
 //
 FunctionPass *createScalarizerPass();
+
+//===----------------------------------------------------------------------===//
+//
+// AddDiscriminators - Add DWARF path discriminators to the IR.
+FunctionPass *createAddDiscriminatorsPass();
 
 } // End llvm namespace
 

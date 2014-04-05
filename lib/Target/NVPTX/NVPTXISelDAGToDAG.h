@@ -67,6 +67,7 @@ private:
   SDNode *SelectLoadParam(SDNode *N);
   SDNode *SelectStoreRetval(SDNode *N);
   SDNode *SelectStoreParam(SDNode *N);
+  SDNode *SelectAddrSpaceCast(SDNode *N);
         
   inline SDValue getI32Imm(unsigned Imm) {
     return CurDAG->getTargetConstant(Imm, MVT::i32);
@@ -90,8 +91,6 @@ private:
                       SDValue &Offset);
 
   bool ChkMemSDNodeAddressSpace(SDNode *N, unsigned int spN) const;
-
-  bool UndefOrImm(SDValue Op, SDValue N, SDValue &Retval);
 
 };
 }

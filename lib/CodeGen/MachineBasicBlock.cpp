@@ -24,10 +24,10 @@
 #include "llvm/CodeGen/SlotIndexes.h"
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/DataLayout.h"
+#include "llvm/IR/LeakDetector.h"
 #include "llvm/MC/MCAsmInfo.h"
 #include "llvm/MC/MCContext.h"
 #include "llvm/Support/Debug.h"
-#include "llvm/Support/LeakDetector.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Target/TargetInstrInfo.h"
 #include "llvm/Target/TargetMachine.h"
@@ -160,7 +160,7 @@ MachineBasicBlock::iterator MachineBasicBlock::getFirstNonPHI() {
 MachineBasicBlock::iterator
 MachineBasicBlock::SkipPHIsAndLabels(MachineBasicBlock::iterator I) {
   iterator E = end();
-  while (I != E && (I->isPHI() || I->isLabel() || I->isDebugValue()))
+  while (I != E && (I->isPHI() || I->isPosition() || I->isDebugValue()))
     ++I;
   // FIXME: This needs to change if we wish to bundle labels / dbg_values
   // inside the bundle.
@@ -626,7 +626,7 @@ bool MachineBasicBlock::isSuccessor(const MachineBasicBlock *MBB) const {
 
 bool MachineBasicBlock::isLayoutSuccessor(const MachineBasicBlock *MBB) const {
   MachineFunction::const_iterator I(this);
-  return llvm::next(I) == MachineFunction::const_iterator(MBB);
+  return std::next(I) == MachineFunction::const_iterator(MBB);
 }
 
 bool MachineBasicBlock::canFallThrough() {
@@ -705,7 +705,7 @@ MachineBasicBlock::SplitCriticalEdge(MachineBasicBlock *Succ, Pass *P) {
   }
 
   MachineBasicBlock *NMBB = MF->CreateMachineBasicBlock();
-  MF->insert(llvm::next(MachineFunction::iterator(this)), NMBB);
+  MF->insert(std::next(MachineFunction::iterator(this)), NMBB);
   DEBUG(dbgs() << "Splitting critical edge:"
         " BB#" << getNumber()
         << " -- BB#" << NMBB->getNumber()
@@ -848,7 +848,7 @@ MachineBasicBlock::SplitCriticalEdge(MachineBasicBlock *Succ, Pass *P) {
     // extend to the end of the new split block.
 
     bool isLastMBB =
-      llvm::next(MachineFunction::iterator(NMBB)) == getParent()->end();
+      std::next(MachineFunction::iterator(NMBB)) == getParent()->end();
 
     SlotIndex StartIndex = Indexes->getMBBEndIdx(this);
     SlotIndex PrevIndex = StartIndex.getPrevSlot();
@@ -1063,7 +1063,7 @@ bool MachineBasicBlock::CorrectExtraCFGEdges(MachineBasicBlock *DestA,
   bool Changed = false;
 
   MachineFunction::iterator FallThru =
-    llvm::next(MachineFunction::iterator(this));
+    std::next(MachineFunction::iterator(this));
 
   if (DestA == 0 && DestB == 0) {
     // Block falls through to successor.
@@ -1121,6 +1121,13 @@ uint32_t MachineBasicBlock::getSuccWeight(const_succ_iterator Succ) const {
     return 0;
 
   return *getWeightIterator(Succ);
+}
+
+/// Set successor weight of a given iterator.
+void MachineBasicBlock::setSuccWeight(succ_iterator I, uint32_t weight) {
+  if (Weights.empty())
+    return;
+  *getWeightIterator(I) = weight;
 }
 
 /// getWeightIterator - Return wight iterator corresonding to the I successor

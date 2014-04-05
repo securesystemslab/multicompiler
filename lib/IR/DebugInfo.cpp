@@ -12,7 +12,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "llvm/DebugInfo.h"
+#include "llvm/IR/DebugInfo.h"
+#include "LLVMContextImpl.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallString.h"
@@ -23,9 +24,9 @@
 #include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/Intrinsics.h"
 #include "llvm/IR/Module.h"
+#include "llvm/IR/ValueHandle.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/Dwarf.h"
-#include "llvm/Support/ValueHandle.h"
 #include "llvm/Support/raw_ostream.h"
 using namespace llvm;
 using namespace llvm::dwarf;
@@ -45,6 +46,7 @@ bool DIDescriptor::Verify() const {
           DILexicalBlockFile(DbgNode).Verify() ||
           DISubrange(DbgNode).Verify() || DIEnumerator(DbgNode).Verify() ||
           DIObjCProperty(DbgNode).Verify() ||
+          DIUnspecifiedParameter(DbgNode).Verify() ||
           DITemplateTypeParameter(DbgNode).Verify() ||
           DITemplateValueParameter(DbgNode).Verify() ||
           DIImportedEntity(DbgNode).Verify());
@@ -381,7 +383,7 @@ bool DICompileUnit::Verify() const {
   if (getFilename().empty())
     return false;
 
-  return DbgNode->getNumOperands() == 13;
+  return DbgNode->getNumOperands() == 14;
 }
 
 /// Verify - Verify that an ObjC property is well formed.
@@ -427,8 +429,10 @@ static bool fieldIsTypeRef(const MDNode *DbgNode, unsigned Elt) {
 /// Check if a value can be a ScopeRef.
 static bool isScopeRef(const Value *Val) {
   return !Val ||
-         (isa<MDString>(Val) && !cast<MDString>(Val)->getString().empty()) ||
-         (isa<MDNode>(Val) && DIScope(cast<MDNode>(Val)).isScope());
+    (isa<MDString>(Val) && !cast<MDString>(Val)->getString().empty()) ||
+    // Not checking for Val->isScope() here, because it would work
+    // only for lexical scopes and not all subclasses of DIScope.
+    isa<MDNode>(Val);
 }
 
 /// Check if a field at position Elt of a MDNode can be a ScopeRef.
@@ -539,10 +543,11 @@ bool DIGlobalVariable::Verify() const {
 
   if (getDisplayName().empty())
     return false;
-  // Make sure context @ field 2 and type @ field 8 are MDNodes.
+  // Make sure context @ field 2 is an MDNode.
   if (!fieldIsMDNode(DbgNode, 2))
     return false;
-  if (!fieldIsMDNode(DbgNode, 8))
+  // Make sure that type @ field 8 is a DITypeRef.
+  if (!fieldIsTypeRef(DbgNode, 8))
     return false;
   // Make sure StaticDataMemberDeclaration @ field 12 is MDNode.
   if (!fieldIsMDNode(DbgNode, 12))
@@ -556,10 +561,11 @@ bool DIVariable::Verify() const {
   if (!isVariable())
     return false;
 
-  // Make sure context @ field 1 and type @ field 5 are MDNodes.
+  // Make sure context @ field 1 is an MDNode.
   if (!fieldIsMDNode(DbgNode, 1))
     return false;
-  if (!fieldIsMDNode(DbgNode, 5))
+  // Make sure that type @ field 5 is a DITypeRef.
+  if (!fieldIsTypeRef(DbgNode, 5))
     return false;
   return DbgNode->getNumOperands() >= 8;
 }
@@ -599,12 +605,17 @@ bool DISubrange::Verify() const {
 
 /// \brief Verify that the lexical block descriptor is well formed.
 bool DILexicalBlock::Verify() const {
-  return isLexicalBlock() && DbgNode->getNumOperands() == 6;
+  return isLexicalBlock() && DbgNode->getNumOperands() == 7;
 }
 
 /// \brief Verify that the file-scoped lexical block descriptor is well formed.
 bool DILexicalBlockFile::Verify() const {
   return isLexicalBlockFile() && DbgNode->getNumOperands() == 3;
+}
+
+/// \brief Verify that an unspecified parameter descriptor is well formed.
+bool DIUnspecifiedParameter::Verify() const {
+  return isUnspecifiedParameter() && DbgNode->getNumOperands() == 1;
 }
 
 /// \brief Verify that the template type parameter descriptor is well formed.
@@ -812,6 +823,29 @@ DIArray DICompileUnit::getImportedEntities() const {
   return DIArray(getNodeField(DbgNode, 11));
 }
 
+/// copyWithNewScope - Return a copy of this location, replacing the
+/// current scope with the given one.
+DILocation DILocation::copyWithNewScope(LLVMContext &Ctx,
+                                        DILexicalBlock NewScope) {
+  SmallVector<Value *, 10> Elts;
+  assert(Verify());
+  for (unsigned I = 0; I < DbgNode->getNumOperands(); ++I) {
+    if (I != 2)
+      Elts.push_back(DbgNode->getOperand(I));
+    else
+      Elts.push_back(NewScope);
+  }
+  MDNode *NewDIL = MDNode::get(Ctx, Elts);
+  return DILocation(NewDIL);
+}
+
+/// computeNewDiscriminator - Generate a new discriminator value for this
+/// file and line location.
+unsigned DILocation::computeNewDiscriminator(LLVMContext &Ctx) {
+  std::pair<const char *, unsigned> Key(getFilename().data(), getLineNumber());
+  return ++Ctx.pImpl->DiscriminatorTable[Key];
+}
+
 /// fixupSubprogramName - Replace contains special characters used
 /// in a typical Objective-C names with '.' in a given string.
 static void fixupSubprogramName(DISubprogram Fn, SmallVectorImpl<char> &Out) {
@@ -969,7 +1003,7 @@ void DebugInfoFinder::processModule(const Module &M) {
         DIGlobalVariable DIG(GVs.getElement(i));
         if (addGlobalVariable(DIG)) {
           processScope(DIG.getContext());
-          processType(DIG.getType());
+          processType(DIG.getType().resolve(TypeIdentifierMap));
         }
       }
       DIArray SPs = CU.getSubprograms();
@@ -984,7 +1018,7 @@ void DebugInfoFinder::processModule(const Module &M) {
       DIArray Imports = CU.getImportedEntities();
       for (unsigned i = 0, e = Imports.getNumElements(); i != e; ++i) {
         DIImportedEntity Import = DIImportedEntity(Imports.getElement(i));
-        DIDescriptor Entity = Import.getEntity();
+        DIDescriptor Entity = Import.getEntity().resolve(TypeIdentifierMap);
         if (Entity.isType())
           processType(DIType(Entity));
         else if (Entity.isSubprogram())
@@ -1055,18 +1089,6 @@ void DebugInfoFinder::processScope(DIScope Scope) {
   }
 }
 
-/// processLexicalBlock
-void DebugInfoFinder::processLexicalBlock(DILexicalBlock LB) {
-  DIScope Context = LB.getContext();
-  if (Context.isLexicalBlock())
-    return processLexicalBlock(DILexicalBlock(Context));
-  else if (Context.isLexicalBlockFile()) {
-    DILexicalBlockFile DBF = DILexicalBlockFile(Context);
-    return processLexicalBlock(DILexicalBlock(DBF.getScope()));
-  } else
-    return processSubprogram(DISubprogram(Context));
-}
-
 /// processSubprogram - Process DISubprogram.
 void DebugInfoFinder::processSubprogram(DISubprogram SP) {
   if (!addSubprogram(SP))
@@ -1103,7 +1125,7 @@ void DebugInfoFinder::processDeclare(const Module &M,
   if (!NodesSeen.insert(DV))
     return;
   processScope(DIVariable(N).getContext());
-  processType(DIVariable(N).getType());
+  processType(DIVariable(N).getType().resolve(TypeIdentifierMap));
 }
 
 void DebugInfoFinder::processValue(const Module &M, const DbgValueInst *DVI) {
@@ -1119,7 +1141,7 @@ void DebugInfoFinder::processValue(const Module &M, const DbgValueInst *DVI) {
   if (!NodesSeen.insert(DV))
     return;
   processScope(DIVariable(N).getContext());
-  processType(DIVariable(N).getType());
+  processType(DIVariable(N).getType().resolve(TypeIdentifierMap));
 }
 
 /// addType - Add type into Tys.
@@ -1446,7 +1468,7 @@ bool llvm::StripDebugInfo(Module &M) {
   // the module.
   if (Function *Declare = M.getFunction("llvm.dbg.declare")) {
     while (!Declare->use_empty()) {
-      CallInst *CI = cast<CallInst>(Declare->use_back());
+      CallInst *CI = cast<CallInst>(Declare->user_back());
       CI->eraseFromParent();
     }
     Declare->eraseFromParent();
@@ -1455,7 +1477,7 @@ bool llvm::StripDebugInfo(Module &M) {
 
   if (Function *DbgVal = M.getFunction("llvm.dbg.value")) {
     while (!DbgVal->use_empty()) {
-      CallInst *CI = cast<CallInst>(DbgVal->use_back());
+      CallInst *CI = cast<CallInst>(DbgVal->user_back());
       CI->eraseFromParent();
     }
     DbgVal->eraseFromParent();

@@ -15,7 +15,6 @@
 #define LTO_MODULE_H
 
 #include "llvm-c/lto.h"
-#include "llvm/ADT/OwningPtr.h"
 #include "llvm/ADT/StringMap.h"
 #include "llvm/IR/Mangler.h"
 #include "llvm/IR/Module.h"
@@ -48,8 +47,8 @@ private:
     const llvm::GlobalValue *symbol;
   };
 
-  llvm::OwningPtr<llvm::Module>           _module;
-  llvm::OwningPtr<llvm::TargetMachine>    _target;
+  std::unique_ptr<llvm::Module>           _module;
+  std::unique_ptr<llvm::TargetMachine>    _target;
   llvm::MCObjectFileInfo ObjFileInfo;
   StringSet                               _linkeropt_strings;
   std::vector<const char *>               _deplibs;
@@ -100,7 +99,8 @@ public:
                                   std::string& errMsg);
   static LTOModule *makeLTOModule(const void *mem, size_t length,
                                   llvm::TargetOptions options,
-                                  std::string &errMsg);
+                                  std::string &errMsg,
+                                  llvm::StringRef path = "");
 
   /// getTargetTriple - Return the Module's target triple.
   const char *getTargetTriple() {
@@ -222,8 +222,9 @@ private:
                                   llvm::TargetOptions options,
                                   std::string &errMsg);
 
-  /// makeBuffer - Create a MemoryBuffer from a memory range.
-  static llvm::MemoryBuffer *makeBuffer(const void *mem, size_t length);
+  /// Create a MemoryBuffer from a memory range with an optional name.
+  static llvm::MemoryBuffer *makeBuffer(const void *mem, size_t length,
+                                        llvm::StringRef name = "");
 };
 
 #endif // LTO_MODULE_H

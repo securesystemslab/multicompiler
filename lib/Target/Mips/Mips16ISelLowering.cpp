@@ -15,9 +15,11 @@
 #include "MCTargetDesc/MipsBaseInfo.h"
 #include "MipsRegisterInfo.h"
 #include "MipsTargetMachine.h"
+#include "llvm/ADT/StringRef.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Target/TargetInstrInfo.h"
+#include <string>
 
 using namespace llvm;
 
@@ -159,7 +161,9 @@ llvm::createMips16TargetLowering(MipsTargetMachine &TM) {
 }
 
 bool
-Mips16TargetLowering::allowsUnalignedMemoryAccesses(EVT VT, bool *Fast) const {
+Mips16TargetLowering::allowsUnalignedMemoryAccesses(EVT VT,
+                                                    unsigned,
+                                                    bool *Fast) const {
   return false;
 }
 
@@ -443,7 +447,29 @@ getOpndList(SmallVectorImpl<SDValue> &Ops,
                              Find))
         LookupHelper = false;
       else {
-        Mips16IntrinsicHelperType IntrinsicFind = {S->getSymbol(), ""};
+        const char *Symbol = S->getSymbol();
+        Mips16IntrinsicHelperType IntrinsicFind = { Symbol, "" };
+        const Mips16HardFloatInfo::FuncSignature *Signature =
+            Mips16HardFloatInfo::findFuncSignature(Symbol);
+        if (!IsPICCall && (Signature && (FuncInfo->StubsNeeded.find(Symbol) ==
+                                         FuncInfo->StubsNeeded.end()))) {
+          FuncInfo->StubsNeeded[Symbol] = Signature;
+          //
+          // S2 is normally saved if the stub is for a function which
+          // returns a float or double value and is not otherwise. This is
+          // because more work is required after the function the stub
+          // is calling completes, and so the stub cannot directly return
+          // and the stub has no stack space to store the return address so
+          // S2 is used for that purpose.
+          // In order to take advantage of not saving S2, we need to also
+          // optimize the call in the stub and this requires some further
+          // functionality in MipsAsmPrinter which we don't have yet.
+          // So for now we always save S2. The optimization will be done
+          // in a follow-on patch.
+          //
+          if (1 || (Signature->RetSig != Mips16HardFloatInfo::NoFPRet))
+            FuncInfo->setSaveS2();
+        }
         // one more look at list of intrinsics
         if (std::binary_search(Mips16IntrinsicHelper,
             array_endof(Mips16IntrinsicHelper),
@@ -523,8 +549,7 @@ emitSel16(unsigned Opc, MachineInstr *MI, MachineBasicBlock *BB) const {
 
   // Transfer the remainder of BB and its successor edges to sinkMBB.
   sinkMBB->splice(sinkMBB->begin(), BB,
-                  llvm::next(MachineBasicBlock::iterator(MI)),
-                  BB->end());
+                  std::next(MachineBasicBlock::iterator(MI)), BB->end());
   sinkMBB->transferSuccessorsAndUpdatePHIs(BB);
 
   // Next, add the true and fallthrough blocks as its successors.
@@ -586,8 +611,7 @@ MachineBasicBlock *Mips16TargetLowering::emitSelT16
 
   // Transfer the remainder of BB and its successor edges to sinkMBB.
   sinkMBB->splice(sinkMBB->begin(), BB,
-                  llvm::next(MachineBasicBlock::iterator(MI)),
-                  BB->end());
+                  std::next(MachineBasicBlock::iterator(MI)), BB->end());
   sinkMBB->transferSuccessorsAndUpdatePHIs(BB);
 
   // Next, add the true and fallthrough blocks as its successors.
@@ -651,8 +675,7 @@ MachineBasicBlock *Mips16TargetLowering::emitSeliT16
 
   // Transfer the remainder of BB and its successor edges to sinkMBB.
   sinkMBB->splice(sinkMBB->begin(), BB,
-                  llvm::next(MachineBasicBlock::iterator(MI)),
-                  BB->end());
+                  std::next(MachineBasicBlock::iterator(MI)), BB->end());
   sinkMBB->transferSuccessorsAndUpdatePHIs(BB);
 
   // Next, add the true and fallthrough blocks as its successors.
@@ -746,8 +769,8 @@ MachineBasicBlock *Mips16TargetLowering::emitFEXT_CCRX16_ins(
   unsigned CC = MI->getOperand(0).getReg();
   unsigned regX = MI->getOperand(1).getReg();
   unsigned regY = MI->getOperand(2).getReg();
-  BuildMI(*BB, MI, MI->getDebugLoc(),
-		  TII->get(SltOpc)).addReg(regX).addReg(regY);
+  BuildMI(*BB, MI, MI->getDebugLoc(), TII->get(SltOpc)).addReg(regX).addReg(
+      regY);
   BuildMI(*BB, MI, MI->getDebugLoc(),
           TII->get(Mips::MoveR3216), CC).addReg(Mips::T8);
   MI->eraseFromParent();   // The pseudo instruction is gone now.

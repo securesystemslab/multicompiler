@@ -40,7 +40,7 @@ typedef bool lto_bool_t;
  * @{
  */
 
-#define LTO_API_VERSION 8
+#define LTO_API_VERSION 10
 
 /**
  * \since prior to LTO_API_VERSION=3
@@ -81,15 +81,6 @@ typedef enum {
     LTO_CODEGEN_PIC_MODEL_DYNAMIC        = 1,
     LTO_CODEGEN_PIC_MODEL_DYNAMIC_NO_PIC = 2
 } lto_codegen_model;
-
-/**
- * \since LTO_API_VERSION=6
- */
-typedef enum {
-    LTO_INTERNALIZE_FULL   = 0,
-    LTO_INTERNALIZE_NONE   = 1,
-    LTO_INTERNALIZE_HIDDEN = 2
-} lto_internalize_strategy;
 
 /** opaque reference to a loaded object module */
 typedef struct LTOModule*         lto_module_t;
@@ -174,6 +165,16 @@ lto_module_create(const char* path);
  */
 extern lto_module_t
 lto_module_create_from_memory(const void* mem, size_t length);
+
+/**
+ * Loads an object file from memory with an extra path argument.
+ * Returns NULL on error (check lto_get_error_message() for details).
+ *
+ * \since prior to LTO_API_VERSION=9
+ */
+extern lto_module_t
+lto_module_create_from_memory_with_path(const void* mem, size_t length,
+                                        const char *path);
 
 /**
  * Loads an object file from disk. The seek point of fd is not preserved.
@@ -289,9 +290,10 @@ lto_module_get_linkeropt(lto_module_t mod, unsigned int index);
  * \since LTO_API_VERSION=7
  */
 typedef enum {
-  LTO_DS_ERROR,
-  LTO_DS_WARNING,
-  LTO_DS_NOTE
+  LTO_DS_ERROR = 0,
+  LTO_DS_WARNING = 1,
+  LTO_DS_REMARK = 3, // Added in LTO_API_VERSION=10.
+  LTO_DS_NOTE = 2
 } lto_codegen_diagnostic_severity_t;
 
 /**
@@ -390,16 +392,6 @@ lto_codegen_set_assembler_path(lto_code_gen_t cg, const char* path);
 extern void
 lto_codegen_set_assembler_args(lto_code_gen_t cg, const char **args,
                                int nargs);
-
-/**
- * Sets the strategy to use during internalize.  Default strategy is
- * LTO_INTERNALIZE_FULL.
- *
- * \since LTO_API_VERSION=6
- */
-extern void
-lto_codegen_set_internalize_strategy(lto_code_gen_t cg,
-                                     lto_internalize_strategy);
 
 /**
  * Tells LTO optimization passes that this symbol must be preserved

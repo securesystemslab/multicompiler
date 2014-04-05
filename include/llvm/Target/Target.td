@@ -697,6 +697,15 @@ class InstrInfo {
   // generator has better support for complex operands and targets have
   // migrated away from using positionally encoded operands.
   bit decodePositionallyEncodedOperands = 0;
+
+  // When set, this indicates that there will be no overlap between those
+  // operands that are matched by ordering (positional operands) and those
+  // matched by name.
+  //
+  // This option is temporary; it will go away once the TableGen decoder
+  // generator has better support for complex operands and targets have
+  // migrated away from using positionally encoded operands.
+  bit noNamedPositionallyEncodedOperands = 0;
 }
 
 // Standard Pseudo Instructions.
@@ -714,7 +723,7 @@ def INLINEASM : Instruction {
   let AsmString = "";
   let neverHasSideEffects = 1;  // Note side effect is encoded in an operand.
 }
-def PROLOG_LABEL : Instruction {
+def CFI_INSTRUCTION : Instruction {
   let OutOperandList = (outs);
   let InOperandList = (ins i32imm:$id);
   let AsmString = "";
@@ -814,14 +823,14 @@ def LIFETIME_END : Instruction {
 }
 def STACKMAP : Instruction {
   let OutOperandList = (outs);
-  let InOperandList = (ins i32imm:$id, i32imm:$nbytes, variable_ops);
+  let InOperandList = (ins i64imm:$id, i32imm:$nbytes, variable_ops);
   let isCall = 1;
   let mayLoad = 1;
   let usesCustomInserter = 1;
 }
 def PATCHPOINT : Instruction {
   let OutOperandList = (outs unknown:$dst);
-  let InOperandList = (ins i32imm:$id, i32imm:$nbytes, unknown:$callee,
+  let InOperandList = (ins i64imm:$id, i32imm:$nbytes, unknown:$callee,
                        i32imm:$nargs, i32imm:$cc, variable_ops);
   let isCall = 1;
   let mayLoad = 1;

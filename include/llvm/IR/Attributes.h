@@ -202,7 +202,7 @@ public:
 /// index `1'.
 class AttributeSet {
 public:
-  enum AttrIndex LLVM_ENUM_INT_TYPE(unsigned) {
+  enum AttrIndex : unsigned {
     ReturnIndex = 0U,
     FunctionIndex = ~0U
   };
@@ -403,10 +403,6 @@ public:
     addAttribute(A);
   }
   AttrBuilder(AttributeSet AS, unsigned Idx);
-  AttrBuilder(const AttrBuilder &B)
-    : Attrs(B.Attrs),
-      TargetDepAttrs(B.TargetDepAttrs.begin(), B.TargetDepAttrs.end()),
-      Alignment(B.Alignment), StackAlignment(B.StackAlignment) {}
 
   void clear();
 

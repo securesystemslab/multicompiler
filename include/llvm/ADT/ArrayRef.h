@@ -12,6 +12,7 @@
 
 #include "llvm/ADT/None.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/Support/Allocator.h"
 #include <vector>
 
 namespace llvm {
@@ -76,7 +77,7 @@ namespace llvm {
     /// Construct an ArrayRef from a std::vector.
     template<typename A>
     /*implicit*/ ArrayRef(const std::vector<T, A> &Vec)
-      : Data(Vec.empty() ? (T*)0 : &Vec[0]), Length(Vec.size()) {}
+      : Data(Vec.data()), Length(Vec.size()) {}
 
     /// Construct an ArrayRef from a C array.
     template <size_t N>
@@ -118,6 +119,13 @@ namespace llvm {
     const T &back() const {
       assert(!empty());
       return Data[Length-1];
+    }
+
+    // copy - Allocate copy in BumpPtrAllocator and return ArrayRef<T> to it.
+    ArrayRef<T> copy(BumpPtrAllocator &Allocator) {
+      T *Buff = Allocator.Allocate<T>(Length);
+      std::copy(begin(), end(), Buff);
+      return ArrayRef<T>(Buff, Length);
     }
 
     /// equals - Check for element-wise equality.

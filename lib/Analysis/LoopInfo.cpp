@@ -20,11 +20,11 @@
 #include "llvm/Analysis/LoopInfoImpl.h"
 #include "llvm/Analysis/LoopIterator.h"
 #include "llvm/Analysis/ValueTracking.h"
+#include "llvm/IR/CFG.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/Dominators.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Metadata.h"
-#include "llvm/Support/CFG.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include <algorithm>
@@ -179,12 +179,11 @@ bool Loop::isLCSSAForm(DominatorTree &DT) const {
   for (block_iterator BI = block_begin(), E = block_end(); BI != E; ++BI) {
     BasicBlock *BB = *BI;
     for (BasicBlock::iterator I = BB->begin(), E = BB->end(); I != E;++I)
-      for (Value::use_iterator UI = I->use_begin(), E = I->use_end(); UI != E;
-           ++UI) {
-        User *U = *UI;
-        BasicBlock *UserBB = cast<Instruction>(U)->getParent();
-        if (PHINode *P = dyn_cast<PHINode>(U))
-          UserBB = P->getIncomingBlock(UI);
+      for (Use &U : I->uses()) {
+        Instruction *UI = cast<Instruction>(U.getUser());
+        BasicBlock *UserBB = UI->getParent();
+        if (PHINode *P = dyn_cast<PHINode>(UI))
+          UserBB = P->getIncomingBlock(U);
 
         // Check the current block, as a fast-path, before checking whether
         // the use is anywhere in the loop.  Most values are used in the same
@@ -219,12 +218,12 @@ bool Loop::isSafeToClone() const {
       return false;
 
     if (const InvokeInst *II = dyn_cast<InvokeInst>((*I)->getTerminator()))
-      if (II->hasFnAttr(Attribute::NoDuplicate))
+      if (II->cannotDuplicate())
         return false;
 
     for (BasicBlock::iterator BI = (*I)->begin(), BE = (*I)->end(); BI != BE; ++BI) {
       if (const CallInst *CI = dyn_cast<CallInst>(BI)) {
-        if (CI->hasFnAttr(Attribute::NoDuplicate))
+        if (CI->cannotDuplicate())
           return false;
       }
     }
@@ -527,8 +526,8 @@ void UnloopUpdater::removeBlocksFromAncestors() {
 /// nested within unloop.
 void UnloopUpdater::updateSubloopParents() {
   while (!Unloop->empty()) {
-    Loop *Subloop = *llvm::prior(Unloop->end());
-    Unloop->removeChildLoop(llvm::prior(Unloop->end()));
+    Loop *Subloop = *std::prev(Unloop->end());
+    Unloop->removeChildLoop(std::prev(Unloop->end()));
 
     assert(SubloopParents.count(Subloop) && "DFS failed to visit subloop");
     if (Loop *Parent = SubloopParents[Subloop])
@@ -652,7 +651,7 @@ void LoopInfo::updateUnloop(Loop *Unloop) {
 
     // Move all of the subloops to the top-level.
     while (!Unloop->empty())
-      LI.addTopLevelLoop(Unloop->removeChildLoop(llvm::prior(Unloop->end())));
+      LI.addTopLevelLoop(Unloop->removeChildLoop(std::prev(Unloop->end())));
 
     return;
   }

@@ -506,7 +506,13 @@ bool RegPressureTracker::recede(SmallVectorImpl<unsigned> *LiveUses,
         DeadDef = LRQ.isDeadDef();
       }
     }
-    if (!DeadDef) {
+    if (DeadDef) {
+      // LiveIntervals knows this is a dead even though it's MachineOperand is
+      // not flagged as such. Since this register will not be recorded as
+      // live-out, increase its PDiff value to avoid underflowing pressure.
+      if (PDiff)
+        PDiff->addPressureChange(Reg, false, MRI);
+    } else {
       if (LiveRegs.erase(Reg))
         decreaseRegPressure(Reg);
       else
@@ -876,9 +882,9 @@ static bool findUseBetween(unsigned Reg,
                            SlotIndex PriorUseIdx, SlotIndex NextUseIdx,
                            const MachineRegisterInfo *MRI,
                            const LiveIntervals *LIS) {
-  for (MachineRegisterInfo::use_nodbg_iterator
-         UI = MRI->use_nodbg_begin(Reg), UE = MRI->use_nodbg_end();
-         UI != UE; UI.skipInstruction()) {
+  for (MachineRegisterInfo::use_instr_nodbg_iterator
+       UI = MRI->use_instr_nodbg_begin(Reg),
+       UE = MRI->use_instr_nodbg_end(); UI != UE; ++UI) {
       const MachineInstr* MI = &*UI;
       if (MI->isDebugValue())
         continue;

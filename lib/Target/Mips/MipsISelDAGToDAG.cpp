@@ -25,11 +25,11 @@
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/SelectionDAGNodes.h"
+#include "llvm/IR/CFG.h"
 #include "llvm/IR/GlobalValue.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Intrinsics.h"
 #include "llvm/IR/Type.h"
-#include "llvm/Support/CFG.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
@@ -89,6 +89,12 @@ bool MipsDAGToDAGISel::selectIntAddr(SDValue Addr, SDValue &Base,
 
 bool MipsDAGToDAGISel::selectIntAddrMM(SDValue Addr, SDValue &Base,
                                        SDValue &Offset) const {
+  llvm_unreachable("Unimplemented function.");
+  return false;
+}
+
+bool MipsDAGToDAGISel::selectIntAddrMSA(SDValue Addr, SDValue &Base,
+                                        SDValue &Offset) const {
   llvm_unreachable("Unimplemented function.");
   return false;
 }

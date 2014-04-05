@@ -28,7 +28,7 @@
 #include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineModuleInfo.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
-#include "llvm/DebugInfo.h"
+#include "llvm/IR/DebugInfo.h"
 #include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/GlobalVariable.h"
@@ -307,7 +307,7 @@ void NVPTXAsmPrinter::EmitInstruction(const MachineInstr *MI) {
 
   MCInst Inst;
   lowerToMCInst(MI, Inst);
-  OutStreamer.EmitInstruction(Inst);
+  EmitToStreamer(OutStreamer, Inst);
 }
 
 void NVPTXAsmPrinter::lowerToMCInst(const MachineInstr *MI, MCInst &OutMI) {
@@ -699,12 +699,11 @@ static bool usedInGlobalVarDef(const Constant *C) {
     return true;
   }
 
-  for (Value::const_use_iterator ui = C->use_begin(), ue = C->use_end();
-       ui != ue; ++ui) {
-    const Constant *C = dyn_cast<Constant>(*ui);
-    if (usedInGlobalVarDef(C))
-      return true;
-  }
+  for (const User *U : C->users())
+    if (const Constant *C = dyn_cast<Constant>(U))
+      if (usedInGlobalVarDef(C))
+        return true;
+
   return false;
 }
 
@@ -730,11 +729,10 @@ static bool usedInOneFunc(const User *U, Function const *&oneFunc) {
                           (md->getName().str() == "llvm.dbg.sp")))
       return true;
 
-  for (User::const_use_iterator ui = U->use_begin(), ue = U->use_end();
-       ui != ue; ++ui) {
-    if (usedInOneFunc(*ui, oneFunc) == false)
+  for (const User *UU : U->users())
+    if (usedInOneFunc(UU, oneFunc) == false)
       return false;
-  }
+
   return true;
 }
 
@@ -765,12 +763,11 @@ static bool canDemoteGlobalVar(const GlobalVariable *gv, Function const *&f) {
 
 static bool useFuncSeen(const Constant *C,
                         llvm::DenseMap<const Function *, bool> &seenMap) {
-  for (Value::const_use_iterator ui = C->use_begin(), ue = C->use_end();
-       ui != ue; ++ui) {
-    if (const Constant *cu = dyn_cast<Constant>(*ui)) {
+  for (const User *U : C->users()) {
+    if (const Constant *cu = dyn_cast<Constant>(U)) {
       if (useFuncSeen(cu, seenMap))
         return true;
-    } else if (const Instruction *I = dyn_cast<Instruction>(*ui)) {
+    } else if (const Instruction *I = dyn_cast<Instruction>(U)) {
       const BasicBlock *bb = I->getParent();
       if (!bb)
         continue;
@@ -797,10 +794,8 @@ void NVPTXAsmPrinter::emitDeclarations(const Module &M, raw_ostream &O) {
       emitDeclaration(F, O);
       continue;
     }
-    for (Value::const_use_iterator iter = F->use_begin(),
-                                   iterEnd = F->use_end();
-         iter != iterEnd; ++iter) {
-      if (const Constant *C = dyn_cast<Constant>(*iter)) {
+    for (const User *U : F->users()) {
+      if (const Constant *C = dyn_cast<Constant>(U)) {
         if (usedInGlobalVarDef(C)) {
           // The use is in the initialization of a global variable
           // that is a function pointer, so print a declaration
@@ -816,9 +811,9 @@ void NVPTXAsmPrinter::emitDeclarations(const Module &M, raw_ostream &O) {
         }
       }
 
-      if (!isa<Instruction>(*iter))
+      if (!isa<Instruction>(U))
         continue;
-      const Instruction *instr = cast<Instruction>(*iter);
+      const Instruction *instr = cast<Instruction>(U);
       const BasicBlock *bb = instr->getParent();
       if (!bb)
         continue;
@@ -843,10 +838,7 @@ void NVPTXAsmPrinter::recordAndEmitFilenames(Module &M) {
   DbgFinder.processModule(M);
 
   unsigned i = 1;
-  for (DebugInfoFinder::iterator I = DbgFinder.compile_unit_begin(),
-                                 E = DbgFinder.compile_unit_end();
-       I != E; ++I) {
-    DICompileUnit DIUnit(*I);
+  for (DICompileUnit DIUnit : DbgFinder.compile_units()) {
     StringRef Filename(DIUnit.getFilename());
     StringRef Dirname(DIUnit.getDirectory());
     SmallString<128> FullPathName = Dirname;
@@ -861,10 +853,7 @@ void NVPTXAsmPrinter::recordAndEmitFilenames(Module &M) {
     ++i;
   }
 
-  for (DebugInfoFinder::iterator I = DbgFinder.subprogram_begin(),
-                                 E = DbgFinder.subprogram_end();
-       I != E; ++I) {
-    DISubprogram SP(*I);
+  for (DISubprogram SP : DbgFinder.subprograms()) {
     StringRef Filename(SP.getFilename());
     StringRef Dirname(SP.getDirectory());
     SmallString<128> FullPathName = Dirname;
@@ -1522,8 +1511,8 @@ void NVPTXAsmPrinter::emitFunctionParamList(const Function *F, raw_ostream &O) {
     }
 
     if (PAL.hasAttribute(paramIndex + 1, Attribute::ByVal) == false) {
-      if (Ty->isVectorTy()) {
-        // Just print .param .b8 .align <a> .param[size];
+      if (Ty->isAggregateType() || Ty->isVectorTy()) {
+        // Just print .param .align <a> .b8 .param[size];
         // <a> = PAL.getparamalignment
         // size = typeallocsize of element type
         unsigned align = PAL.getParamAlignment(paramIndex + 1);
@@ -1603,7 +1592,7 @@ void NVPTXAsmPrinter::emitFunctionParamList(const Function *F, raw_ostream &O) {
     Type *ETy = PTy->getElementType();
 
     if (isABI || isKernelFunc) {
-      // Just print .param .b8 .align <a> .param[size];
+      // Just print .param .align <a> .b8 .param[size];
       // <a> = PAL.getparamalignment
       // size = typeallocsize of element type
       unsigned align = PAL.getParamAlignment(paramIndex + 1);

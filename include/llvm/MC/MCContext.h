@@ -28,7 +28,7 @@ namespace llvm {
   class MCSection;
   class MCSymbol;
   class MCLabel;
-  class MCDwarfFile;
+  struct MCDwarfFile;
   class MCDwarfLoc;
   class MCObjectFileInfo;
   class MCRegisterInfo;
@@ -70,6 +70,14 @@ namespace llvm {
     /// Symbols - Bindings of names to symbols.
     SymbolTable Symbols;
 
+    /// A maping from a local label number and an instance count to a symbol.
+    /// For example, in the assembly
+    ///     1:
+    ///     2:
+    ///     1:
+    /// We have three labels represented by the pairs (1, 0), (2, 0) and (1, 1)
+    DenseMap<std::pair<unsigned, unsigned>, MCSymbol*> LocalSymbols;
+
     /// UsedNames - Keeps tracks of names that were used both for used declared
     /// and artificial symbols.
     StringMap<bool, BumpPtrAllocator&> UsedNames;
@@ -82,10 +90,10 @@ namespace llvm {
     DenseMap<unsigned, MCLabel *> Instances;
     /// NextInstance() creates the next instance of the directional local label
     /// for the LocalLabelVal and adds it to the map if needed.
-    unsigned NextInstance(int64_t LocalLabelVal);
+    unsigned NextInstance(unsigned LocalLabelVal);
     /// GetInstance() gets the current instance of the directional local label
     /// for the LocalLabelVal and adds it to the map if needed.
-    unsigned GetInstance(int64_t LocalLabelVal);
+    unsigned GetInstance(unsigned LocalLabelVal);
 
     /// The file name of the log file from the environment variable
     /// AS_SECURE_LOG_FILE.  Which must be set before the .secure_log_unique
@@ -108,9 +116,7 @@ namespace llvm {
     /// We now emit a line table for each compile unit. To reduce the prologue
     /// size of each line table, the files and directories used by each compile
     /// unit are separated.
-    typedef std::map<unsigned, SmallVector<MCDwarfFile *, 4> > MCDwarfFilesMap;
-    MCDwarfFilesMap MCDwarfFilesCUMap;
-    std::map<unsigned, SmallVector<StringRef, 4> > MCDwarfDirsCUMap;
+    std::map<unsigned, MCDwarfLineTable> MCDwarfLineTablesCUMap;
 
     /// The current dwarf line information from the last dwarf .loc directive.
     MCDwarfLoc CurrentDwarfLoc;
@@ -146,16 +152,8 @@ namespace llvm {
     /// Darwin).
     bool AllowTemporaryLabels;
 
-    /// The dwarf line information from the .loc directives for the sections
-    /// with assembled machine instructions have after seeing .loc directives.
-    DenseMap<const MCSection *, MCLineSection *> MCLineSections;
-    /// We need a deterministic iteration order, so we remember the order
-    /// the elements were added.
-    std::vector<const MCSection *> MCLineSectionOrder;
     /// The Compile Unit ID that we are currently processing.
     unsigned DwarfCompileUnitID;
-    /// The line table start symbol for each Compile Unit.
-    DenseMap<unsigned, MCSymbol *> MCLineTableSymbols;
 
     void *MachOUniquingMap, *ELFUniquingMap, *COFFUniquingMap;
 
@@ -163,6 +161,9 @@ namespace llvm {
     bool AutoReset;
 
     MCSymbol *CreateSymbol(StringRef Name);
+
+    MCSymbol *getOrCreateDirectionalLocalSymbol(unsigned LocalLabelVal,
+                                                unsigned Instance);
 
   public:
     explicit MCContext(const MCAsmInfo *MAI, const MCRegisterInfo *MRI,
@@ -192,6 +193,10 @@ namespace llvm {
     /// @name Symbol Management
     /// @{
 
+    /// CreateLinkerPrivateTempSymbol - Create and return a new linker temporary
+    /// symbol with a unique but unspecified name.
+    MCSymbol *CreateLinkerPrivateTempSymbol();
+
     /// CreateTempSymbol - Create and return a new assembler temporary symbol
     /// with a unique but unspecified name.
     MCSymbol *CreateTempSymbol();
@@ -200,13 +205,13 @@ namespace llvm {
     /// symbol names.
     unsigned getUniqueSymbolID() { return NextUniqueID++; }
 
-    /// CreateDirectionalLocalSymbol - Create the definition of a directional
-    /// local symbol for numbered label (used for "1:" definitions).
-    MCSymbol *CreateDirectionalLocalSymbol(int64_t LocalLabelVal);
+    /// Create the definition of a directional local symbol for numbered label
+    /// (used for "1:" definitions).
+    MCSymbol *CreateDirectionalLocalSymbol(unsigned LocalLabelVal);
 
-    /// GetDirectionalLocalSymbol - Create and return a directional local
-    /// symbol for numbered label (used for "1b" or 1f" references).
-    MCSymbol *GetDirectionalLocalSymbol(int64_t LocalLabelVal, int bORf);
+    /// Create and return a directional local symbol for numbered label (used
+    /// for "1b" or 1f" references).
+    MCSymbol *GetDirectionalLocalSymbol(unsigned LocalLabelVal, bool Before);
 
     /// GetOrCreateSymbol - Lookup the symbol inside with the specified
     /// @p Name.  If it exists, return it.  If not, create a forward
@@ -291,7 +296,7 @@ namespace llvm {
     const std::string &getMainFileName() const { return MainFileName; }
 
     /// \brief Set the main file name and override the default.
-    void setMainFileName(StringRef S) { MainFileName = S.str(); }
+    void setMainFileName(StringRef S) { MainFileName = S; }
 
     /// GetDwarfFile - creates an entry in the dwarf file and directory tables.
     unsigned GetDwarfFile(StringRef Directory, StringRef FileName,
@@ -301,31 +306,38 @@ namespace llvm {
 
     bool hasDwarfFiles() const {
       // Traverse MCDwarfFilesCUMap and check whether each entry is empty.
-      MCDwarfFilesMap::const_iterator MapB, MapE;
-      for (MapB = MCDwarfFilesCUMap.begin(), MapE = MCDwarfFilesCUMap.end();
-           MapB != MapE; MapB++)
-        if (!MapB->second.empty())
+      for (const auto &FileTable : MCDwarfLineTablesCUMap)
+        if (!FileTable.second.getMCDwarfFiles().empty())
            return true;
       return false;
     }
 
-    const SmallVectorImpl<MCDwarfFile *> &getMCDwarfFiles(unsigned CUID = 0) {
-      return MCDwarfFilesCUMap[CUID];
-    }
-    const SmallVectorImpl<StringRef> &getMCDwarfDirs(unsigned CUID = 0) {
-      return MCDwarfDirsCUMap[CUID];
+    const std::map<unsigned, MCDwarfLineTable> &getMCDwarfLineTables() const {
+      return MCDwarfLineTablesCUMap;
     }
 
-    const DenseMap<const MCSection *, MCLineSection *>
-    &getMCLineSections() const {
-      return MCLineSections;
+    MCDwarfLineTable &getMCDwarfLineTable(unsigned CUID) {
+      return MCDwarfLineTablesCUMap[CUID];
     }
-    const std::vector<const MCSection *> &getMCLineSectionOrder() const {
-      return MCLineSectionOrder;
+
+    const MCDwarfLineTable &getMCDwarfLineTable(unsigned CUID) const {
+      auto I = MCDwarfLineTablesCUMap.find(CUID);
+      assert(I != MCDwarfLineTablesCUMap.end());
+      return I->second;
     }
-    void addMCLineSection(const MCSection *Sec, MCLineSection *Line) {
-      MCLineSections[Sec] = Line;
-      MCLineSectionOrder.push_back(Sec);
+
+    const SmallVectorImpl<MCDwarfFile> &getMCDwarfFiles(unsigned CUID = 0) {
+      return getMCDwarfLineTable(CUID).getMCDwarfFiles();
+    }
+    const SmallVectorImpl<std::string> &getMCDwarfDirs(unsigned CUID = 0) {
+      return getMCDwarfLineTable(CUID).getMCDwarfDirs();
+    }
+
+    bool hasMCLineSections() const {
+      for (const auto &Table : MCDwarfLineTablesCUMap)
+        if (!Table.second.getMCDwarfFiles().empty() || Table.second.getLabel())
+          return true;
+      return false;
     }
     unsigned getDwarfCompileUnitID() {
       return DwarfCompileUnitID;
@@ -333,18 +345,8 @@ namespace llvm {
     void setDwarfCompileUnitID(unsigned CUIndex) {
       DwarfCompileUnitID = CUIndex;
     }
-    const DenseMap<unsigned, MCSymbol *> &getMCLineTableSymbols() const {
-      return MCLineTableSymbols;
-    }
-    MCSymbol *getMCLineTableSymbol(unsigned ID) const {
-      DenseMap<unsigned, MCSymbol *>::const_iterator CIter =
-        MCLineTableSymbols.find(ID);
-      if (CIter == MCLineTableSymbols.end())
-        return NULL;
-      return CIter->second;
-    }
-    void setMCLineTableSymbol(MCSymbol *Sym, unsigned ID) {
-      MCLineTableSymbols[ID] = Sym;
+    void setMCLineTableCompilationDir(unsigned CUID, StringRef CompilationDir) {
+      getMCDwarfLineTable(CUID).setCompilationDir(CompilationDir);
     }
 
     /// setCurrentDwarfLoc - saves the information from the currently parsed
@@ -370,7 +372,9 @@ namespace llvm {
     bool getGenDwarfForAssembly() { return GenDwarfForAssembly; }
     void setGenDwarfForAssembly(bool Value) { GenDwarfForAssembly = Value; }
     unsigned getGenDwarfFileNumber() { return GenDwarfFileNumber; }
-    unsigned nextGenDwarfFileNumber() { return ++GenDwarfFileNumber; }
+    void setGenDwarfFileNumber(unsigned FileNumber) {
+      GenDwarfFileNumber = FileNumber;
+    }
     const MCSection *getGenDwarfSection() { return GenDwarfSection; }
     void setGenDwarfSection(const MCSection *Sec) { GenDwarfSection = Sec; }
     MCSymbol *getGenDwarfSectionStartSym() { return GenDwarfSectionStartSym; }

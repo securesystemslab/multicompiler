@@ -42,14 +42,13 @@ StringRef Binary::getFileName() const {
 }
 
 ErrorOr<Binary *> object::createBinary(MemoryBuffer *Source,
-                                       sys::fs::file_magic Type) {
-  OwningPtr<MemoryBuffer> scopedSource(Source);
-  if (Type == sys::fs::file_magic::unknown)
-    Type = sys::fs::identify_magic(Source->getBuffer());
+                                       LLVMContext *Context) {
+  std::unique_ptr<MemoryBuffer> scopedSource(Source);
+  sys::fs::file_magic Type = sys::fs::identify_magic(Source->getBuffer());
 
   switch (Type) {
     case sys::fs::file_magic::archive:
-      return Archive::create(scopedSource.take());
+      return Archive::create(scopedSource.release());
     case sys::fs::file_magic::elf_relocatable:
     case sys::fs::file_magic::elf_executable:
     case sys::fs::file_magic::elf_shared_object:
@@ -67,11 +66,12 @@ ErrorOr<Binary *> object::createBinary(MemoryBuffer *Source,
     case sys::fs::file_magic::coff_object:
     case sys::fs::file_magic::coff_import_library:
     case sys::fs::file_magic::pecoff_executable:
-      return ObjectFile::createObjectFile(scopedSource.take(), Type);
-    case sys::fs::file_magic::macho_universal_binary:
-      return MachOUniversalBinary::create(scopedSource.take());
-    case sys::fs::file_magic::unknown:
     case sys::fs::file_magic::bitcode:
+      return ObjectFile::createSymbolicFile(scopedSource.release(), true, Type,
+                                            Context);
+    case sys::fs::file_magic::macho_universal_binary:
+      return MachOUniversalBinary::create(scopedSource.release());
+    case sys::fs::file_magic::unknown:
     case sys::fs::file_magic::windows_resource:
       // Unrecognized object file format.
       return object_error::invalid_file_type;
@@ -80,8 +80,8 @@ ErrorOr<Binary *> object::createBinary(MemoryBuffer *Source,
 }
 
 ErrorOr<Binary *> object::createBinary(StringRef Path) {
-  OwningPtr<MemoryBuffer> File;
+  std::unique_ptr<MemoryBuffer> File;
   if (error_code EC = MemoryBuffer::getFileOrSTDIN(Path, File))
     return EC;
-  return createBinary(File.take());
+  return createBinary(File.release());
 }

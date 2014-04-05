@@ -12,7 +12,6 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/Target/TargetMachine.h"
-#include "llvm/ADT/OwningPtr.h"
 #include "llvm/CodeGen/AsmPrinter.h"
 #include "llvm/CodeGen/MachineFunctionAnalysis.h"
 #include "llvm/CodeGen/MachineModuleInfo.h"
@@ -63,14 +62,23 @@ static bool getVerboseAsm() {
 }
 
 void LLVMTargetMachine::initAsmInfo() {
-  AsmInfo = TheTarget.createMCAsmInfo(*getRegisterInfo(), TargetTriple);
+  MCAsmInfo *TmpAsmInfo = TheTarget.createMCAsmInfo(*getRegisterInfo(),
+                                                    TargetTriple);
   // TargetSelect.h moved to a different directory between LLVM 2.9 and 3.0,
   // and if the old one gets included then MCAsmInfo will be NULL and
   // we'll crash later.
   // Provide the user with a useful error message about what's wrong.
-  assert(AsmInfo && "MCAsmInfo not initialized. "
+  assert(TmpAsmInfo && "MCAsmInfo not initialized. "
          "Make sure you include the correct TargetSelect.h"
          "and that InitializeAllTargetMCs() is being invoked!");
+
+  if (Options.DisableIntegratedAS)
+    TmpAsmInfo->setUseIntegratedAssembler(false);
+
+  if (Options.CompressDebugSections)
+    TmpAsmInfo->setCompressDebugSections(true);
+
+  AsmInfo = TmpAsmInfo;
 }
 
 LLVMTargetMachine::LLVMTargetMachine(const Target &T, StringRef Triple,
@@ -168,7 +176,7 @@ bool LLVMTargetMachine::addPassesToEmitFile(PassManagerBase &PM,
   const MCRegisterInfo &MRI = *getRegisterInfo();
   const MCInstrInfo &MII = *getInstrInfo();
   const MCSubtargetInfo &STI = getSubtarget<MCSubtargetInfo>();
-  OwningPtr<MCStreamer> AsmStreamer;
+  std::unique_ptr<MCStreamer> AsmStreamer;
 
   switch (FileType) {
   case CGFT_AssemblyFile: {
@@ -185,7 +193,6 @@ bool LLVMTargetMachine::addPassesToEmitFile(PassManagerBase &PM,
                                                        TargetCPU);
     MCStreamer *S = getTarget().createAsmStreamer(*Context, Out,
                                                   getVerboseAsm(),
-                                                  hasMCUseLoc(),
                                                   hasMCUseCFI(),
                                                   hasMCUseDwarfDirectory(),
                                                   InstPrinter,
@@ -222,7 +229,7 @@ bool LLVMTargetMachine::addPassesToEmitFile(PassManagerBase &PM,
     return true;
 
   // If successful, createAsmPrinter took ownership of AsmStreamer.
-  AsmStreamer.take();
+  AsmStreamer.release();
 
   PM.add(Printer);
 
@@ -276,7 +283,7 @@ bool LLVMTargetMachine::addPassesToEmitMC(PassManagerBase &PM,
   if (MCE == 0 || MAB == 0)
     return true;
 
-  OwningPtr<MCStreamer> AsmStreamer;
+  std::unique_ptr<MCStreamer> AsmStreamer;
   AsmStreamer.reset(getTarget().createMCObjectStreamer(
       getTargetTriple(), *Ctx, *MAB, Out, MCE, STI, hasMCRelaxAll(),
       hasMCNoExecStack()));
@@ -287,7 +294,7 @@ bool LLVMTargetMachine::addPassesToEmitMC(PassManagerBase &PM,
     return true;
 
   // If successful, createAsmPrinter took ownership of AsmStreamer.
-  AsmStreamer.take();
+  AsmStreamer.release();
 
   PM.add(Printer);
 

@@ -112,8 +112,10 @@ VirtRegAuxInfo::calculateSpillWeightAndHint(LiveInterval &li) {
   // Don't recompute spill weight for an unspillable register.
   bool Spillable = li.isSpillable();
 
-  for (MachineRegisterInfo::reg_iterator I = mri.reg_begin(li.reg);
-       MachineInstr *mi = I.skipInstruction();) {
+  for (MachineRegisterInfo::reg_instr_iterator
+       I = mri.reg_instr_begin(li.reg), E = mri.reg_instr_end();
+       I != E; ) {
+    MachineInstr *mi = &*(I++);
     if (mi->isIdentityCopy() || mi->isImplicitDef() || mi->isDebugValue())
       continue;
     if (!visited.insert(mi))
@@ -130,7 +132,7 @@ VirtRegAuxInfo::calculateSpillWeightAndHint(LiveInterval &li) {
 
       // Calculate instr weight.
       bool reads, writes;
-      tie(reads, writes) = mi->readsWritesVirtualRegister(li.reg);
+      std::tie(reads, writes) = mi->readsWritesVirtualRegister(li.reg);
       weight = LiveIntervals::getSpillWeight(
         writes, reads, &MBFI, mi);
 

@@ -35,7 +35,7 @@ void initializeAMDGPUTTIPass(PassRegistry &);
 
 namespace {
 
-class AMDGPUTTI LLVM_FINAL : public ImmutablePass, public TargetTransformInfo {
+class AMDGPUTTI final : public ImmutablePass, public TargetTransformInfo {
   const AMDGPUTargetMachine *TM;
   const AMDGPUSubtarget *ST;
   const AMDGPUTargetLowering *TLI;
@@ -55,11 +55,9 @@ public:
     initializeAMDGPUTTIPass(*PassRegistry::getPassRegistry());
   }
 
-  virtual void initializePass() LLVM_OVERRIDE { pushTTIStack(this); }
+  virtual void initializePass() override { pushTTIStack(this); }
 
-  virtual void finalizePass() { popTTIStack(); }
-
-  virtual void getAnalysisUsage(AnalysisUsage &AU) const LLVM_OVERRIDE {
+  virtual void getAnalysisUsage(AnalysisUsage &AU) const override {
     TargetTransformInfo::getAnalysisUsage(AU);
   }
 
@@ -67,13 +65,13 @@ public:
   static char ID;
 
   /// Provide necessary pointer adjustments for the two base classes.
-  virtual void *getAdjustedAnalysisPointer(const void *ID) LLVM_OVERRIDE {
+  virtual void *getAdjustedAnalysisPointer(const void *ID) override {
     if (ID == &TargetTransformInfo::ID)
       return (TargetTransformInfo *)this;
     return this;
   }
 
-  virtual bool hasBranchDivergence() const LLVM_OVERRIDE;
+  virtual bool hasBranchDivergence() const override;
 
   virtual void getUnrollingPreferences(Loop *L, UnrollingPreferences &UP) const;
 
@@ -110,9 +108,13 @@ void AMDGPUTTI::getUnrollingPreferences(Loop *L,
         // instructions that make it through to the code generator.  allocas
         // require us to use indirect addressing, which is slow and prone to
         // compiler bugs.  If this loop does an address calculation on an
-        // alloca ptr, then we want to unconditionally unroll the loop.  In most
-        // cases, this will make it possible for SROA to eliminate these allocas.
-        UP.Threshold = UINT_MAX;
+        // alloca ptr, then we want to use a higher than normal loop unroll
+        // threshold. This will give SROA a better chance to eliminate these
+        // allocas.
+        //
+        // Don't use the maximum allowed value here as it will make some
+        // programs way too big.
+        UP.Threshold = 500;
       }
     }
   }

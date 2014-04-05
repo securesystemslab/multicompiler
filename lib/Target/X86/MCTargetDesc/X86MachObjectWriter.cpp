@@ -63,7 +63,7 @@ public:
   void RecordRelocation(MachObjectWriter *Writer,
                         const MCAssembler &Asm, const MCAsmLayout &Layout,
                         const MCFragment *Fragment, const MCFixup &Fixup,
-                        MCValue Target, uint64_t &FixedValue) {
+                        MCValue Target, uint64_t &FixedValue) override {
     if (Writer->is64Bit())
       RecordX86_64Relocation(Writer, Asm, Layout, Fragment, Fixup, Target,
                              FixedValue);
@@ -230,7 +230,7 @@ void X86MachObjectWriter::RecordX86_64Relocation(MachObjectWriter *Writer,
     if (Symbol->isInSection()) {
       const MCSectionMachO &Section = static_cast<const MCSectionMachO&>(
         Fragment->getParent()->getSection());
-      if (Section.hasAttribute(MCSectionMachO::S_ATTR_DEBUG))
+      if (Section.hasAttribute(MachO::S_ATTR_DEBUG))
         Base = 0;
     }
 

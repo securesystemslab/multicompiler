@@ -15,6 +15,7 @@
 #define DEBUG_TYPE "dwarfehprepare"
 #include "llvm/CodeGen/Passes.h"
 #include "llvm/ADT/Statistic.h"
+#include "llvm/IR/CallSite.h"
 #include "llvm/IR/Dominators.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Instructions.h"
@@ -22,7 +23,6 @@
 #include "llvm/IR/Module.h"
 #include "llvm/MC/MCAsmInfo.h"
 #include "llvm/Pass.h"
-#include "llvm/Support/CallSite.h"
 #include "llvm/Target/TargetLowering.h"
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
 #include "llvm/Transforms/Utils/SSAUpdater.h"
@@ -47,11 +47,11 @@ namespace {
       initializeDominatorTreeWrapperPassPass(*PassRegistry::getPassRegistry());
     }
 
-    virtual bool runOnFunction(Function &Fn);
+    bool runOnFunction(Function &Fn) override;
 
-    virtual void getAnalysisUsage(AnalysisUsage &AU) const { }
+    void getAnalysisUsage(AnalysisUsage &AU) const override { }
 
-    const char *getPassName() const {
+    const char *getPassName() const override {
       return "Exception handling preparation";
     }
   };

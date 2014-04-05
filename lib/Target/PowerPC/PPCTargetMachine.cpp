@@ -26,6 +26,10 @@ static cl::
 opt<bool> DisableCTRLoops("disable-ppc-ctrloops", cl::Hidden,
                         cl::desc("Disable CTR loops for PPC"));
 
+static cl::opt<bool>
+VSXFMAMutateEarly("schedule-ppc-vsx-fma-mutation-early",
+  cl::Hidden, cl::desc("Schedule VSX FMA instruction mutation early"));
+
 extern "C" void LLVMInitializePowerPCTarget() {
   // Register the targets
   RegisterTargetMachine<PPC32TargetMachine> A(ThePPC32Target);
@@ -37,8 +41,13 @@ extern "C" void LLVMInitializePowerPCTarget() {
 static std::string getDataLayoutString(const PPCSubtarget &ST) {
   const Triple &T = ST.getTargetTriple();
 
-  // PPC is big endian.
-  std::string Ret = "E";
+  std::string Ret;
+
+  // Most PPC* platforms are big endian, PPC64LE is little endian.
+  if (ST.isLittleEndian())
+    Ret = "e";
+  else
+    Ret = "E";
 
   Ret += DataLayout::getManglingComponent(T);
 
@@ -70,15 +79,11 @@ PPCTargetMachine::PPCTargetMachine(const Target &T, StringRef TT,
                                    CodeGenOpt::Level OL,
                                    bool is64Bit)
   : LLVMTargetMachine(T, TT, CPU, FS, Options, RM, CM, OL),
-    Subtarget(TT, CPU, FS, is64Bit),
+    Subtarget(TT, CPU, FS, is64Bit, OL),
     DL(getDataLayoutString(Subtarget)), InstrInfo(*this),
     FrameLowering(Subtarget), JITInfo(*this, is64Bit),
     TLInfo(*this), TSInfo(*this),
     InstrItins(Subtarget.getInstrItineraryData()) {
-
-  // The binutils for the BG/P are too old for CFI.
-  if (Subtarget.isBGP())
-    setMCUseCFI(false);
   initAsmInfo();
 }
 
@@ -125,6 +130,7 @@ public:
   virtual bool addPreISel();
   virtual bool addILPOpts();
   virtual bool addInstSelector();
+  virtual bool addPreRegAlloc();
   virtual bool addPreSched2();
   virtual bool addPreEmitPass();
 };
@@ -159,10 +165,26 @@ bool PPCPassConfig::addInstSelector() {
     addPass(createPPCCTRLoopsVerify());
 #endif
 
+  if (getPPCSubtarget().hasVSX())
+    addPass(createPPCVSXCopyPass());
+
+  return false;
+}
+
+bool PPCPassConfig::addPreRegAlloc() {
+  if (getPPCSubtarget().hasVSX()) {
+    initializePPCVSXFMAMutatePass(*PassRegistry::getPassRegistry());
+    insertPass(VSXFMAMutateEarly ? &RegisterCoalescerID : &MachineSchedulerID,
+               &PPCVSXFMAMutateID);
+  }
+
   return false;
 }
 
 bool PPCPassConfig::addPreSched2() {
+  if (getPPCSubtarget().hasVSX())
+    addPass(createPPCVSXCopyCleanupPass());
+
   if (getOptLevel() != CodeGenOpt::None)
     addPass(&IfConverterID);
 

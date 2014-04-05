@@ -69,7 +69,7 @@ static std::string prettyTag(yaml::Node *N) {
   if (StringRef(Tag).startswith("tag:yaml.org,2002:")) {
     std::string Ret = "!!";
     Ret += StringRef(Tag).substr(18);
-    return llvm_move(Ret);
+    return std::move(Ret);
   }
   std::string Ret = "!<";
   Ret += Tag;
@@ -188,7 +188,7 @@ static std::string createJSONText(size_t MemoryMB, unsigned ValueSize) {
 int main(int argc, char **argv) {
   llvm::cl::ParseCommandLineOptions(argc, argv);
   if (Input.getNumOccurrences()) {
-    OwningPtr<MemoryBuffer> Buf;
+    std::unique_ptr<MemoryBuffer> Buf;
     if (MemoryBuffer::getFileOrSTDIN(Input, Buf))
       return 1;
 

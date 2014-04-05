@@ -142,7 +142,7 @@ AMDGPUPassConfig::addPreISel() {
   addPass(createFlattenCFGPass());
   if (ST.IsIRStructurizerEnabled())
     addPass(createStructurizeCFGPass());
-  if (ST.getGeneration() > AMDGPUSubtarget::NORTHERN_ISLANDS) {
+  if (ST.getGeneration() >= AMDGPUSubtarget::SOUTHERN_ISLANDS) {
     addPass(createSinkingPass());
     addPass(createSITypeRewriter());
     addPass(createSIAnnotateControlFlowPass());
@@ -165,6 +165,9 @@ bool AMDGPUPassConfig::addPreRegAlloc() {
     addPass(createR600VectorRegMerger(*TM));
   } else {
     addPass(createSIFixSGPRCopiesPass(*TM));
+    // SIFixSGPRCopies can generate a lot of duplicate instructions,
+    // so we need to run MachineCSE afterwards.
+    addPass(&MachineCSEID);
   }
   return false;
 }

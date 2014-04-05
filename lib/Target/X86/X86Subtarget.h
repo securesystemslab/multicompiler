@@ -39,7 +39,7 @@ enum Style {
 };
 }
 
-class X86Subtarget : public X86GenSubtargetInfo {
+class X86Subtarget final : public X86GenSubtargetInfo {
 protected:
   enum X86SSEEnum {
     NoMMXSSE, MMX, SSE1, SSE2, SSE3, SSSE3, SSE41, SSE42, AVX, AVX2, AVX512F
@@ -240,7 +240,7 @@ public:
   void AutoDetectSubtargetFeatures();
 
   /// \brief Reset the features for the X86 target.
-  virtual void resetSubtargetFeatures(const MachineFunction *MF);
+  void resetSubtargetFeatures(const MachineFunction *MF) override;
 private:
   void initializeEnvironment();
   void resetSubtargetFeatures(StringRef CPU, StringRef FS);
@@ -343,9 +343,23 @@ public:
   bool isTargetNaCl() const { return TargetTriple.isOSNaCl(); }
   bool isTargetNaCl32() const { return isTargetNaCl() && !is64Bit(); }
   bool isTargetNaCl64() const { return isTargetNaCl() && is64Bit(); }
-  bool isTargetWindows() const { return TargetTriple.getOS() == Triple::Win32; }
-  bool isTargetMingw() const { return TargetTriple.getOS() == Triple::MinGW32; }
-  bool isTargetCygwin() const { return TargetTriple.getOS() == Triple::Cygwin; }
+
+  bool isTargetWindowsMSVC() const {
+    return TargetTriple.isWindowsMSVCEnvironment();
+  }
+
+  bool isTargetKnownWindowsMSVC() const {
+    return TargetTriple.isKnownWindowsMSVCEnvironment();
+  }
+
+  bool isTargetWindowsCygwin() const {
+    return TargetTriple.isWindowsCygwinEnvironment();
+  }
+
+  bool isTargetWindowsGNU() const {
+    return TargetTriple.isWindowsGNUEnvironment();
+  }
+
   bool isTargetCygMing() const { return TargetTriple.isOSCygMing(); }
 
   bool isOSWindows() const { return TargetTriple.isOSWindows(); }
@@ -355,7 +369,7 @@ public:
   }
 
   bool isTargetWin32() const {
-    return !In64BitMode && (isTargetCygMing() || isTargetWindows());
+    return !In64BitMode && (isTargetCygMing() || isTargetKnownWindowsMSVC());
   }
 
   bool isPICStyleSet() const { return PICStyle != PICStyles::None; }
@@ -406,12 +420,12 @@ public:
   bool hasSinCos() const;
 
   /// Enable the MachineScheduler pass for all X86 subtargets.
-  bool enableMachineScheduler() const LLVM_OVERRIDE { return true; }
+  bool enableMachineScheduler() const override { return true; }
 
   /// enablePostRAScheduler - run for Atom optimization.
   bool enablePostRAScheduler(CodeGenOpt::Level OptLevel,
                              TargetSubtargetInfo::AntiDepBreakMode& Mode,
-                             RegClassVector& CriticalPathRCs) const;
+                             RegClassVector& CriticalPathRCs) const override;
 
   bool postRAScheduler() const { return PostRAScheduler; }
 

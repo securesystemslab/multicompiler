@@ -15,7 +15,6 @@
 #include "NVPTX.h"
 #include "MCTargetDesc/NVPTXBaseInfo.h"
 #include "NVPTXUtilities.h"
-#include "llvm/ADT/ValueMap.h"
 #include "llvm/CodeGen/MachineFunctionAnalysis.h"
 #include "llvm/CodeGen/ValueTypes.h"
 #include "llvm/IR/Constants.h"
@@ -25,6 +24,7 @@
 #include "llvm/IR/Intrinsics.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Operator.h"
+#include "llvm/IR/ValueMap.h"
 #include "llvm/PassManager.h"
 
 using namespace llvm;
@@ -146,10 +146,8 @@ bool GenericToNVVM::runOnModule(Module &M) {
     // variable initializers, as other uses have been already been removed
     // while walking through the instructions in function definitions.
     for (Value::use_iterator UI = GV->use_begin(), UE = GV->use_end();
-         UI != UE;) {
-      Use &U = (UI++).getUse();
-      U.set(BitCastNewGV);
-    }
+         UI != UE;)
+      (UI++)->set(BitCastNewGV);
     std::string Name = GV->getName();
     GV->removeDeadConstantUsers();
     GV->eraseFromParent();

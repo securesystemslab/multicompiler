@@ -13,7 +13,6 @@
 
 #define DEBUG_TYPE "asm-printer"
 #include "SparcInstPrinter.h"
-#include "MCTargetDesc/SparcBaseInfo.h"
 #include "Sparc.h"
 #include "llvm/MC/MCExpr.h"
 #include "llvm/MC/MCInst.h"
@@ -21,9 +20,21 @@
 #include "llvm/Support/raw_ostream.h"
 using namespace llvm;
 
+// The generated AsmMatcher SparcGenAsmWriter uses "Sparc" as the target
+// namespace. But SPARC backend uses "SP" as its namespace.
+namespace llvm {
+namespace Sparc {
+  using namespace SP;
+}
+}
+
 #define GET_INSTRUCTION_NAME
 #define PRINT_ALIAS_INSTR
 #include "SparcGenAsmWriter.inc"
+
+bool SparcInstPrinter::isV9() const {
+  return (STI.getFeatureBits() & Sparc::FeatureV9) != 0;
+}
 
 void SparcInstPrinter::printRegName(raw_ostream &OS, unsigned RegNo) const
 {
@@ -50,13 +61,43 @@ bool SparcInstPrinter::printSparcAliasInstr(const MCInst *MI, raw_ostream &O)
       return false;
     switch (MI->getOperand(0).getReg()) {
     default: return false;
-    case SP::G0: // jmp $addr
+    case SP::G0: // jmp $addr | ret | retl
+      if (MI->getOperand(2).isImm() &&
+          MI->getOperand(2).getImm() == 8) {
+        switch(MI->getOperand(1).getReg()) {
+        default: break;
+        case SP::I7: O << "\tret"; return true;
+        case SP::O7: O << "\tretl"; return true;
+        }
+      }
       O << "\tjmp "; printMemOperand(MI, 1, O);
       return true;
     case SP::O7: // call $addr
       O << "\tcall "; printMemOperand(MI, 1, O);
       return true;
     }
+  }
+  case SP::V9FCMPS:  case SP::V9FCMPD:  case SP::V9FCMPQ:
+  case SP::V9FCMPES: case SP::V9FCMPED: case SP::V9FCMPEQ: {
+    if (isV9()
+        || (MI->getNumOperands() != 3)
+        || (!MI->getOperand(0).isReg())
+        || (MI->getOperand(0).getReg() != SP::FCC0))
+      return false;
+    // if V8, skip printing %fcc0.
+    switch(MI->getOpcode()) {
+    default:
+    case SP::V9FCMPS:  O << "\tfcmps "; break;
+    case SP::V9FCMPD:  O << "\tfcmpd "; break;
+    case SP::V9FCMPQ:  O << "\tfcmpq "; break;
+    case SP::V9FCMPES: O << "\tfcmpes "; break;
+    case SP::V9FCMPED: O << "\tfcmped "; break;
+    case SP::V9FCMPEQ: O << "\tfcmpeq "; break;
+    }
+    printOperand(MI, 1, O);
+    O << ", ";
+    printOperand(MI, 2, O);
+    return true;
   }
   }
 }
@@ -110,11 +151,17 @@ void SparcInstPrinter::printCCOperand(const MCInst *MI, int opNum,
   switch (MI->getOpcode()) {
   default: break;
   case SP::FBCOND:
-  case SP::MOVFCCrr:
-  case SP::MOVFCCri:
-  case SP::FMOVS_FCC:
-  case SP::FMOVD_FCC:
-  case SP::FMOVQ_FCC:  // Make sure CC is a fp conditional flag.
+  case SP::FBCONDA:
+  case SP::BPFCC:
+  case SP::BPFCCA:
+  case SP::BPFCCNT:
+  case SP::BPFCCANT:
+  case SP::MOVFCCrr:  case SP::V9MOVFCCrr:
+  case SP::MOVFCCri:  case SP::V9MOVFCCri:
+  case SP::FMOVS_FCC: case SP::V9FMOVS_FCC:
+  case SP::FMOVD_FCC: case SP::V9FMOVD_FCC:
+  case SP::FMOVQ_FCC: case SP::V9FMOVQ_FCC:
+    // Make sure CC is a fp conditional flag.
     CC = (CC < 16) ? (CC + 16) : CC;
     break;
   }

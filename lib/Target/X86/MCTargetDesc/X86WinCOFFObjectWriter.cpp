@@ -29,9 +29,8 @@ namespace {
     X86WinCOFFObjectWriter(bool Is64Bit_);
     virtual ~X86WinCOFFObjectWriter();
 
-    virtual unsigned getRelocType(const MCValue &Target,
-                                  const MCFixup &Fixup,
-                                  bool IsCrossSection) const LLVM_OVERRIDE;
+    unsigned getRelocType(const MCValue &Target, const MCFixup &Fixup,
+                          bool IsCrossSection) const override;
   };
 }
 

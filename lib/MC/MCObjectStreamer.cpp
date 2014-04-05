@@ -20,6 +20,7 @@
 #include "llvm/MC/MCSection.h"
 #include "llvm/MC/MCSymbol.h"
 #include "llvm/Support/ErrorHandling.h"
+#include "llvm/MC/MCSectionELF.h"
 using namespace llvm;
 
 MCObjectStreamer::MCObjectStreamer(MCContext &Context, MCAsmBackend &TAB,
@@ -53,7 +54,7 @@ MCFragment *MCObjectStreamer::getCurrentFragment() const {
   assert(getCurrentSectionData() && "No current section!");
 
   if (CurInsertionPoint != getCurrentSectionData()->getFragmentList().begin())
-    return prior(CurInsertionPoint);
+    return std::prev(CurInsertionPoint);
 
   return 0;
 }
@@ -63,7 +64,11 @@ MCDataFragment *MCObjectStreamer::getOrCreateDataFragment() const {
   // When bundling is enabled, we don't want to add data to a fragment that
   // already has instructions (see MCELFStreamer::EmitInstToData for details)
   if (!F || (Assembler->isBundlingEnabled() && F->hasInstructions())) {
-    F = new MCDataFragment();
+    const auto *Sec = dyn_cast<MCSectionELF>(&getCurrentSectionData()->getSection());
+    if (Sec && Sec->getSectionName().startswith(".zdebug_"))
+      F = new MCCompressedFragment();
+    else
+      F = new MCDataFragment();
     insert(F);
   }
   return F;
@@ -184,10 +189,11 @@ void MCObjectStreamer::ChangeSection(const MCSection *Section,
 
 void MCObjectStreamer::EmitAssignment(MCSymbol *Symbol, const MCExpr *Value) {
   getAssembler().getOrCreateSymbolData(*Symbol);
-  Symbol->setVariableValue(AddValueSymbols(Value));
+  AddValueSymbols(Value);
+  MCStreamer::EmitAssignment(Symbol, Value);
 }
 
-void MCObjectStreamer::EmitInstruction(const MCInst &Inst) {
+void MCObjectStreamer::EmitInstruction(const MCInst &Inst, const MCSubtargetInfo &STI) {
   // Scan for values.
   for (unsigned i = Inst.getNumOperands(); i--; )
     if (Inst.getOperand(i).isExpr())
@@ -203,7 +209,7 @@ void MCObjectStreamer::EmitInstruction(const MCInst &Inst) {
   // If this instruction doesn't need relaxation, just emit it as data.
   MCAssembler &Assembler = getAssembler();
   if (!Assembler.getBackend().mayNeedRelaxation(Inst)) {
-    EmitInstToData(Inst);
+    EmitInstToData(Inst, STI);
     return;
   }
 
@@ -218,23 +224,25 @@ void MCObjectStreamer::EmitInstruction(const MCInst &Inst) {
     getAssembler().getBackend().relaxInstruction(Inst, Relaxed);
     while (getAssembler().getBackend().mayNeedRelaxation(Relaxed))
       getAssembler().getBackend().relaxInstruction(Relaxed, Relaxed);
-    EmitInstToData(Relaxed);
+    EmitInstToData(Relaxed, STI);
     return;
   }
 
   // Otherwise emit to a separate fragment.
-  EmitInstToFragment(Inst);
+  EmitInstToFragment(Inst, STI);
 }
 
-void MCObjectStreamer::EmitInstToFragment(const MCInst &Inst) {
+void MCObjectStreamer::EmitInstToFragment(const MCInst &Inst,
+                                          const MCSubtargetInfo &STI) {
   // Always create a new, separate fragment here, because its size can change
   // during relaxation.
-  MCRelaxableFragment *IF = new MCRelaxableFragment(Inst);
+  MCRelaxableFragment *IF = new MCRelaxableFragment(Inst, STI);
   insert(IF);
 
   SmallString<128> Code;
   raw_svector_ostream VecOS(Code);
-  getAssembler().getEmitter().EncodeInstruction(Inst, VecOS, IF->getFixups());
+  getAssembler().getEmitter().EncodeInstruction(Inst, VecOS, IF->getFixups(),
+                                                STI);
   VecOS.flush();
   IF->getContents().append(Code.begin(), Code.end());
 }
@@ -375,14 +383,12 @@ void MCObjectStreamer::EmitZeros(uint64_t NumBytes) {
 }
 
 void MCObjectStreamer::FinishImpl() {
-  // Dump out the dwarf file & directory tables and line tables.
-  const MCSymbol *LineSectionSymbol = NULL;
-  if (getContext().hasDwarfFiles())
-    LineSectionSymbol = MCDwarfFileTable::Emit(this);
-
   // If we are generating dwarf for assembly source files dump out the sections.
   if (getContext().getGenDwarfForAssembly())
-    MCGenDwarfInfo::Emit(this, LineSectionSymbol);
+    MCGenDwarfInfo::Emit(this);
+
+  // Dump out the dwarf file & directory tables and line tables.
+  MCDwarfLineTable::Emit(this);
 
   getAssembler().Finish();
 }

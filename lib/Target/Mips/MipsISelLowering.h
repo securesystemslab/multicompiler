@@ -184,6 +184,9 @@ namespace llvm {
       PCKEV, // Pack even elements
       PCKOD, // Pack odd elements
 
+      // Vector Lane Copy
+      INSVE, // Copy element from one vector to another
+
       // Combined (XOR (OR $a, $b), -1)
       VNOR,
 
@@ -255,17 +258,17 @@ namespace llvm {
     // computing a local symbol's address:
     //
     // (add (load (wrapper $gp, %got(sym)), %lo(sym))
-    template<class NodeTy>
+    template <class NodeTy>
     SDValue getAddrLocal(NodeTy *N, EVT Ty, SelectionDAG &DAG,
-                         bool HasMips64) const {
+                         bool IsN32OrN64) const {
       SDLoc DL(N);
-      unsigned GOTFlag = HasMips64 ? MipsII::MO_GOT_PAGE : MipsII::MO_GOT;
+      unsigned GOTFlag = IsN32OrN64 ? MipsII::MO_GOT_PAGE : MipsII::MO_GOT;
       SDValue GOT = DAG.getNode(MipsISD::Wrapper, DL, Ty, getGlobalReg(DAG, Ty),
                                 getTargetNode(N, Ty, DAG, GOTFlag));
       SDValue Load = DAG.getLoad(Ty, DL, DAG.getEntryNode(), GOT,
                                  MachinePointerInfo::getGOT(), false, false,
                                  false, 0);
-      unsigned LoFlag = HasMips64 ? MipsII::MO_GOT_OFST : MipsII::MO_ABS_LO;
+      unsigned LoFlag = IsN32OrN64 ? MipsII::MO_GOT_OFST : MipsII::MO_ABS_LO;
       SDValue Lo = DAG.getNode(MipsISD::Lo, DL, Ty,
                                getTargetNode(N, Ty, DAG, LoFlag));
       return DAG.getNode(ISD::ADD, DL, Ty, Load, Lo);
@@ -379,7 +382,7 @@ namespace llvm {
       unsigned reservedArgArea() const;
 
       /// Return pointer to array of integer argument registers.
-      const uint16_t *intArgRegs() const;
+      const MCPhysReg *intArgRegs() const;
 
       typedef SmallVectorImpl<ByValArgInfo>::const_iterator byval_iterator;
       byval_iterator byval_begin() const { return ByValArgs.begin(); }
@@ -400,7 +403,7 @@ namespace llvm {
       /// Return the function that analyzes variable argument list functions.
       llvm::CCAssignFn *varArgFn() const;
 
-      const uint16_t *shadowRegs() const;
+      const MCPhysReg *shadowRegs() const;
 
       void allocateRegs(ByValArgInfo &ByVal, unsigned ByValSize,
                         unsigned Align);
@@ -429,7 +432,11 @@ namespace llvm {
     // Subtarget Info
     const MipsSubtarget *Subtarget;
 
-    bool HasMips64, IsN64, IsO32;
+    bool hasMips64() const { return Subtarget->hasMips64(); }
+    bool isGP64bit() const { return Subtarget->isGP64bit(); }
+    bool isO32() const { return Subtarget->isABI_O32(); }
+    bool isN32() const { return Subtarget->isABI_N32(); }
+    bool isN64() const { return Subtarget->isABI_N64(); }
 
   private:
     // Create a TargetGlobalAddress node.

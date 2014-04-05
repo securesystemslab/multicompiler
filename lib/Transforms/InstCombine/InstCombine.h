@@ -11,13 +11,13 @@
 #define INSTCOMBINE_INSTCOMBINE_H
 
 #include "InstCombineWorklist.h"
+#include "llvm/Analysis/TargetFolder.h"
 #include "llvm/Analysis/ValueTracking.h"
 #include "llvm/IR/IRBuilder.h"
+#include "llvm/IR/InstVisitor.h"
 #include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/Operator.h"
-#include "llvm/InstVisitor.h"
 #include "llvm/Pass.h"
-#include "llvm/Support/TargetFolder.h"
 #include "llvm/Transforms/Utils/SimplifyLibCalls.h"
 
 namespace llvm {
@@ -81,7 +81,7 @@ public:
 class LLVM_LIBRARY_VISIBILITY InstCombiner
                              : public FunctionPass,
                                public InstVisitor<InstCombiner, Instruction*> {
-  DataLayout *TD;
+  const DataLayout *DL;
   TargetLibraryInfo *TLI;
   bool MadeIRChange;
   LibCallSimplifier *Simplifier;
@@ -96,19 +96,19 @@ public:
   BuilderTy *Builder;
 
   static char ID; // Pass identification, replacement for typeid
-  InstCombiner() : FunctionPass(ID), TD(0), Builder(0) {
+  InstCombiner() : FunctionPass(ID), DL(0), Builder(0) {
     MinimizeSize = false;
     initializeInstCombinerPass(*PassRegistry::getPassRegistry());
   }
 
 public:
-  virtual bool runOnFunction(Function &F);
+  bool runOnFunction(Function &F) override;
 
   bool DoOneIteration(Function &F, unsigned ItNum);
 
-  virtual void getAnalysisUsage(AnalysisUsage &AU) const;
+  void getAnalysisUsage(AnalysisUsage &AU) const override;
 
-  DataLayout *getDataLayout() const { return TD; }
+  const DataLayout *getDataLayout() const { return DL; }
 
   TargetLibraryInfo *getTargetLibraryInfo() const { return TLI; }
 
@@ -234,7 +234,7 @@ private:
                           Type *Ty);
 
   Instruction *visitCallSite(CallSite CS);
-  Instruction *tryOptimizeCall(CallInst *CI, const DataLayout *TD);
+  Instruction *tryOptimizeCall(CallInst *CI, const DataLayout *DL);
   bool transformConstExprCastCall(CallSite CS);
   Instruction *transformCallThroughTrampoline(CallSite CS,
                                               IntrinsicInst *Tramp);
@@ -311,15 +311,15 @@ public:
 
   void ComputeMaskedBits(Value *V, APInt &KnownZero,
                          APInt &KnownOne, unsigned Depth = 0) const {
-    return llvm::ComputeMaskedBits(V, KnownZero, KnownOne, TD, Depth);
+    return llvm::ComputeMaskedBits(V, KnownZero, KnownOne, DL, Depth);
   }
 
   bool MaskedValueIsZero(Value *V, const APInt &Mask,
                          unsigned Depth = 0) const {
-    return llvm::MaskedValueIsZero(V, Mask, TD, Depth);
+    return llvm::MaskedValueIsZero(V, Mask, DL, Depth);
   }
   unsigned ComputeNumSignBits(Value *Op, unsigned Depth = 0) const {
-    return llvm::ComputeNumSignBits(Op, TD, Depth);
+    return llvm::ComputeNumSignBits(Op, DL, Depth);
   }
 
 private:

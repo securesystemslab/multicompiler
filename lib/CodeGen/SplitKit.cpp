@@ -131,11 +131,9 @@ void SplitAnalysis::analyzeUses() {
 
   // Get use slots form the use-def chain.
   const MachineRegisterInfo &MRI = MF.getRegInfo();
-  for (MachineRegisterInfo::use_nodbg_iterator
-       I = MRI.use_nodbg_begin(CurLI->reg), E = MRI.use_nodbg_end(); I != E;
-       ++I)
-    if (!I.getOperand().isUndef())
-      UseSlots.push_back(LIS.getInstructionIndex(&*I).getRegSlot());
+  for (MachineOperand &MO : MRI.use_nodbg_operands(CurLI->reg))
+    if (!MO.isUndef())
+      UseSlots.push_back(LIS.getInstructionIndex(MO.getParent()).getRegSlot());
 
   array_pod_sort(UseSlots.begin(), UseSlots.end());
 
@@ -188,7 +186,7 @@ bool SplitAnalysis::calcLiveBlockInfo() {
     BlockInfo BI;
     BI.MBB = MFI;
     SlotIndex Start, Stop;
-    tie(Start, Stop) = LIS.getSlotIndexes()->getMBBRange(BI.MBB);
+    std::tie(Start, Stop) = LIS.getSlotIndexes()->getMBBRange(BI.MBB);
 
     // If the block contains no uses, the range must be live through. At one
     // point, RegisterCoalescer could create dangling ranges that ended
@@ -509,7 +507,7 @@ SlotIndex SplitEditor::enterIntvAfter(SlotIndex Idx) {
   assert(MI && "enterIntvAfter called with invalid index");
 
   VNInfo *VNI = defFromParent(OpenIdx, ParentVNI, Idx, *MI->getParent(),
-                              llvm::next(MachineBasicBlock::iterator(MI)));
+                              std::next(MachineBasicBlock::iterator(MI)));
   return VNI->def;
 }
 
@@ -570,7 +568,7 @@ SlotIndex SplitEditor::leaveIntvAfter(SlotIndex Idx) {
   }
 
   VNInfo *VNI = defFromParent(0, ParentVNI, Boundary, *MI->getParent(),
-                              llvm::next(MachineBasicBlock::iterator(MI)));
+                              std::next(MachineBasicBlock::iterator(MI)));
   return VNI->def;
 }
 
@@ -888,7 +886,7 @@ bool SplitEditor::transferValues() {
       // LiveInBlocks.
       MachineFunction::iterator MBB = LIS.getMBBFromIndex(Start);
       SlotIndex BlockStart, BlockEnd;
-      tie(BlockStart, BlockEnd) = LIS.getSlotIndexes()->getMBBRange(MBB);
+      std::tie(BlockStart, BlockEnd) = LIS.getSlotIndexes()->getMBBRange(MBB);
 
       // The first block may be live-in, or it may have its own def.
       if (Start != BlockStart) {
@@ -972,7 +970,7 @@ void SplitEditor::extendPHIKillRanges() {
 void SplitEditor::rewriteAssigned(bool ExtendRanges) {
   for (MachineRegisterInfo::reg_iterator RI = MRI.reg_begin(Edit->getReg()),
        RE = MRI.reg_end(); RI != RE;) {
-    MachineOperand &MO = RI.getOperand();
+    MachineOperand &MO = *RI;
     MachineInstr *MI = MO.getParent();
     ++RI;
     // LiveDebugVariables should have handled all DBG_VALUE instructions.
@@ -1183,7 +1181,7 @@ void SplitEditor::splitLiveThroughBlock(unsigned MBBNum,
                                         unsigned IntvIn, SlotIndex LeaveBefore,
                                         unsigned IntvOut, SlotIndex EnterAfter){
   SlotIndex Start, Stop;
-  tie(Start, Stop) = LIS.getSlotIndexes()->getMBBRange(MBBNum);
+  std::tie(Start, Stop) = LIS.getSlotIndexes()->getMBBRange(MBBNum);
 
   DEBUG(dbgs() << "BB#" << MBBNum << " [" << Start << ';' << Stop
                << ") intf " << LeaveBefore << '-' << EnterAfter
@@ -1286,7 +1284,7 @@ void SplitEditor::splitLiveThroughBlock(unsigned MBBNum,
 void SplitEditor::splitRegInBlock(const SplitAnalysis::BlockInfo &BI,
                                   unsigned IntvIn, SlotIndex LeaveBefore) {
   SlotIndex Start, Stop;
-  tie(Start, Stop) = LIS.getSlotIndexes()->getMBBRange(BI.MBB);
+  std::tie(Start, Stop) = LIS.getSlotIndexes()->getMBBRange(BI.MBB);
 
   DEBUG(dbgs() << "BB#" << BI.MBB->getNumber() << " [" << Start << ';' << Stop
                << "), uses " << BI.FirstInstr << '-' << BI.LastInstr
@@ -1378,7 +1376,7 @@ void SplitEditor::splitRegInBlock(const SplitAnalysis::BlockInfo &BI,
 void SplitEditor::splitRegOutBlock(const SplitAnalysis::BlockInfo &BI,
                                    unsigned IntvOut, SlotIndex EnterAfter) {
   SlotIndex Start, Stop;
-  tie(Start, Stop) = LIS.getSlotIndexes()->getMBBRange(BI.MBB);
+  std::tie(Start, Stop) = LIS.getSlotIndexes()->getMBBRange(BI.MBB);
 
   DEBUG(dbgs() << "BB#" << BI.MBB->getNumber() << " [" << Start << ';' << Stop
                << "), uses " << BI.FirstInstr << '-' << BI.LastInstr

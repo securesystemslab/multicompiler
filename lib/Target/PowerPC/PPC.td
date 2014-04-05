@@ -51,6 +51,8 @@ def Feature64Bit     : SubtargetFeature<"64bit","Has64BitSupport", "true",
                                         "Enable 64-bit instructions">;
 def Feature64BitRegs : SubtargetFeature<"64bitregs","Use64BitRegs", "true",
                               "Enable 64-bit registers usage for ppc32 [beta]">;
+def FeatureCRBits    : SubtargetFeature<"crbits", "UseCRBits", "true",
+                              "Use condition-register bits individually">;
 def FeatureAltivec   : SubtargetFeature<"altivec","HasAltivec", "true",
                                         "Enable Altivec instructions">;
 def FeatureMFOCRF    : SubtargetFeature<"mfocrf","HasMFOCRF", "true",
@@ -88,7 +90,8 @@ def FeatureBookE     : SubtargetFeature<"booke", "IsBookE", "true",
 def FeatureQPX       : SubtargetFeature<"qpx","HasQPX", "true",
                                         "Enable QPX instructions">;
 def FeatureVSX       : SubtargetFeature<"vsx","HasVSX", "true",
-                                        "Enable VSX instructions">;
+                                        "Enable VSX instructions",
+                                        [FeatureAltivec]>;
 
 def DeprecatedMFTB   : SubtargetFeature<"", "DeprecatedMFTB", "true",
                                         "Treat mftb as deprecated">;
@@ -109,6 +112,12 @@ def DeprecatedDST    : SubtargetFeature<"", "DeprecatedDST", "true",
 // RecFormRel - Filter class used to relate non-record-form instructions with
 // their record-form variants.
 class RecFormRel;
+
+// AltVSXFMARel - Filter class used to relate the primary addend-killing VSX
+// FMA instruction forms with their corresponding factor-killing forms.
+class AltVSXFMARel {
+  bit IsVSXFMAAlt = 0;
+}
 
 //===----------------------------------------------------------------------===//
 // Relation Map Definitions.
@@ -138,6 +147,19 @@ def getNonRecordFormOpcode : InstrMapping {
   let KeyCol = ["1"];
   // Value columns are RC=0
   let ValueCols = [["0"]];
+}
+
+def getAltVSXFMAOpcode : InstrMapping {
+  let FilterClass = "AltVSXFMARel";
+  // Instructions with the same BaseName and Interpretation64Bit values
+  // form a row.
+  let RowFields = ["BaseName"];
+  // Instructions with the same RC value form a column.
+  let ColFields = ["IsVSXFMAAlt"];
+  // The key column are the (default) addend-killing instructions.
+  let KeyCol = ["0"];
+  // Value columns IsVSXFMAAlt=1
+  let ValueCols = [["1"]];
 }
 
 //===----------------------------------------------------------------------===//
@@ -286,6 +308,8 @@ def PPCInstrInfo : InstrInfo {
 
   // FIXME: Unset this when no longer needed!
   let decodePositionallyEncodedOperands = 1;
+
+  let noNamedPositionallyEncodedOperands = 1;
 }
 
 def PPCAsmParser : AsmParser {

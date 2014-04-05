@@ -20,10 +20,10 @@
 #include "llvm/Analysis/ScalarEvolution.h"
 #include "llvm/Analysis/TargetTransformInfo.h"
 #include "llvm/Analysis/ValueTracking.h"
+#include "llvm/IR/CFG.h"
 #include "llvm/IR/Dominators.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/IntrinsicInst.h"
-#include "llvm/Support/CFG.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
 #include "llvm/Transforms/Utils/Local.h"
@@ -44,7 +44,7 @@ namespace {
     }
 
     // LCSSA form makes instruction renaming easier.
-    virtual void getAnalysisUsage(AnalysisUsage &AU) const {
+    void getAnalysisUsage(AnalysisUsage &AU) const override {
       AU.addPreserved<DominatorTreeWrapperPass>();
       AU.addRequired<LoopInfo>();
       AU.addPreserved<LoopInfo>();
@@ -56,7 +56,7 @@ namespace {
       AU.addRequired<TargetTransformInfo>();
     }
 
-    bool runOnLoop(Loop *L, LPPassManager &LPM);
+    bool runOnLoop(Loop *L, LPPassManager &LPM) override;
     bool simplifyLoopLatch(Loop *L);
     bool rotateLoop(Loop *L, bool SimplifiedLatch);
 
@@ -79,6 +79,9 @@ Pass *llvm::createLoopRotatePass() { return new LoopRotate(); }
 /// Rotate Loop L as many times as possible. Return true if
 /// the loop is rotated at least once.
 bool LoopRotate::runOnLoop(Loop *L, LPPassManager &LPM) {
+  if (skipOptnoneFunction(L))
+    return false;
+
   LI = &getAnalysis<LoopInfo>();
   TTI = &getAnalysis<TargetTransformInfo>();
 
@@ -131,7 +134,7 @@ static void RewriteUsesOfClonedInstructions(BasicBlock *OrigHeader,
     for (Value::use_iterator UI = OrigHeaderVal->use_begin(),
          UE = OrigHeaderVal->use_end(); UI != UE; ) {
       // Grab the use before incrementing the iterator.
-      Use &U = UI.getUse();
+      Use &U = *UI;
 
       // Increment the iterator before removing the use from the list.
       ++UI;
@@ -463,9 +466,24 @@ bool LoopRotate::rotateLoop(Loop *L, bool SimplifiedLatch) {
     NewPH->setName(NewHeader->getName() + ".lr.ph");
 
     // Preserve canonical loop form, which means that 'Exit' should have only
-    // one predecessor.
-    BasicBlock *ExitSplit = SplitCriticalEdge(L->getLoopLatch(), Exit, this);
-    ExitSplit->moveBefore(Exit);
+    // one predecessor. Note that Exit could be an exit block for multiple
+    // nested loops, causing both of the edges to now be critical and need to
+    // be split.
+    SmallVector<BasicBlock *, 4> ExitPreds(pred_begin(Exit), pred_end(Exit));
+    bool SplitLatchEdge = false;
+    for (SmallVectorImpl<BasicBlock *>::iterator PI = ExitPreds.begin(),
+                                                 PE = ExitPreds.end();
+         PI != PE; ++PI) {
+      // We only need to split loop exit edges.
+      Loop *PredLoop = LI->getLoopFor(*PI);
+      if (!PredLoop || PredLoop->contains(Exit))
+        continue;
+      SplitLatchEdge |= L->getLoopLatch() == *PI;
+      BasicBlock *ExitSplit = SplitCriticalEdge(*PI, Exit, this);
+      ExitSplit->moveBefore(Exit);
+    }
+    assert(SplitLatchEdge &&
+           "Despite splitting all preds, failed to split latch exit?");
   } else {
     // We can fold the conditional branch in the preheader, this makes things
     // simpler. The first step is to remove the extra edge to the Exit block.

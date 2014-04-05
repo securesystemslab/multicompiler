@@ -147,7 +147,7 @@ HexagonInstrInfo::InsertBranch(MachineBasicBlock &MBB,MachineBasicBlock *TBB,
         if (isPredicated(Term) && !AnalyzeBranch(MBB, NewTBB, NewFBB, Cond,
                                                  false)) {
           MachineBasicBlock *NextBB =
-            llvm::next(MachineFunction::iterator(&MBB));
+            std::next(MachineFunction::iterator(&MBB));
           if (NewTBB == NextBB) {
             ReverseBranchCondition(Cond);
             RemoveBranch(MBB);
@@ -1654,7 +1654,7 @@ bool HexagonInstrInfo::isSchedulingBoundary(const MachineInstr *MI,
     return false;
 
   // Terminators and labels can't be scheduled around.
-  if (MI->getDesc().isTerminator() || MI->isLabel() || MI->isInlineAsm())
+  if (MI->getDesc().isTerminator() || MI->isPosition() || MI->isInlineAsm())
     return true;
 
   return false;

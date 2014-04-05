@@ -32,35 +32,26 @@ void initializePPCTTIPass(PassRegistry &);
 
 namespace {
 
-class PPCTTI LLVM_FINAL : public ImmutablePass, public TargetTransformInfo {
-  const PPCTargetMachine *TM;
+class PPCTTI final : public ImmutablePass, public TargetTransformInfo {
   const PPCSubtarget *ST;
   const PPCTargetLowering *TLI;
 
-  /// Estimate the overhead of scalarizing an instruction. Insert and Extract
-  /// are set if the result needs to be inserted and/or extracted from vectors.
-  unsigned getScalarizationOverhead(Type *Ty, bool Insert, bool Extract) const;
-
 public:
-  PPCTTI() : ImmutablePass(ID), TM(0), ST(0), TLI(0) {
+  PPCTTI() : ImmutablePass(ID), ST(0), TLI(0) {
     llvm_unreachable("This pass cannot be directly constructed");
   }
 
   PPCTTI(const PPCTargetMachine *TM)
-      : ImmutablePass(ID), TM(TM), ST(TM->getSubtargetImpl()),
+      : ImmutablePass(ID), ST(TM->getSubtargetImpl()),
         TLI(TM->getTargetLowering()) {
     initializePPCTTIPass(*PassRegistry::getPassRegistry());
   }
 
-  virtual void initializePass() LLVM_OVERRIDE {
+  virtual void initializePass() override {
     pushTTIStack(this);
   }
 
-  virtual void finalizePass() {
-    popTTIStack();
-  }
-
-  virtual void getAnalysisUsage(AnalysisUsage &AU) const LLVM_OVERRIDE {
+  virtual void getAnalysisUsage(AnalysisUsage &AU) const override {
     TargetTransformInfo::getAnalysisUsage(AU);
   }
 
@@ -68,7 +59,7 @@ public:
   static char ID;
 
   /// Provide necessary pointer adjustments for the two base classes.
-  virtual void *getAdjustedAnalysisPointer(const void *ID) LLVM_OVERRIDE {
+  virtual void *getAdjustedAnalysisPointer(const void *ID) override {
     if (ID == &TargetTransformInfo::ID)
       return (TargetTransformInfo*)this;
     return this;
@@ -77,32 +68,32 @@ public:
   /// \name Scalar TTI Implementations
   /// @{
   virtual PopcntSupportKind
-  getPopcntSupport(unsigned TyWidth) const LLVM_OVERRIDE;
+  getPopcntSupport(unsigned TyWidth) const override;
   virtual void getUnrollingPreferences(
-    Loop *L, UnrollingPreferences &UP) const LLVM_OVERRIDE;
+    Loop *L, UnrollingPreferences &UP) const override;
 
   /// @}
 
   /// \name Vector TTI Implementations
   /// @{
 
-  virtual unsigned getNumberOfRegisters(bool Vector) const LLVM_OVERRIDE;
-  virtual unsigned getRegisterBitWidth(bool Vector) const LLVM_OVERRIDE;
-  virtual unsigned getMaximumUnrollFactor() const LLVM_OVERRIDE;
+  virtual unsigned getNumberOfRegisters(bool Vector) const override;
+  virtual unsigned getRegisterBitWidth(bool Vector) const override;
+  virtual unsigned getMaximumUnrollFactor() const override;
   virtual unsigned getArithmeticInstrCost(unsigned Opcode, Type *Ty,
                                           OperandValueKind,
-                                          OperandValueKind) const LLVM_OVERRIDE;
+                                          OperandValueKind) const override;
   virtual unsigned getShuffleCost(ShuffleKind Kind, Type *Tp,
-                                  int Index, Type *SubTp) const LLVM_OVERRIDE;
+                                  int Index, Type *SubTp) const override;
   virtual unsigned getCastInstrCost(unsigned Opcode, Type *Dst,
-                                    Type *Src) const LLVM_OVERRIDE;
+                                    Type *Src) const override;
   virtual unsigned getCmpSelInstrCost(unsigned Opcode, Type *ValTy,
-                                      Type *CondTy) const LLVM_OVERRIDE;
+                                      Type *CondTy) const override;
   virtual unsigned getVectorInstrCost(unsigned Opcode, Type *Val,
-                                      unsigned Index) const LLVM_OVERRIDE;
+                                      unsigned Index) const override;
   virtual unsigned getMemoryOpCost(unsigned Opcode, Type *Src,
                                    unsigned Alignment,
-                                   unsigned AddressSpace) const LLVM_OVERRIDE;
+                                   unsigned AddressSpace) const override;
 
   /// @}
 };
@@ -143,7 +134,7 @@ void PPCTTI::getUnrollingPreferences(Loop *L, UnrollingPreferences &UP) const {
 unsigned PPCTTI::getNumberOfRegisters(bool Vector) const {
   if (Vector && !ST->hasAltivec())
     return 0;
-  return 32;
+  return ST->hasVSX() ? 64 : 32;
 }
 
 unsigned PPCTTI::getRegisterBitWidth(bool Vector) const {
@@ -212,11 +203,21 @@ unsigned PPCTTI::getVectorInstrCost(unsigned Opcode, Type *Val,
   int ISD = TLI->InstructionOpcodeToISD(Opcode);
   assert(ISD && "Invalid opcode");
 
+  if (ST->hasVSX() && Val->getScalarType()->isDoubleTy()) {
+    // Double-precision scalars are already located in index #0.
+    if (Index == 0)
+      return 0;
+
+    return TargetTransformInfo::getVectorInstrCost(Opcode, Val, Index);
+  }
+
   // Estimated cost of a load-hit-store delay.  This was obtained
   // experimentally as a minimum needed to prevent unprofitable
   // vectorization for the paq8p benchmark.  It may need to be
   // raised further if other unprofitable cases remain.
-  unsigned LHSPenalty = 12;
+  unsigned LHSPenalty = 2;
+  if (ISD == ISD::INSERT_VECTOR_ELT)
+    LHSPenalty += 7;
 
   // Vector element insert/extract with Altivec is very expensive,
   // because they require store and reload with the attendant
@@ -237,14 +238,34 @@ unsigned PPCTTI::getMemoryOpCost(unsigned Opcode, Type *Src, unsigned Alignment,
   assert((Opcode == Instruction::Load || Opcode == Instruction::Store) &&
          "Invalid Opcode");
 
-  // Each load/store unit costs 1.
-  unsigned Cost = LT.first * 1;
+  unsigned Cost =
+    TargetTransformInfo::getMemoryOpCost(Opcode, Src, Alignment, AddressSpace);
+
+  // VSX loads/stores support unaligned access.
+  if (ST->hasVSX()) {
+    if (LT.second == MVT::v2f64 || LT.second == MVT::v2i64)
+      return Cost;
+  }
+
+  bool UnalignedAltivec =
+    Src->isVectorTy() &&
+    Src->getPrimitiveSizeInBits() >= LT.second.getSizeInBits() &&
+    LT.second.getSizeInBits() == 128 &&
+    Opcode == Instruction::Load;
 
   // PPC in general does not support unaligned loads and stores. They'll need
   // to be decomposed based on the alignment factor.
   unsigned SrcBytes = LT.second.getStoreSize();
-  if (SrcBytes && Alignment && Alignment < SrcBytes)
-    Cost *= (SrcBytes/Alignment);
+  if (SrcBytes && Alignment && Alignment < SrcBytes && !UnalignedAltivec) {
+    Cost += LT.first*(SrcBytes/Alignment-1);
+
+    // For a vector type, there is also scalarization overhead (only for
+    // stores, loads are expanded using the vector-load + permutation sequence,
+    // which is much less expensive).
+    if (Src->isVectorTy() && Opcode == Instruction::Store)
+      for (int i = 0, e = Src->getVectorNumElements(); i < e; ++i)
+        Cost += getVectorInstrCost(Instruction::ExtractElement, Src, i);
+  }
 
   return Cost;
 }

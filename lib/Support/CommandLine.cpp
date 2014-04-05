@@ -18,7 +18,6 @@
 
 #include "llvm/Support/CommandLine.h"
 #include "llvm/ADT/ArrayRef.h"
-#include "llvm/ADT/OwningPtr.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/StringMap.h"
@@ -111,6 +110,13 @@ void Option::addArgument() {
   MarkOptionsChanged();
 }
 
+void Option::removeArgument() {
+  assert(NextRegistered != 0 && "argument never registered");
+  assert(RegisteredOptionList == this && "argument is not the last registered");
+  RegisteredOptionList = NextRegistered;
+  MarkOptionsChanged();
+}
+
 // This collects the different option categories that have been registered.
 typedef SmallPtrSet<OptionCategory*,16> OptionCatSet;
 static ManagedStatic<OptionCatSet> RegisteredOptionCategories;
@@ -118,8 +124,13 @@ static ManagedStatic<OptionCatSet> RegisteredOptionCategories;
 // Initialise the general option category.
 OptionCategory llvm::cl::GeneralCategory("General options");
 
-void OptionCategory::registerCategory()
-{
+void OptionCategory::registerCategory() {
+  assert(std::count_if(RegisteredOptionCategories->begin(),
+                       RegisteredOptionCategories->end(),
+                       [this](const OptionCategory *Category) {
+                         return getName() == Category->getName();
+                       }) == 0 && "Duplicate option categories");
+
   RegisteredOptionCategories->insert(this);
 }
 
@@ -608,7 +619,7 @@ void cl::TokenizeWindowsCommandLine(StringRef Src, StringSaver &Saver,
 static bool ExpandResponseFile(const char *FName, StringSaver &Saver,
                                TokenizerCallback Tokenizer,
                                SmallVectorImpl<const char *> &NewArgv) {
-  OwningPtr<MemoryBuffer> MemBuf;
+  std::unique_ptr<MemoryBuffer> MemBuf;
   if (MemoryBuffer::getFile(FName, MemBuf))
     return false;
   StringRef Str(MemBuf->getBufferStart(), MemBuf->getBufferSize());
@@ -677,7 +688,7 @@ namespace {
         free(Dup);
       }
     }
-    const char *SaveString(const char *Str) LLVM_OVERRIDE {
+    const char *SaveString(const char *Str) override {
       char *Dup = strdup(Str);
       Dups.push_back(Dup);
       return Dup;
@@ -1476,7 +1487,7 @@ public:
     MoreHelp->clear();
 
     // Halt the program since help information was printed
-    exit(1);
+    exit(0);
   }
 };
 
@@ -1488,16 +1499,14 @@ public:
   // It shall return true if A's name should be lexographically
   // ordered before B's name. It returns false otherwise.
   static bool OptionCategoryCompare(OptionCategory *A, OptionCategory *B) {
-    int Length = strcmp(A->getName(), B->getName());
-    assert(Length != 0 && "Duplicate option categories");
-    return Length < 0;
+    return strcmp(A->getName(), B->getName()) < 0;
   }
 
   // Make sure we inherit our base class's operator=()
   using HelpPrinter::operator= ;
 
 protected:
-  virtual void printOptions(StrOptionPairVector &Opts, size_t MaxArgLen) {
+  void printOptions(StrOptionPairVector &Opts, size_t MaxArgLen) override {
     std::vector<OptionCategory *> SortedCategories;
     std::map<OptionCategory *, std::vector<Option *> > CategorizedOptions;
 
@@ -1505,8 +1514,9 @@ protected:
     // sorting.
     for (OptionCatSet::const_iterator I = RegisteredOptionCategories->begin(),
                                       E = RegisteredOptionCategories->end();
-         I != E; ++I)
+         I != E; ++I) {
       SortedCategories.push_back(*I);
+    }
 
     // Sort the different option categories alphabetically.
     assert(SortedCategories.size() > 0 && "No option categories registered!");
@@ -1713,7 +1723,7 @@ public:
 
     if (OverrideVersionPrinter != 0) {
       (*OverrideVersionPrinter)();
-      exit(1);
+      exit(0);
     }
     print();
 
@@ -1727,7 +1737,7 @@ public:
         (*I)();
     }
 
-    exit(1);
+    exit(0);
   }
 };
 } // End anonymous namespace

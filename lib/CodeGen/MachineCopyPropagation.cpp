@@ -42,7 +42,7 @@ namespace {
      initializeMachineCopyPropagationPass(*PassRegistry::getPassRegistry());
     }
 
-    virtual bool runOnMachineFunction(MachineFunction &MF);
+    bool runOnMachineFunction(MachineFunction &MF) override;
 
   private:
     typedef SmallVector<unsigned, 4> DestList;
@@ -329,6 +329,9 @@ bool MachineCopyPropagation::CopyPropagateBlock(MachineBasicBlock &MBB) {
 }
 
 bool MachineCopyPropagation::runOnMachineFunction(MachineFunction &MF) {
+  if (skipOptnoneFunction(*MF.getFunction()))
+    return false;
+
   bool Changed = false;
 
   TRI = MF.getTarget().getRegisterInfo();

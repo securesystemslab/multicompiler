@@ -79,9 +79,6 @@ namespace {
       return dyn_cast<BranchInst>(BB->getTerminator());
     }
 
-    /// Return the condition of the branch terminating the given basic block.
-    static Value *getBrCondtion(BasicBlock *);
-
     /// Derive the precondition block (i.e the block that guards the loop
     /// preheader) from the given preheader.
     static BasicBlock *getPrecondBb(BasicBlock *PreHead);
@@ -132,7 +129,7 @@ namespace {
 
   class LoopIdiomRecognize : public LoopPass {
     Loop *CurLoop;
-    const DataLayout *TD;
+    const DataLayout *DL;
     DominatorTree *DT;
     ScalarEvolution *SE;
     TargetLibraryInfo *TLI;
@@ -141,10 +138,10 @@ namespace {
     static char ID;
     explicit LoopIdiomRecognize() : LoopPass(ID) {
       initializeLoopIdiomRecognizePass(*PassRegistry::getPassRegistry());
-      TD = 0; DT = 0; SE = 0; TLI = 0; TTI = 0;
+      DL = 0; DT = 0; SE = 0; TLI = 0; TTI = 0;
     }
 
-    bool runOnLoop(Loop *L, LPPassManager &LPM);
+    bool runOnLoop(Loop *L, LPPassManager &LPM) override;
     bool runOnLoopBlock(BasicBlock *BB, const SCEV *BECount,
                         SmallVectorImpl<BasicBlock*> &ExitBlocks);
 
@@ -164,7 +161,7 @@ namespace {
     /// This transformation requires natural loop information & requires that
     /// loop preheaders be inserted into the CFG.
     ///
-    virtual void getAnalysisUsage(AnalysisUsage &AU) const {
+    void getAnalysisUsage(AnalysisUsage &AU) const override {
       AU.addRequired<LoopInfo>();
       AU.addPreserved<LoopInfo>();
       AU.addRequiredID(LoopSimplifyID);
@@ -182,7 +179,11 @@ namespace {
     }
 
     const DataLayout *getDataLayout() {
-      return TD ? TD : TD=getAnalysisIfAvailable<DataLayout>();
+      if (DL)
+        return DL;
+      DataLayoutPass *DLP = getAnalysisIfAvailable<DataLayoutPass>();
+      DL = DLP ? &DLP->getDataLayout() : 0;
+      return DL;
     }
 
     DominatorTree *getDominatorTree() {
@@ -286,11 +287,6 @@ bool LIRUtil::isAlmostEmpty(BasicBlock *BB) {
     return Br->isUnconditional() && BB->size() == 1;
   }
   return false;
-}
-
-Value *LIRUtil::getBrCondtion(BasicBlock *BB) {
-  BranchInst *Br = getBranch(BB);
-  return Br ? Br->getCondition() : 0;
 }
 
 BasicBlock *LIRUtil::getPrecondBb(BasicBlock *PreHead) {
@@ -460,9 +456,8 @@ bool NclPopcountRecognize::detectIdiom(Instruction *&CntInst,
 
       // Check if the result of the instruction is live of the loop.
       bool LiveOutLoop = false;
-      for (Value::use_iterator I = Inst->use_begin(), E = Inst->use_end();
-             I != E;  I++) {
-        if ((cast<Instruction>(*I))->getParent() != LoopEntry) {
+      for (User *U : Inst->users()) {
+        if ((cast<Instruction>(U))->getParent() != LoopEntry) {
           LiveOutLoop = true; break;
         }
       }
@@ -598,11 +593,9 @@ void NclPopcountRecognize::transform(Instruction *CntInst,
   //  __builtin_ctpop().
   {
     SmallVector<Value *, 4> CntUses;
-    for (Value::use_iterator I = CntInst->use_begin(), E = CntInst->use_end();
-         I != E; I++) {
-      if (cast<Instruction>(*I)->getParent() != Body)
-        CntUses.push_back(*I);
-    }
+    for (User *U : CntInst->users())
+      if (cast<Instruction>(U)->getParent() != Body)
+        CntUses.push_back(U);
     for (unsigned Idx = 0; Idx < CntUses.size(); Idx++) {
       (cast<Instruction>(CntUses[Idx]))->replaceUsesOfWith(CntInst, NewCount);
     }
@@ -707,6 +700,9 @@ bool LoopIdiomRecognize::runOnNoncountableLoop() {
 }
 
 bool LoopIdiomRecognize::runOnLoop(Loop *L, LPPassManager &LPM) {
+  if (skipOptnoneFunction(L))
+    return false;
+
   CurLoop = L;
 
   // If the loop could not be converted to canonical form, it must have an
@@ -779,7 +775,7 @@ bool LoopIdiomRecognize::processLoopStore(StoreInst *SI, const SCEV *BECount) {
   Value *StorePtr = SI->getPointerOperand();
 
   // Reject stores that are so large that they overflow an unsigned.
-  uint64_t SizeInBits = TD->getTypeSizeInBits(StoredVal->getType());
+  uint64_t SizeInBits = DL->getTypeSizeInBits(StoredVal->getType());
   if ((SizeInBits & 7) || (SizeInBits >> 32) != 0)
     return false;
 
@@ -907,7 +903,7 @@ static bool mayLoopAccessLocation(Value *Ptr,AliasAnalysis::ModRefResult Access,
 ///
 /// Note that we don't ever attempt to use memset_pattern8 or 4, because these
 /// just replicate their input array and then pass on to memset_pattern16.
-static Constant *getMemSetPatternValue(Value *V, const DataLayout &TD) {
+static Constant *getMemSetPatternValue(Value *V, const DataLayout &DL) {
   // If the value isn't a constant, we can't promote it to being in a constant
   // array.  We could theoretically do a store to an alloca or something, but
   // that doesn't seem worthwhile.
@@ -915,12 +911,12 @@ static Constant *getMemSetPatternValue(Value *V, const DataLayout &TD) {
   if (C == 0) return 0;
 
   // Only handle simple values that are a power of two bytes in size.
-  uint64_t Size = TD.getTypeSizeInBits(V->getType());
+  uint64_t Size = DL.getTypeSizeInBits(V->getType());
   if (Size == 0 || (Size & 7) || (Size & (Size-1)))
     return 0;
 
   // Don't care enough about darwin/ppc to implement this.
-  if (TD.isBigEndian())
+  if (DL.isBigEndian())
     return 0;
 
   // Convert to size in bytes.
@@ -967,7 +963,7 @@ processLoopStridedStore(Value *DestPtr, unsigned StoreSize,
     PatternValue = 0;
   } else if (DestAS == 0 &&
              TLI->has(LibFunc::memset_pattern16) &&
-             (PatternValue = getMemSetPatternValue(StoredVal, *TD))) {
+             (PatternValue = getMemSetPatternValue(StoredVal, *DL))) {
     // Don't create memset_pattern16s with address spaces.
     // It looks like we can use PatternValue!
     SplatValue = 0;
@@ -1008,7 +1004,7 @@ processLoopStridedStore(Value *DestPtr, unsigned StoreSize,
 
   // The # stored bytes is (BECount+1)*Size.  Expand the trip count out to
   // pointer size if it isn't already.
-  Type *IntPtr = Builder.getIntPtrTy(TD, DestAS);
+  Type *IntPtr = Builder.getIntPtrTy(DL, DestAS);
   BECount = SE->getTruncateOrZeroExtend(BECount, IntPtr);
 
   const SCEV *NumBytesS = SE->getAddExpr(BECount, SE->getConstant(IntPtr, 1),
@@ -1122,7 +1118,7 @@ processLoopStoreOfLoopLoad(StoreInst *SI, unsigned StoreSize,
 
   // The # stored bytes is (BECount+1)*Size.  Expand the trip count out to
   // pointer size if it isn't already.
-  Type *IntPtrTy = Builder.getIntPtrTy(TD, SI->getPointerAddressSpace());
+  Type *IntPtrTy = Builder.getIntPtrTy(DL, SI->getPointerAddressSpace());
   BECount = SE->getTruncateOrZeroExtend(BECount, IntPtrTy);
 
   const SCEV *NumBytesS = SE->getAddExpr(BECount, SE->getConstant(IntPtrTy, 1),

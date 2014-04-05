@@ -30,7 +30,7 @@
 #include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Metadata.h"
-#include "llvm/Support/ValueHandle.h"
+#include "llvm/IR/ValueHandle.h"
 #include <vector>
 
 namespace llvm {
@@ -225,9 +225,9 @@ public:
   MDNode *get() const {
     return cast_or_null<MDNode>(getValPtr());
   }
-  
-  virtual void deleted();
-  virtual void allUsesReplacedWith(Value *VNew);
+
+  void deleted() override;
+  void allUsesReplacedWith(Value *VNew) override;
 };
   
 class LLVMContextImpl {
@@ -352,7 +352,12 @@ public:
   /// for an index.  The ValueHandle ensures that ScopeINlinedAtIdx stays up
   /// to date.
   std::vector<std::pair<DebugRecVH, DebugRecVH> > ScopeInlinedAtRecords;
-  
+
+  /// DiscriminatorTable - This table maps file:line locations to an
+  /// integer representing the next DWARF path discriminator to assign to
+  /// instructions in different blocks at the same location.
+  DenseMap<std::pair<const char *, unsigned>, unsigned> DiscriminatorTable;
+
   /// IntrinsicIDCache - Cache of intrinsic name (string) to numeric ID mappings
   /// requested in this context
   typedef DenseMap<const Function*, unsigned> IntrinsicIDCacheTy;

@@ -78,6 +78,12 @@ LLVMBuildTool	:= $(PROJ_SRC_ROOT)/utils/llvm-build/llvm-build
 
 # The files we are going to generate using llvm-build.
 LLVMBuildMakeFrag := $(PROJ_OBJ_ROOT)/Makefile.llvmbuild
+LLVMBuildCMakeFrag := $(PROJ_OBJ_ROOT)/LLVMBuild.cmake
+LLVMBuildCMakeExportsFrag := $(PROJ_OBJ_ROOT)/cmake/modules/LLVMBuildExports.cmake
+LLVMBuildMakeFrags := \
+	$(LLVMBuildMakeFrag) \
+	$(LLVMBuildCMakeFrag) \
+	$(LLVMBuildCMakeExportsFrag)
 LLVMConfigLibraryDependenciesInc := \
 	$(PROJ_OBJ_ROOT)/tools/llvm-config/LibraryDependencies.inc
 
@@ -94,18 +100,20 @@ endif
 #
 # We include a dependency on this Makefile to ensure that changes to the
 # generation command get picked up.
-$(LLVMBuildMakeFrag): $(PROJ_SRC_ROOT)/Makefile.rules \
-		      $(PROJ_OBJ_ROOT)/Makefile.config
+$(LLVMBuildMakeFrags): $(PROJ_SRC_ROOT)/Makefile.rules \
+		       $(PROJ_OBJ_ROOT)/Makefile.config
 	$(Echo) Constructing LLVMBuild project information.
 	$(Verb)$(PYTHON) $(LLVMBuildTool) \
 	  --native-target "$(TARGET_NATIVE_ARCH)" \
 	  --enable-targets "$(TARGETS_TO_BUILD)" \
 	  --enable-optional-components "$(OPTIONAL_COMPONENTS)" \
 	  --write-library-table $(LLVMConfigLibraryDependenciesInc) \
-	  --write-make-fragment $(LLVMBuildMakeFrag)
+	  --write-make-fragment $(LLVMBuildMakeFrag) \
+	  --write-cmake-fragment $(LLVMBuildCMakeFrag) \
+	  --write-cmake-exports-fragment $(LLVMBuildCMakeExportsFrag)
 
 # For completeness, let Make know how the extra files are generated.
-$(LLVMConfigLibraryDependenciesInc): $(LLVMBuildMakeFrag)
+$(LLVMConfigLibraryDependenciesInc): $(LLVMBuildMakeFrags)
 
 # Include the generated Makefile fragment.
 #
@@ -120,7 +128,7 @@ LLVMBUILD_INCLUDE_DEPENDENCIES := 1
 
 # Clean the generated makefile fragment at the top-level.
 clean-local::
-	-$(Verb) $(RM) -f $(LLVMBuildMakeFrag)
+	-$(Verb) $(RM) -f $(LLVMBuildMakeFrags)
 endif
 -include $(LLVMBuildMakeFrag)
 
@@ -311,8 +319,16 @@ ifeq ($(ENABLE_LIBCPP),1)
   LD.Flags +=  -stdlib=libc++
 endif
 
-ifeq ($(ENABLE_CXX11),1)
-  CXX.Flags += -std=c++11
+ifeq ($(ENABLE_CXX1Y),1)
+  CXX.Flags += -std=c++1y
+else
+  ifeq ($(HOST_OS), $(filter $(HOST_OS), Cygwin MingW))
+    # MinGW and Cygwin are a bit stricter and lack things like
+    # 'strdup', 'stricmp', etc in c++11 mode.
+    CXX.Flags += -std=gnu++11
+ else
+    CXX.Flags += -std=c++11
+ endif
 endif
 
 ifeq ($(ENABLE_WERROR),1)
@@ -581,6 +597,8 @@ ifdef SHARED_LIBRARY
 ifneq ($(HOST_OS), $(filter $(HOST_OS), Cygwin MingW))
 ifneq ($(HOST_OS),Darwin)
   LD.Flags += $(RPATH) -Wl,'$$ORIGIN'
+else
+  LD.Flags += -Wl,-install_name  -Wl,"@rpath/lib$(LIBRARYNAME)$(SHLIBEXT)"
 endif
 endif
 endif
@@ -669,13 +687,13 @@ ifeq ($(HOST_OS),HP-UX)
   CompileCommonOpts := -D_REENTRANT -D_HPUX_SOURCE
 endif
 
-# If we are building a universal binary on Mac OS/X, pass extra options.  This
+# If we are building a universal binary on Mac OS X, pass extra options.  This
 # is useful to people that want to link the LLVM libraries into their universal
 # apps.
 #
 # The following can be optionally specified:
 #   UNIVERSAL_SDK_PATH variable can be specified as a path to the SDK to use.
-#      For Mac OS/X 10.4 Intel machines, the traditional one is:
+#      For Mac OS X 10.4 Intel machines, the traditional one is:
 #      UNIVERSAL_SDK_PATH=/Developer/SDKs/MacOSX10.4u.sdk/
 #   UNIVERSAL_ARCH can be optionally specified to be a list of architectures
 #      to build for, e.g. UNIVERSAL_ARCH="i386 ppc ppc64".  This defaults to
@@ -775,7 +793,7 @@ else
 Ranlib        = ranlib
 endif
 
-AliasTool     = ln -s
+AliasTool     = ln -sf
 
 #----------------------------------------------------------
 # Get the list of source files and compute object file
@@ -1139,15 +1157,19 @@ ifdef LIBRARYNAME
 
 # Make sure there isn't any extraneous whitespace on the LIBRARYNAME option
 LIBRARYNAME := $(strip $(LIBRARYNAME))
+LIBRARYALIASNAME := $(strip $(LIBRARYALIASNAME))
 ifdef LOADABLE_MODULE
 BaseLibName.A  := $(LIBRARYNAME).a
 BaseLibName.SO := $(LIBRARYNAME)$(SHLIBEXT)
+BaseAliasName.SO := $(LIBRARYALIASNAME)$(SHLIBEXT)
 else
 BaseLibName.A  := lib$(LIBRARYNAME).a
 BaseLibName.SO := $(SharedPrefix)$(LIBRARYNAME)$(SHLIBEXT)
+BaseAliasName.SO := $(SharedPrefix)$(LIBRARYALIASNAME)$(SHLIBEXT)
 endif
 LibName.A  := $(LibDir)/$(BaseLibName.A)
 LibName.SO := $(SharedLibDir)/$(BaseLibName.SO)
+AliasName.SO := $(SharedLibDir)/$(BaseAliasName.SO)
 LibName.O  := $(LibDir)/$(LIBRARYNAME).o
 
 #---------------------------------------------------------
@@ -1201,12 +1223,17 @@ else
 DestSharedLibDir := $(DESTDIR)$(PROJ_libdir)
 endif
 DestSharedLib := $(DestSharedLibDir)/$(BaseLibName.SO)
+DestSharedAlias := $(DestSharedLibDir)/$(BaseAliasName.SO)
 
 install-local:: $(DestSharedLib)
 
 $(DestSharedLib): $(LibName.SO) $(DestSharedLibDir)
 	$(Echo) Installing $(BuildMode) Shared Library $(DestSharedLib)
 	$(Verb) $(INSTALL) $(LibName.SO) $(DestSharedLib)
+ifdef SHARED_ALIAS
+	$(Echo) Creating alias from $(DestSharedLib) to $(DestSharedAlias)
+	$(Verb) $(AliasTool) $(DestSharedLib) $(DestSharedAlias)
+endif
 
 uninstall-local::
 	$(Echo) Uninstalling $(BuildMode) Shared Library $(DestSharedLib)

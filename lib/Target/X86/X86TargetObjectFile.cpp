@@ -14,33 +14,34 @@
 #include "llvm/MC/MCExpr.h"
 #include "llvm/MC/MCSectionELF.h"
 #include "llvm/Support/Dwarf.h"
+#include "llvm/Target/TargetLowering.h"
 
 using namespace llvm;
 using namespace dwarf;
 
-const MCExpr *X86_64MachoTargetObjectFile::
-getTTypeGlobalReference(const GlobalValue *GV, Mangler *Mang,
-                        MachineModuleInfo *MMI, unsigned Encoding,
-                        MCStreamer &Streamer) const {
+const MCExpr *X86_64MachoTargetObjectFile::getTTypeGlobalReference(
+    const GlobalValue *GV, unsigned Encoding, Mangler &Mang,
+    const TargetMachine &TM, MachineModuleInfo *MMI,
+    MCStreamer &Streamer) const {
 
   // On Darwin/X86-64, we can reference dwarf symbols with foo@GOTPCREL+4, which
   // is an indirect pc-relative reference.
   if (Encoding & (DW_EH_PE_indirect | DW_EH_PE_pcrel)) {
-    const MCSymbol *Sym = getSymbol(*Mang, GV);
+    const MCSymbol *Sym = TM.getSymbol(GV, Mang);
     const MCExpr *Res =
       MCSymbolRefExpr::Create(Sym, MCSymbolRefExpr::VK_GOTPCREL, getContext());
     const MCExpr *Four = MCConstantExpr::Create(4, getContext());
     return MCBinaryExpr::CreateAdd(Res, Four, getContext());
   }
 
-  return TargetLoweringObjectFileMachO::
-    getTTypeGlobalReference(GV, Mang, MMI, Encoding, Streamer);
+  return TargetLoweringObjectFileMachO::getTTypeGlobalReference(
+      GV, Encoding, Mang, TM, MMI, Streamer);
 }
 
-MCSymbol *X86_64MachoTargetObjectFile::
-getCFIPersonalitySymbol(const GlobalValue *GV, Mangler *Mang,
-                        MachineModuleInfo *MMI) const {
-  return getSymbol(*Mang, GV);
+MCSymbol *X86_64MachoTargetObjectFile::getCFIPersonalitySymbol(
+    const GlobalValue *GV, Mangler &Mang, const TargetMachine &TM,
+    MachineModuleInfo *MMI) const {
+  return TM.getSymbol(GV, Mang);
 }
 
 void
@@ -55,9 +56,8 @@ X86LinuxTargetObjectFile::getDebugThreadLocalSymbol(
   return MCSymbolRefExpr::Create(Sym, MCSymbolRefExpr::VK_DTPOFF, getContext());
 }
 
-const MCExpr *
-X86WindowsTargetObjectFile::getExecutableRelativeSymbol(const ConstantExpr *CE,
-                                                        Mangler *Mang) const {
+const MCExpr *X86WindowsTargetObjectFile::getExecutableRelativeSymbol(
+    const ConstantExpr *CE, Mangler &Mang, const TargetMachine &TM) const {
   // We are looking for the difference of two symbols, need a subtraction
   // operation.
   const SubOperator *Sub = dyn_cast<SubOperator>(CE);
@@ -102,6 +102,7 @@ X86WindowsTargetObjectFile::getExecutableRelativeSymbol(const ConstantExpr *CE,
   if (GVLHS->isThreadLocal())
     return 0;
 
-  return MCSymbolRefExpr::Create(
-      getSymbol(*Mang, GVLHS), MCSymbolRefExpr::VK_COFF_IMGREL32, getContext());
+  return MCSymbolRefExpr::Create(TM.getSymbol(GVLHS, Mang),
+                                 MCSymbolRefExpr::VK_COFF_IMGREL32,
+                                 getContext());
 }

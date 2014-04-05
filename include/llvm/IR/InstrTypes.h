@@ -51,7 +51,7 @@ protected:
   virtual BasicBlock *getSuccessorV(unsigned idx) const = 0;
   virtual unsigned getNumSuccessorsV() const = 0;
   virtual void setSuccessorV(unsigned idx, BasicBlock *B) = 0;
-  virtual TerminatorInst *clone_impl() const = 0;
+  TerminatorInst *clone_impl() const override = 0;
 public:
 
   /// getNumSuccessors - Return the number of successors that this terminator
@@ -143,7 +143,7 @@ protected:
                  const Twine &Name, Instruction *InsertBefore);
   BinaryOperator(BinaryOps iType, Value *S1, Value *S2, Type *Ty,
                  const Twine &Name, BasicBlock *InsertAtEnd);
-  virtual BinaryOperator *clone_impl() const LLVM_OVERRIDE;
+  BinaryOperator *clone_impl() const override;
 public:
   // allocate space for exactly two operands
   void *operator new(size_t s) {
@@ -385,7 +385,7 @@ DEFINE_TRANSPARENT_OPERAND_ACCESSORS(BinaryOperator, Value)
 /// if (isa<CastInst>(Instr)) { ... }
 /// @brief Base class of casting instructions.
 class CastInst : public UnaryInstruction {
-  virtual void anchor() LLVM_OVERRIDE;
+  void anchor() override;
 protected:
   /// @brief Constructor with insert-before-instruction semantics for subclasses
   CastInst(Type *Ty, unsigned iType, Value *S,
@@ -582,6 +582,11 @@ public:
     Type *IntPtrTy ///< Integer type corresponding to pointer
   ) const;
 
+  /// @brief Determine if this cast is a no-op cast.
+  bool isNoopCast(
+    const DataLayout *DL ///< DataLayout to get the Int Ptr type from.
+  ) const;
+
   /// Determine how a pair of casts can be eliminated, if they can be at all.
   /// This is a helper function for both CastInst and ConstantExpr.
   /// @returns 0 if the CastInst pair can't be eliminated, otherwise
@@ -642,7 +647,7 @@ protected:
           Value *LHS, Value *RHS, const Twine &Name,
           BasicBlock *InsertAtEnd);
 
-  virtual void anchor() LLVM_OVERRIDE; // Out of line virtual method.
+  void anchor() override; // Out of line virtual method.
 public:
   /// This enumeration lists the possible predicates for CmpInst subclasses.
   /// Values in the range 0-31 are reserved for FCmpInst, while values in the
