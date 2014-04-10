@@ -7,8 +7,9 @@
 //
 //===----------------------------------------------------------------------===//
 //
-//  This file implements cryptographically secure random number generation.
-//  TODO: not secure! cryptographically secure
+// This file implements random number generation (RNG).
+// The current implementation is NOT cryptographically secure as it uses
+// the C++11 <random> facilities.
 //
 //===----------------------------------------------------------------------===//
 

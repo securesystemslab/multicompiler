@@ -7,20 +7,20 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// This file defines the Random Number Generator abstraction.
+// This file defines an abstraction for random number generation (RNG).
+// Note that the current implementation is not cryptographically secure
+// as it uses the C++11 <random> facilities.
 //
 //===----------------------------------------------------------------------===//
 
 #ifndef LLVM_SUPPORT_RANDOMNUMBERGENERATOR_H_
 #define LLVM_SUPPORT_RANDOMNUMBERGENERATOR_H_
 
-#include "llvm/Support/raw_ostream.h"
+#include "llvm/ADT/StringRef.h"
 #include <string>
 #include <random>
 
 namespace llvm {
-
-class StringRef;
 
 class RandomNumberGenerator {
 public:
