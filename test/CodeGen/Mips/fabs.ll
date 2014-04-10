@@ -10,6 +10,9 @@
 ; RUN: llc  < %s -mtriple=mipsel-linux-gnu -mcpu=mips32r2 | FileCheck %s
 ; RUN: llc  < %s -mtriple=mipsel-linux-gnu -mcpu=mips32 -enable-no-nans-fp-math | FileCheck %s
 
+; RUN: llc  < %s -mtriple=mips64el-linux-gnu -mcpu=mips64 | FileCheck %s
+; RUN: llc  < %s -mtriple=mips64el-linux-gnu -mcpu=mips64 -enable-no-nans-fp-math | FileCheck %s
+
 define float @foo0(float %a) nounwind readnone {
 entry:
 

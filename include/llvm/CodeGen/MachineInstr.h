@@ -24,6 +24,7 @@
 #include "llvm/ADT/ilist_node.h"
 #include "llvm/ADT/iterator_range.h"
 #include "llvm/CodeGen/MachineOperand.h"
+#include "llvm/IR/DebugInfo.h"
 #include "llvm/IR/DebugLoc.h"
 #include "llvm/IR/InlineAsm.h"
 #include "llvm/MC/MCInstrDesc.h"
@@ -243,6 +244,13 @@ public:
   ///
   DebugLoc getDebugLoc() const { return debugLoc; }
 
+  /// getDebugVariable() - Return the debug variable referenced by
+  /// this DBG_VALUE instruction.
+  const MDNode *getDebugVariable() const {
+    assert(isDebugValue() && "not a DBG_VALUE");
+    return getOperand(getNumOperands() - 1).getMetadata();
+  }
+
   /// emitError - Emit an error referring to the source location of this
   /// instruction. This should only be used for inline assembly that is somehow
   /// impossible to compile. Other errors should have been handled much
@@ -287,11 +295,27 @@ public:
   const_mop_iterator operands_begin() const { return Operands; }
   const_mop_iterator operands_end() const { return Operands + NumOperands; }
 
-  inline iterator_range<mop_iterator>  operands() {
+  iterator_range<mop_iterator> operands() {
     return iterator_range<mop_iterator>(operands_begin(), operands_end());
   }
-  inline iterator_range<const_mop_iterator> operands() const {
+  iterator_range<const_mop_iterator> operands() const {
     return iterator_range<const_mop_iterator>(operands_begin(), operands_end());
+  }
+  iterator_range<mop_iterator> explicit_operands() {
+    return iterator_range<mop_iterator>(
+        operands_begin(), operands_begin() + getNumExplicitOperands());
+  }
+  iterator_range<const_mop_iterator> explicit_operands() const {
+    return iterator_range<const_mop_iterator>(
+        operands_begin(), operands_begin() + getNumExplicitOperands());
+  }
+  iterator_range<mop_iterator> implicit_operands() {
+    return iterator_range<mop_iterator>(explicit_operands().end(),
+                                        operands_end());
+  }
+  iterator_range<const_mop_iterator> implicit_operands() const {
+    return iterator_range<const_mop_iterator>(explicit_operands().end(),
+                                              operands_end());
   }
 
   /// Access to memory operands of the instruction
@@ -299,10 +323,10 @@ public:
   mmo_iterator memoperands_end() const { return MemRefs + NumMemRefs; }
   bool memoperands_empty() const { return NumMemRefs == 0; }
 
-  inline iterator_range<mmo_iterator>  memoperands() {
+  iterator_range<mmo_iterator>  memoperands() {
     return iterator_range<mmo_iterator>(memoperands_begin(), memoperands_end());
   }
-  inline iterator_range<mmo_iterator> memoperands() const {
+  iterator_range<mmo_iterator> memoperands() const {
     return iterator_range<mmo_iterator>(memoperands_begin(), memoperands_end());
   }
 

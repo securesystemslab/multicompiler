@@ -332,9 +332,12 @@ def MSRcpsr: MSRcpsrI;
 def : Pat<(ARM64threadpointer), (MRS 0xde82)>;
 
 // Generic system instructions
-def SYS    : SystemI<0, "sys">;
 def SYSxt  : SystemXtI<0, "sys">;
 def SYSLxt : SystemLXtI<1, "sysl">;
+
+def : InstAlias<"sys $op1, $Cn, $Cm, $op2",
+                (SYSxt imm0_7:$op1, sys_cr_op:$Cn,
+                 sys_cr_op:$Cm, imm0_7:$op2, XZR)>;
 
 //===----------------------------------------------------------------------===//
 // Move immediate instructions.
@@ -604,13 +607,6 @@ defm ORN  : LogicalReg<0b01, 1, "orn",
                        BinOpFrag<(or node:$LHS, (not node:$RHS))>>;
 defm ORR  : LogicalReg<0b01, 0, "orr", or>;
 
-def : InstAlias<"mov $dst, $src", (ORRWrs GPR32:$dst, WZR, GPR32:$src, 0)>;
-def : InstAlias<"mov $dst, $src",
-                (ADDWri GPR32sp:$dst, GPR32sp:$src, 0, 0)>;
-def : InstAlias<"mov $dst, $src", (ORRXrs GPR64:$dst, XZR, GPR64:$src, 0)>;
-def : InstAlias<"mov $dst, $src",
-                (ADDXri GPR64sp:$dst, GPR64sp:$src, 0, 0)>;
-
 def : InstAlias<"tst $src1, $src2",
                 (ANDSWri WZR, GPR32:$src1, logical_imm32:$src2)>;
 def : InstAlias<"tst $src1, $src2",
@@ -630,6 +626,11 @@ def : InstAlias<"mvn $Wd, $Wm",
                 (ORNWrs GPR32:$Wd, WZR, GPR32:$Wm, 0)>;
 def : InstAlias<"mvn $Xd, $Xm",
                 (ORNXrs GPR64:$Xd, XZR, GPR64:$Xm, 0)>;
+
+def : InstAlias<"mvn $Wd, $Wm, $sh",
+                (ORNWrs GPR32:$Wd, WZR, GPR32:$Wm, logical_shift:$sh)>;
+def : InstAlias<"mvn $Xd, $Xm, $sh",
+                (ORNXrs GPR64:$Xd, XZR, GPR64:$Xm, logical_shift:$sh)>;
 
 def : Pat<(not GPR32:$Wm), (ORNWrr WZR, GPR32:$Wm)>;
 def : Pat<(not GPR64:$Xm), (ORNXrr XZR, GPR64:$Xm)>;
@@ -967,13 +968,13 @@ def LDPQi : LoadPairOffset<0b10, 1, FPR128, am_indexed128simm7, "ldp">;
 def LDPSWi : LoadPairOffset<0b01, 0, GPR64, am_indexed32simm7, "ldpsw">;
 
 // Pair (pre-indexed)
-def LDPWpre : LoadPairPreIdx<0b00, 0, GPR32, am_indexed32simm7, "ldp">;
-def LDPXpre : LoadPairPreIdx<0b10, 0, GPR64, am_indexed64simm7, "ldp">;
-def LDPSpre : LoadPairPreIdx<0b00, 1, FPR32, am_indexed32simm7, "ldp">;
-def LDPDpre : LoadPairPreIdx<0b01, 1, FPR64, am_indexed64simm7, "ldp">;
-def LDPQpre : LoadPairPreIdx<0b10, 1, FPR128, am_indexed128simm7, "ldp">;
+def LDPWpre : LoadPairPreIdx<0b00, 0, GPR32, am_indexed32simm7_wb, "ldp">;
+def LDPXpre : LoadPairPreIdx<0b10, 0, GPR64, am_indexed64simm7_wb, "ldp">;
+def LDPSpre : LoadPairPreIdx<0b00, 1, FPR32, am_indexed32simm7_wb, "ldp">;
+def LDPDpre : LoadPairPreIdx<0b01, 1, FPR64, am_indexed64simm7_wb, "ldp">;
+def LDPQpre : LoadPairPreIdx<0b10, 1, FPR128, am_indexed128simm7_wb, "ldp">;
 
-def LDPSWpre : LoadPairPreIdx<0b01, 0, GPR64, am_indexed32simm7, "ldpsw">;
+def LDPSWpre : LoadPairPreIdx<0b01, 0, GPR64, am_indexed32simm7_wb, "ldpsw">;
 
 // Pair (post-indexed)
 def LDPWpost : LoadPairPostIdx<0b00, 0, GPR32, simm7s4, "ldp">;
@@ -1516,11 +1517,11 @@ def STPDi : StorePairOffset<0b01, 1, FPR64, am_indexed64simm7, "stp">;
 def STPQi : StorePairOffset<0b10, 1, FPR128, am_indexed128simm7, "stp">;
 
 // Pair (pre-indexed)
-def STPWpre : StorePairPreIdx<0b00, 0, GPR32, am_indexed32simm7, "stp">;
-def STPXpre : StorePairPreIdx<0b10, 0, GPR64, am_indexed64simm7, "stp">;
-def STPSpre : StorePairPreIdx<0b00, 1, FPR32, am_indexed32simm7, "stp">;
-def STPDpre : StorePairPreIdx<0b01, 1, FPR64, am_indexed64simm7, "stp">;
-def STPQpre : StorePairPreIdx<0b10, 1, FPR128, am_indexed128simm7, "stp">;
+def STPWpre : StorePairPreIdx<0b00, 0, GPR32, am_indexed32simm7_wb, "stp">;
+def STPXpre : StorePairPreIdx<0b10, 0, GPR64, am_indexed64simm7_wb, "stp">;
+def STPSpre : StorePairPreIdx<0b00, 1, FPR32, am_indexed32simm7_wb, "stp">;
+def STPDpre : StorePairPreIdx<0b01, 1, FPR64, am_indexed64simm7_wb, "stp">;
+def STPQpre : StorePairPreIdx<0b10, 1, FPR128, am_indexed128simm7_wb, "stp">;
 
 // Pair (pre-indexed)
 def STPWpost : StorePairPostIdx<0b00, 0, GPR32, simm7s4, "stp">;
@@ -1859,19 +1860,23 @@ def STXPX  : StoreExclusivePair<0b11, 0, 0, 1, 0, GPR64, "stxp">;
 // Scaled floating point to integer conversion instructions.
 //===----------------------------------------------------------------------===//
 
-defm FCVTAS : FPToInteger<0b00, 0b100, "fcvtas", int_arm64_neon_fcvtas>;
-defm FCVTAU : FPToInteger<0b00, 0b101, "fcvtau", int_arm64_neon_fcvtau>;
-defm FCVTMS : FPToInteger<0b10, 0b000, "fcvtms", int_arm64_neon_fcvtms>;
-defm FCVTMU : FPToInteger<0b10, 0b001, "fcvtmu", int_arm64_neon_fcvtmu>;
-defm FCVTNS : FPToInteger<0b00, 0b000, "fcvtns", int_arm64_neon_fcvtns>;
-defm FCVTNU : FPToInteger<0b00, 0b001, "fcvtnu", int_arm64_neon_fcvtnu>;
-defm FCVTPS : FPToInteger<0b01, 0b000, "fcvtps", int_arm64_neon_fcvtps>;
-defm FCVTPU : FPToInteger<0b01, 0b001, "fcvtpu", int_arm64_neon_fcvtpu>;
-defm FCVTZS : FPToInteger<0b11, 0b000, "fcvtzs", fp_to_sint>;
-defm FCVTZU : FPToInteger<0b11, 0b001, "fcvtzu", fp_to_uint>;
+defm FCVTAS : FPToIntegerUnscaled<0b00, 0b100, "fcvtas", int_arm64_neon_fcvtas>;
+defm FCVTAU : FPToIntegerUnscaled<0b00, 0b101, "fcvtau", int_arm64_neon_fcvtau>;
+defm FCVTMS : FPToIntegerUnscaled<0b10, 0b000, "fcvtms", int_arm64_neon_fcvtms>;
+defm FCVTMU : FPToIntegerUnscaled<0b10, 0b001, "fcvtmu", int_arm64_neon_fcvtmu>;
+defm FCVTNS : FPToIntegerUnscaled<0b00, 0b000, "fcvtns", int_arm64_neon_fcvtns>;
+defm FCVTNU : FPToIntegerUnscaled<0b00, 0b001, "fcvtnu", int_arm64_neon_fcvtnu>;
+defm FCVTPS : FPToIntegerUnscaled<0b01, 0b000, "fcvtps", int_arm64_neon_fcvtps>;
+defm FCVTPU : FPToIntegerUnscaled<0b01, 0b001, "fcvtpu", int_arm64_neon_fcvtpu>;
+defm FCVTZS : FPToIntegerUnscaled<0b11, 0b000, "fcvtzs", fp_to_sint>;
+defm FCVTZU : FPToIntegerUnscaled<0b11, 0b001, "fcvtzu", fp_to_uint>;
+defm FCVTZS : FPToIntegerScaled<0b11, 0b000, "fcvtzs", fp_to_sint>;
+defm FCVTZU : FPToIntegerScaled<0b11, 0b001, "fcvtzu", fp_to_uint>;
 let isCodeGenOnly = 1 in {
-defm FCVTZS_Int : FPToInteger<0b11, 0b000, "fcvtzs", int_arm64_neon_fcvtzs>;
-defm FCVTZU_Int : FPToInteger<0b11, 0b001, "fcvtzu", int_arm64_neon_fcvtzu>;
+defm FCVTZS_Int : FPToIntegerUnscaled<0b11, 0b000, "fcvtzs", int_arm64_neon_fcvtzs>;
+defm FCVTZU_Int : FPToIntegerUnscaled<0b11, 0b001, "fcvtzu", int_arm64_neon_fcvtzu>;
+defm FCVTZS_Int : FPToIntegerScaled<0b11, 0b000, "fcvtzs", int_arm64_neon_fcvtzs>;
+defm FCVTZU_Int : FPToIntegerScaled<0b11, 0b001, "fcvtzu", int_arm64_neon_fcvtzu>;
 }
 
 //===----------------------------------------------------------------------===//
@@ -2009,11 +2014,14 @@ defm FNMSUB : ThreeOperandFPData<1, 1, "fnmsub",
 
 // The following def pats catch the case where the LHS of an FMA is negated.
 // The TriOpFrag above catches the case where the middle operand is negated.
-def : Pat<(f32 (fma (fneg FPR32:$Rn), FPR32:$Rm, FPR32:$Rd)),
-          (FMSUBSrrr FPR32:$Rd, FPR32:$Rn, FPR32:$Rm)>;
 
-def : Pat<(f64 (fma (fneg FPR64:$Rn), FPR64:$Rm, FPR64:$Rd)),
-          (FMSUBDrrr FPR64:$Rd, FPR64:$Rn, FPR64:$Rm)>;
+// N.b. FMSUB etc have the accumulator at the *end* of (outs), unlike
+// the NEON variant.
+def : Pat<(f32 (fma (fneg FPR32:$Rn), FPR32:$Rm, FPR32:$Ra)),
+          (FMSUBSrrr FPR32:$Rn, FPR32:$Rm, FPR32:$Ra)>;
+
+def : Pat<(f64 (fma (fneg FPR64:$Rn), FPR64:$Rm, FPR64:$Ra)),
+          (FMSUBDrrr FPR64:$Rn, FPR64:$Rm, FPR64:$Ra)>;
 
 //===----------------------------------------------------------------------===//
 // Floating point comparison instructions.
@@ -2147,6 +2155,7 @@ def : Pat<(ARM64not (v16i8 V128:$Rn)), (NOTv16i8 V128:$Rn)>;
 def : Pat<(ARM64not (v4i16 V64:$Rn)),  (NOTv8i8  V64:$Rn)>;
 def : Pat<(ARM64not (v8i16 V128:$Rn)), (NOTv16i8 V128:$Rn)>;
 def : Pat<(ARM64not (v2i32 V64:$Rn)),  (NOTv8i8  V64:$Rn)>;
+def : Pat<(ARM64not (v1i64 V64:$Rn)),  (NOTv8i8  V64:$Rn)>;
 def : Pat<(ARM64not (v4i32 V128:$Rn)), (NOTv16i8 V128:$Rn)>;
 def : Pat<(ARM64not (v2i64 V128:$Rn)), (NOTv16i8 V128:$Rn)>;
 

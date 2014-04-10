@@ -29,6 +29,8 @@ class Module;
 class SMDiagnostic;
 class DiagnosticInfo;
 template <typename T> class SmallVectorImpl;
+class Function;
+class DebugLoc;
 
 /// This is an important class for using LLVM in a threaded context.  It
 /// (opaquely) owns and manages the core "global" data of LLVM's core
@@ -78,7 +80,7 @@ public:
   /// LLVMContext doesn't take ownership or interpret either of these
   /// pointers.
   void setInlineAsmDiagnosticHandler(InlineAsmDiagHandlerTy DiagHandler,
-                                     void *DiagContext = 0);
+                                     void *DiagContext = nullptr);
 
   /// getInlineAsmDiagnosticHandler - Return the diagnostic handler set by
   /// setInlineAsmDiagnosticHandler.
@@ -96,7 +98,7 @@ public:
   /// LLVMContext doesn't take ownership or interpret either of these
   /// pointers.
   void setDiagnosticHandler(DiagnosticHandlerTy DiagHandler,
-                            void *DiagContext = 0);
+                            void *DiagContext = nullptr);
 
   /// getDiagnosticHandler - Return the diagnostic handler set by
   /// setDiagnosticHandler.
@@ -124,6 +126,15 @@ public:
   void emitError(unsigned LocCookie, const Twine &ErrorStr);
   void emitError(const Instruction *I, const Twine &ErrorStr);
   void emitError(const Twine &ErrorStr);
+
+  /// emitOptimizationRemark - Emit an optimization remark message. \p PassName
+  /// is the name of the pass emitting the message. If -Rpass= is given
+  /// and \p PassName matches the regular expression in -Rpass, then the
+  /// remark will be emitted. \p Fn is the function triggering the remark,
+  /// \p DLoc is the debug location where the diagnostic is generated.
+  /// \p Msg is the message string to use.
+  void emitOptimizationRemark(const char *PassName, const Function &Fn,
+                              const DebugLoc &DLoc, const Twine &Msg);
 
 private:
   LLVMContext(LLVMContext&) LLVM_DELETED_FUNCTION;

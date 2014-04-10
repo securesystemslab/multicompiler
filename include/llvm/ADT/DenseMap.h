@@ -461,12 +461,12 @@ private:
     const unsigned NumBuckets = getNumBuckets();
 
     if (NumBuckets == 0) {
-      FoundBucket = 0;
+      FoundBucket = nullptr;
       return false;
     }
 
     // FoundTombstone - Keep track of whether we find a tombstone while probing.
-    const BucketT *FoundTombstone = 0;
+    const BucketT *FoundTombstone = nullptr;
     const KeyT EmptyKey = getEmptyKey();
     const KeyT TombstoneKey = getTombstoneKey();
     assert(!KeyInfoT::isEqual(Val, EmptyKey) &&
@@ -665,7 +665,7 @@ private:
   bool allocateBuckets(unsigned Num) {
     NumBuckets = Num;
     if (NumBuckets == 0) {
-      Buckets = 0;
+      Buckets = nullptr;
       return false;
     }
 
@@ -985,7 +985,7 @@ public:
 private:
   pointer Ptr, End;
 public:
-  DenseMapIterator() : Ptr(0), End(0) {}
+  DenseMapIterator() : Ptr(nullptr), End(nullptr) {}
 
   DenseMapIterator(pointer Pos, pointer E, bool NoAdvance = false)
     : Ptr(Pos), End(E) {

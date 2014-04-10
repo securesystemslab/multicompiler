@@ -14,7 +14,7 @@
 #define DEBUG_TYPE "asm-printer"
 #include "ARM64InstPrinter.h"
 #include "MCTargetDesc/ARM64AddressingModes.h"
-#include "MCTargetDesc/ARM64BaseInfo.h"
+#include "Utils/ARM64BaseInfo.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/MC/MCInst.h"
@@ -52,11 +52,11 @@ void ARM64InstPrinter::printRegName(raw_ostream &OS, unsigned RegNo) const {
 
 void ARM64InstPrinter::printInst(const MCInst *MI, raw_ostream &O,
                                  StringRef Annot) {
-  // Check for special encodings and print the cannonical alias instead.
+  // Check for special encodings and print the canonical alias instead.
 
   unsigned Opcode = MI->getOpcode();
 
-  if (Opcode == ARM64::SYS || Opcode == ARM64::SYSxt)
+  if (Opcode == ARM64::SYSxt)
     if (printSysAlias(MI, O)) {
       printAnnotation(O, Annot);
       return;
@@ -96,7 +96,9 @@ void ARM64InstPrinter::printInst(const MCInst *MI, raw_ostream &O,
         AsmMnemonic = IsSigned ? "sxth" : "uxth";
         break;
       case 31:
-        AsmMnemonic = IsSigned ? "sxtw" : "uxtw";
+        // *xtw is only valid for 64-bit operations.
+        if (Opcode == ARM64::SBFMXri || Opcode == ARM64::UBFMXri)
+          AsmMnemonic = IsSigned ? "sxtw" : "uxtw";
         break;
       }
 
@@ -189,6 +191,14 @@ void ARM64InstPrinter::printInst(const MCInst *MI, raw_ostream &O,
     return;
   }
 
+  // ORN Wn, WZR, Wm{, lshift #imm} ==> MVN Wn, Wm{, lshift #imm}
+  // ORN Xn, XZR, Xm{, lshift #imm} ==> MVN Xn, Xm{, lshift #imm}
+  if ((Opcode == ARM64::ORNWrs && MI->getOperand(1).getReg() == ARM64::WZR) ||
+      (Opcode == ARM64::ORNXrs && MI->getOperand(1).getReg() == ARM64::XZR)) {
+    O << "\tmvn\t" << getRegisterName(MI->getOperand(0).getReg()) << ", ";
+    printShiftedRegister(MI, 2, O);
+    return;
+  }
   // SUBS WZR, Wn, #imm ==> CMP Wn, #imm
   // SUBS XZR, Xn, #imm ==> CMP Xn, #imm
   if ((Opcode == ARM64::SUBSWri && MI->getOperand(0).getReg() == ARM64::WZR) ||
@@ -248,6 +258,38 @@ void ARM64InstPrinter::printInst(const MCInst *MI, raw_ostream &O,
     O << "\tcmn\t" << getRegisterName(MI->getOperand(1).getReg()) << ", "
       << getRegisterName(MI->getOperand(2).getReg());
     printExtend(MI, 3, O);
+    return;
+  }
+  // ADD WSP, Wn, #0 ==> MOV WSP, Wn
+  if (Opcode == ARM64::ADDWri && (MI->getOperand(0).getReg() == ARM64::WSP ||
+                                  MI->getOperand(1).getReg() == ARM64::WSP) &&
+      MI->getOperand(2).getImm() == 0 &&
+      ARM64_AM::getShiftValue(MI->getOperand(3).getImm()) == 0) {
+    O << "\tmov\t" << getRegisterName(MI->getOperand(0).getReg())
+      << ", " << getRegisterName(MI->getOperand(1).getReg());
+    return;
+  }
+  // ADD XSP, Wn, #0 ==> MOV XSP, Wn
+  if (Opcode == ARM64::ADDXri && (MI->getOperand(0).getReg() == ARM64::SP ||
+                                  MI->getOperand(1).getReg() == ARM64::SP) &&
+      MI->getOperand(2).getImm() == 0 &&
+      ARM64_AM::getShiftValue(MI->getOperand(3).getImm()) == 0) {
+    O << "\tmov\t" << getRegisterName(MI->getOperand(0).getReg())
+      << ", " << getRegisterName(MI->getOperand(1).getReg());
+    return;
+  }
+  // ORR Wn, WZR, Wm ==> MOV Wn, Wm
+  if (Opcode == ARM64::ORRWrs && MI->getOperand(1).getReg() == ARM64::WZR &&
+      MI->getOperand(3).getImm() == 0) {
+    O << "\tmov\t" << getRegisterName(MI->getOperand(0).getReg())
+      << ", " << getRegisterName(MI->getOperand(2).getReg());
+    return;
+  }
+  // ORR Xn, XZR, Xm ==> MOV Xn, Xm
+  if (Opcode == ARM64::ORRXrs && MI->getOperand(1).getReg() == ARM64::XZR &&
+      MI->getOperand(3).getImm() == 0) {
+    O << "\tmov\t" << getRegisterName(MI->getOperand(0).getReg())
+      << ", " << getRegisterName(MI->getOperand(2).getReg());
     return;
   }
 
@@ -708,8 +750,7 @@ void ARM64AppleInstPrinter::printInst(const MCInst *MI, raw_ostream &O,
 bool ARM64InstPrinter::printSysAlias(const MCInst *MI, raw_ostream &O) {
 #ifndef NDEBUG
   unsigned Opcode = MI->getOpcode();
-  assert((Opcode == ARM64::SYS || Opcode == ARM64::SYSxt) &&
-         "Invalid opcode for SYS alias!");
+  assert(Opcode == ARM64::SYSxt && "Invalid opcode for SYS alias!");
 #endif
 
   const char *Asm = 0;
@@ -849,6 +890,20 @@ bool ARM64InstPrinter::printSysAlias(const MCInst *MI, raw_ostream &O) {
         break;
       }
       break;
+    case 0:
+      switch (Op1Val) {
+      default:
+        break;
+      case 4:
+        switch (Op2Val) {
+        default:
+          break;
+        case 1: Asm = "tlbi\tipas2e1is"; break;
+        case 5: Asm = "tlbi\tipas2le1is"; break;
+        }
+        break;
+      }
+      break;
     case 4:
       switch (Op1Val) {
       default:
@@ -905,9 +960,11 @@ bool ARM64InstPrinter::printSysAlias(const MCInst *MI, raw_ostream &O) {
   }
 
   if (Asm) {
+    unsigned Reg = MI->getOperand(4).getReg();
+
     O << '\t' << Asm;
-    if (MI->getNumOperands() == 5)
-      O << ", " << getRegisterName(MI->getOperand(4).getReg());
+    if (StringRef(Asm).lower().find("all") == StringRef::npos)
+      O << ", " << getRegisterName(Reg);
   }
 
   return Asm != 0;
@@ -1083,8 +1140,10 @@ void ARM64InstPrinter::printExtend(const MCInst *MI, unsigned OpNum,
   if (ExtType == ARM64_AM::UXTW || ExtType == ARM64_AM::UXTX) {
     unsigned Dest = MI->getOperand(0).getReg();
     unsigned Src1 = MI->getOperand(1).getReg();
-    if (Dest == ARM64::SP || Dest == ARM64::WSP || Src1 == ARM64::SP ||
-        Src1 == ARM64::WSP) {
+    if ( ((Dest == ARM64::SP || Src1 == ARM64::SP) &&
+          ExtType == ARM64_AM::UXTX) ||
+         ((Dest == ARM64::WSP || Src1 == ARM64::WSP) &&
+          ExtType == ARM64_AM::UXTW) ) {
       if (ShiftVal != 0)
         O << ", lsl #" << ShiftVal;
       return;
@@ -1098,8 +1157,7 @@ void ARM64InstPrinter::printExtend(const MCInst *MI, unsigned OpNum,
 void ARM64InstPrinter::printDotCondCode(const MCInst *MI, unsigned OpNum,
                                         raw_ostream &O) {
   ARM64CC::CondCode CC = (ARM64CC::CondCode)MI->getOperand(OpNum).getImm();
-  if (CC != ARM64CC::AL)
-    O << '.' << ARM64CC::getCondCodeName(CC);
+  O << '.' << ARM64CC::getCondCodeName(CC);
 }
 
 void ARM64InstPrinter::printCondCode(const MCInst *MI, unsigned OpNum,
@@ -1142,11 +1200,26 @@ void ARM64InstPrinter::printAMIndexed(const MCInst *MI, unsigned OpNum,
   O << ']';
 }
 
+void ARM64InstPrinter::printAMIndexedWB(const MCInst *MI, unsigned OpNum,
+                                        unsigned Scale, raw_ostream &O) {
+  const MCOperand MO1 = MI->getOperand(OpNum + 1);
+  O << '[' << getRegisterName(MI->getOperand(OpNum).getReg());
+  if (MO1.isImm()) {
+      O << ", #" << (MO1.getImm() * Scale);
+  } else {
+    assert(MO1.isExpr() && "Unexpected operand type!");
+    O << ", " << *MO1.getExpr();
+  }
+  O << ']';
+}
+
 void ARM64InstPrinter::printPrefetchOp(const MCInst *MI, unsigned OpNum,
                                        raw_ostream &O) {
   unsigned prfop = MI->getOperand(OpNum).getImm();
-  if (ARM64_AM::isNamedPrefetchOp(prfop))
-    O << ARM64_AM::getPrefetchOpName((ARM64_AM::PrefetchOp)prfop);
+  bool Valid;
+  StringRef Name = ARM64PRFM::PRFMMapper().toString(prfop, Valid);
+  if (Valid)
+    O << Name;
   else
     O << '#' << prfop;
 }
@@ -1387,37 +1460,54 @@ void ARM64InstPrinter::printAdrpLabel(const MCInst *MI, unsigned OpNum,
 void ARM64InstPrinter::printBarrierOption(const MCInst *MI, unsigned OpNo,
                                           raw_ostream &O) {
   unsigned Val = MI->getOperand(OpNo).getImm();
-  const char *Name = ARM64SYS::getBarrierOptName((ARM64SYS::BarrierOption)Val);
-  if (Name)
+  unsigned Opcode = MI->getOpcode();
+
+  bool Valid;
+  StringRef Name;
+  if (Opcode == ARM64::ISB)
+    Name = ARM64ISB::ISBMapper().toString(Val, Valid);
+  else
+    Name = ARM64DB::DBarrierMapper().toString(Val, Valid);
+  if (Valid)
     O << Name;
   else
     O << "#" << Val;
 }
 
-void ARM64InstPrinter::printSystemRegister(const MCInst *MI, unsigned OpNo,
+void ARM64InstPrinter::printMRSSystemRegister(const MCInst *MI, unsigned OpNo,
                                            raw_ostream &O) {
   unsigned Val = MI->getOperand(OpNo).getImm();
-  const char *Name =
-      ARM64SYS::getSystemRegisterName((ARM64SYS::SystemRegister)Val);
-  if (Name) {
-    O << Name;
-    return;
-  }
 
-  unsigned Op0 = 2 | ((Val >> 14) & 1);
-  unsigned Op1 = (Val >> 11) & 7;
-  unsigned CRn = (Val >> 7) & 0xf;
-  unsigned CRm = (Val >> 3) & 0xf;
-  unsigned Op2 = Val & 7;
+  bool Valid;
+  auto Mapper = ARM64SysReg::MRSMapper();
+  std::string Name = Mapper.toString(Val, Valid);
 
-  O << 'S' << Op0 << '_' << Op1 << "_C" << CRn << "_C" << CRm << '_' << Op2;
+  if (Valid)
+    O << StringRef(Name).upper();
+}
+
+void ARM64InstPrinter::printMSRSystemRegister(const MCInst *MI, unsigned OpNo,
+                                           raw_ostream &O) {
+  unsigned Val = MI->getOperand(OpNo).getImm();
+
+  bool Valid;
+  auto Mapper = ARM64SysReg::MSRMapper();
+  std::string Name = Mapper.toString(Val, Valid);
+
+  if (Valid)
+    O << StringRef(Name).upper();
 }
 
 void ARM64InstPrinter::printSystemCPSRField(const MCInst *MI, unsigned OpNo,
                                             raw_ostream &O) {
   unsigned Val = MI->getOperand(OpNo).getImm();
-  const char *Name = ARM64SYS::getCPSRFieldName((ARM64SYS::CPSRField)Val);
-  O << Name;
+
+  bool Valid;
+  StringRef Name = ARM64PState::PStateMapper().toString(Val, Valid);
+  if (Valid)
+    O << StringRef(Name.str()).upper();
+  else
+    O << "#" << Val;
 }
 
 void ARM64InstPrinter::printSIMDType10Operand(const MCInst *MI, unsigned OpNo,

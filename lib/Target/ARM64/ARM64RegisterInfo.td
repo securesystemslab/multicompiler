@@ -112,8 +112,8 @@ def X25   : ARM64Reg<25, "x25", [W25]>, DwarfRegAlias<W25>;
 def X26   : ARM64Reg<26, "x26", [W26]>, DwarfRegAlias<W26>;
 def X27   : ARM64Reg<27, "x27", [W27]>, DwarfRegAlias<W27>;
 def X28   : ARM64Reg<28, "x28", [W28]>, DwarfRegAlias<W28>;
-def FP    : ARM64Reg<29, "fp",  [W29]>, DwarfRegAlias<W29>;
-def LR    : ARM64Reg<30, "lr",  [W30]>, DwarfRegAlias<W30>;
+def FP    : ARM64Reg<29, "x29", [W29]>, DwarfRegAlias<W29>;
+def LR    : ARM64Reg<30, "x30", [W30]>, DwarfRegAlias<W30>;
 def SP    : ARM64Reg<31, "sp",  [WSP]>, DwarfRegAlias<WSP>;
 def XZR   : ARM64Reg<31, "xzr", [WZR]>, DwarfRegAlias<WSP>;
 }
@@ -164,7 +164,7 @@ def tcGPR64 : RegisterClass<"ARM64", [i64], 64, (sub GPR64common, X19, X20, X21,
                                                      X22, X23, X24, X25, X26,
                                                      X27, X28)>;
 
-// GPR register classes for post increment ammount of vector load/store that
+// GPR register classes for post increment amount of vector load/store that
 // has alternate printing when Rm=31 and prints a constant immediate value
 // equal to the total number of bytes transferred.
 def GPR64pi1  : RegisterOperand<GPR64, "printPostIncOperand1">;

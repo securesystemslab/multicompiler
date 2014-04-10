@@ -516,6 +516,7 @@ unsigned SIInstrInfo::getVALUOp(const MachineInstr &MI) {
   case AMDGPU::REG_SEQUENCE: return AMDGPU::REG_SEQUENCE;
   case AMDGPU::COPY: return AMDGPU::COPY;
   case AMDGPU::PHI: return AMDGPU::PHI;
+  case AMDGPU::INSERT_SUBREG: return AMDGPU::INSERT_SUBREG;
   case AMDGPU::S_MOV_B32:
     return MI.getOperand(1).isReg() ?
            AMDGPU::COPY : AMDGPU::V_MOV_B32_e32;
@@ -536,6 +537,7 @@ unsigned SIInstrInfo::getVALUOp(const MachineInstr &MI) {
   case AMDGPU::S_LSHL_B64: return AMDGPU::V_LSHL_B64;
   case AMDGPU::S_LSHR_B32: return AMDGPU::V_LSHR_B32_e32;
   case AMDGPU::S_LSHR_B64: return AMDGPU::V_LSHR_B64;
+  case AMDGPU::S_NOT_B32: return AMDGPU::V_NOT_B32_e32;
   }
 }
 
@@ -996,6 +998,7 @@ void SIInstrInfo::moveToVALU(MachineInstr &TopInst) const {
     case AMDGPU::COPY:
     case AMDGPU::PHI:
     case AMDGPU::REG_SEQUENCE:
+    case AMDGPU::INSERT_SUBREG:
       if (RI.hasVGPRs(NewDstRC))
         continue;
       NewDstRC = RI.getEquivalentVGPRClass(NewDstRC);

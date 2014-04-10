@@ -984,6 +984,10 @@ let Predicates = [HasAVX512] in {
             (EXTRACT_SUBREG
              (AND32ri (KMOVWrk (COPY_TO_REGCLASS VK1:$src, VK16)), (i32 1)),
               sub_16bit)>;
+  def : Pat<(v16i1 (scalar_to_vector VK1:$src)),
+            (COPY_TO_REGCLASS VK1:$src, VK16)>;
+  def : Pat<(v8i1 (scalar_to_vector VK1:$src)),
+            (COPY_TO_REGCLASS VK1:$src, VK8)>;
 }
 // With AVX-512 only, 8-bit mask is promoted to 16-bit mask.
 let Predicates = [HasAVX512] in {
@@ -1355,6 +1359,14 @@ defm VMOVDQU64: avx512_load<0x6F, VR512, VK8WM, i512mem, load,
                 avx512_store<0x7F, VR512, VK8WM, i512mem, store,
                               "vmovdqu64", SSEPackedInt, v8i64>,
                                XS, VEX_W, EVEX_V512, EVEX_CD8<64, CD8VF>;
+
+def: Pat<(v16i32 (int_x86_avx512_mask_loadu_d_512 addr:$ptr,
+                 (v16i32 immAllZerosV), GR16:$mask)),
+       (VMOVDQU32rmkz (v16i1 (COPY_TO_REGCLASS GR16:$mask, VK16WM)), addr:$ptr)>;
+
+def: Pat<(v8i64 (int_x86_avx512_mask_loadu_q_512 addr:$ptr,
+                 (bc_v8i64 (v16i32 immAllZerosV)), GR8:$mask)),
+       (VMOVDQU64rmkz (v8i1 (COPY_TO_REGCLASS GR8:$mask, VK8WM)), addr:$ptr)>;
 
 let AddedComplexity = 20 in {
 def : Pat<(v8i64 (vselect VK8WM:$mask, (v8i64 VR512:$src),
@@ -3112,6 +3124,17 @@ def : Pat<(v8i32 (fp_to_uint (v8f32 VR256X:$src1))),
           (EXTRACT_SUBREG (v16i32 (VCVTTPS2UDQZrr 
            (v16f32 (SUBREG_TO_REG (i32 0), VR256X:$src1, sub_ymm)))), sub_ymm)>;
                                  
+def : Pat<(v4i32 (fp_to_uint (v4f32 VR128X:$src1))),
+          (EXTRACT_SUBREG (v16i32 (VCVTTPS2UDQZrr
+           (v16f32 (SUBREG_TO_REG (i32 0), VR128X:$src1, sub_xmm)))), sub_xmm)>;
+
+def : Pat<(v8f32 (uint_to_fp (v8i32 VR256X:$src1))),
+          (EXTRACT_SUBREG (v16f32 (VCVTUDQ2PSZrr
+           (v16i32 (SUBREG_TO_REG (i32 0), VR256X:$src1, sub_ymm)))), sub_ymm)>;
+           
+def : Pat<(v4f32 (uint_to_fp (v4i32 VR128X:$src1))),
+          (EXTRACT_SUBREG (v16f32 (VCVTUDQ2PSZrr
+           (v16i32 (SUBREG_TO_REG (i32 0), VR128X:$src1, sub_xmm)))), sub_xmm)>;
 
 def : Pat<(v16f32 (int_x86_avx512_mask_cvtdq2ps_512 (v16i32 VR512:$src),
                    (bc_v16f32 (v16i32 immAllZerosV)), (i16 -1), imm:$rc)),
@@ -4200,3 +4223,7 @@ def : Pat<(int_x86_avx512_mask_conflict_q_512 VR512:$src2, VR512:$src1,
                                               GR8:$mask),
           (VPCONFLICTQrrk VR512:$src1,
            (v8i1 (COPY_TO_REGCLASS GR8:$mask, VK8WM)), VR512:$src2)>;
+
+def : Pat<(store (i1 -1), addr:$dst), (MOV8mi addr:$dst, (i8 1))>;
+def : Pat<(store (i1  1), addr:$dst), (MOV8mi addr:$dst, (i8 1))>;
+def : Pat<(store (i1  0), addr:$dst), (MOV8mi addr:$dst, (i8 0))>;

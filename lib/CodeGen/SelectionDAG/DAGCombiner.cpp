@@ -4957,6 +4957,7 @@ SDValue DAGCombiner::visitSIGN_EXTEND(SDNode *N) {
   // on vectors in one instruction.  We only perform this transformation on
   // scalars.
   if (ISD::isNON_EXTLoad(N0.getNode()) && !VT.isVector() &&
+      ISD::isUNINDEXEDLoad(N0.getNode()) &&
       ((!LegalOperations && !cast<LoadSDNode>(N0)->isVolatile()) ||
        TLI.isLoadExtLegal(ISD::SEXTLOAD, N0.getValueType()))) {
     bool DoXform = true;
@@ -5009,7 +5010,7 @@ SDValue DAGCombiner::visitSIGN_EXTEND(SDNode *N) {
       TLI.isLoadExtLegal(ISD::SEXTLOAD, N0.getValueType()) &&
       (!LegalOperations && TLI.isOperationLegal(N0.getOpcode(), VT))) {
     LoadSDNode *LN0 = cast<LoadSDNode>(N0.getOperand(0));
-    if (LN0->getExtensionType() != ISD::ZEXTLOAD) {
+    if (LN0->getExtensionType() != ISD::ZEXTLOAD && LN0->isUnindexed()) {
       bool DoXform = true;
       SmallVector<SDNode*, 4> SetCCs;
       if (!N0.hasOneUse())
@@ -5250,6 +5251,7 @@ SDValue DAGCombiner::visitZERO_EXTEND(SDNode *N) {
   // on vectors in one instruction.  We only perform this transformation on
   // scalars.
   if (ISD::isNON_EXTLoad(N0.getNode()) && !VT.isVector() &&
+      ISD::isUNINDEXEDLoad(N0.getNode()) &&
       ((!LegalOperations && !cast<LoadSDNode>(N0)->isVolatile()) ||
        TLI.isLoadExtLegal(ISD::ZEXTLOAD, N0.getValueType()))) {
     bool DoXform = true;
@@ -5282,7 +5284,7 @@ SDValue DAGCombiner::visitZERO_EXTEND(SDNode *N) {
       TLI.isLoadExtLegal(ISD::ZEXTLOAD, N0.getValueType()) &&
       (!LegalOperations && TLI.isOperationLegal(N0.getOpcode(), VT))) {
     LoadSDNode *LN0 = cast<LoadSDNode>(N0.getOperand(0));
-    if (LN0->getExtensionType() != ISD::SEXTLOAD) {
+    if (LN0->getExtensionType() != ISD::SEXTLOAD && LN0->isUnindexed()) {
       bool DoXform = true;
       SmallVector<SDNode*, 4> SetCCs;
       if (!N0.hasOneUse())
@@ -5478,6 +5480,7 @@ SDValue DAGCombiner::visitANY_EXTEND(SDNode *N) {
   // on vectors in one instruction.  We only perform this transformation on
   // scalars.
   if (ISD::isNON_EXTLoad(N0.getNode()) && !VT.isVector() &&
+      ISD::isUNINDEXEDLoad(N0.getNode()) &&
       ((!LegalOperations && !cast<LoadSDNode>(N0)->isVolatile()) ||
        TLI.isLoadExtLegal(ISD::EXTLOAD, N0.getValueType()))) {
     bool DoXform = true;
@@ -5507,16 +5510,19 @@ SDValue DAGCombiner::visitANY_EXTEND(SDNode *N) {
       !ISD::isNON_EXTLoad(N0.getNode()) && ISD::isUNINDEXEDLoad(N0.getNode()) &&
       N0.hasOneUse()) {
     LoadSDNode *LN0 = cast<LoadSDNode>(N0);
+    ISD::LoadExtType ExtType = LN0->getExtensionType();
     EVT MemVT = LN0->getMemoryVT();
-    SDValue ExtLoad = DAG.getExtLoad(LN0->getExtensionType(), SDLoc(N),
-                                     VT, LN0->getChain(), LN0->getBasePtr(),
-                                     MemVT, LN0->getMemOperand());
-    CombineTo(N, ExtLoad);
-    CombineTo(N0.getNode(),
-              DAG.getNode(ISD::TRUNCATE, SDLoc(N0),
-                          N0.getValueType(), ExtLoad),
-              ExtLoad.getValue(1));
-    return SDValue(N, 0);   // Return N so it doesn't get rechecked!
+    if (!LegalOperations || TLI.isLoadExtLegal(ExtType, MemVT)) {
+      SDValue ExtLoad = DAG.getExtLoad(ExtType, SDLoc(N),
+                                       VT, LN0->getChain(), LN0->getBasePtr(),
+                                       MemVT, LN0->getMemOperand());
+      CombineTo(N, ExtLoad);
+      CombineTo(N0.getNode(),
+                DAG.getNode(ISD::TRUNCATE, SDLoc(N0),
+                            N0.getValueType(), ExtLoad),
+                ExtLoad.getValue(1));
+      return SDValue(N, 0);   // Return N so it doesn't get rechecked!
+    }
   }
 
   if (N0.getOpcode() == ISD::SETCC) {

@@ -16,7 +16,7 @@
 ;===------------------------------------------------------------------------===;
 
 [common]
-subdirectories = AsmParser Disassembler InstPrinter MCTargetDesc TargetInfo
+subdirectories = AsmParser Disassembler InstPrinter MCTargetDesc TargetInfo Utils
 
 [component_0]
 type = TargetGroup
@@ -31,6 +31,5 @@ has_jit = 1
 type = Library
 name = ARM64CodeGen
 parent = ARM64
-required_libraries = ARM64AsmPrinter ARM64Desc ARM64Info Analysis AsmPrinter CodeGen Core MC SelectionDAG Support Target
+required_libraries = ARM64AsmPrinter ARM64Desc ARM64Info Analysis AsmPrinter CodeGen Core MC Scalar SelectionDAG Support Target
 add_to_library_groups = ARM64
-

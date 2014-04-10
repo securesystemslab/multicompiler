@@ -245,7 +245,7 @@ inline typename cast_retty<X, Y *>::ret_type cast(Y *Val) {
 template <class X, class Y>
 LLVM_ATTRIBUTE_UNUSED_RESULT inline typename cast_retty<X, Y *>::ret_type
 cast_or_null(Y *Val) {
-  if (Val == 0) return 0;
+  if (!Val) return nullptr;
   assert(isa<X>(Val) && "cast_or_null<Ty>() argument of incompatible type!");
   return cast<X>(Val);
 }
@@ -263,19 +263,19 @@ template <class X, class Y>
 LLVM_ATTRIBUTE_UNUSED_RESULT inline typename std::enable_if<
     !is_simple_type<Y>::value, typename cast_retty<X, const Y>::ret_type>::type
 dyn_cast(const Y &Val) {
-  return isa<X>(Val) ? cast<X>(Val) : 0;
+  return isa<X>(Val) ? cast<X>(Val) : nullptr;
 }
 
 template <class X, class Y>
 LLVM_ATTRIBUTE_UNUSED_RESULT inline typename cast_retty<X, Y>::ret_type
 dyn_cast(Y &Val) {
-  return isa<X>(Val) ? cast<X>(Val) : 0;
+  return isa<X>(Val) ? cast<X>(Val) : nullptr;
 }
 
 template <class X, class Y>
 LLVM_ATTRIBUTE_UNUSED_RESULT inline typename cast_retty<X, Y *>::ret_type
 dyn_cast(Y *Val) {
-  return isa<X>(Val) ? cast<X>(Val) : 0;
+  return isa<X>(Val) ? cast<X>(Val) : nullptr;
 }
 
 // dyn_cast_or_null<X> - Functionally identical to dyn_cast, except that a null
@@ -284,7 +284,7 @@ dyn_cast(Y *Val) {
 template <class X, class Y>
 LLVM_ATTRIBUTE_UNUSED_RESULT inline typename cast_retty<X, Y *>::ret_type
 dyn_cast_or_null(Y *Val) {
-  return (Val && isa<X>(Val)) ? cast<X>(Val) : 0;
+  return (Val && isa<X>(Val)) ? cast<X>(Val) : nullptr;
 }
 
 } // End llvm namespace

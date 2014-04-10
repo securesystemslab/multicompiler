@@ -76,8 +76,7 @@
 #include <cstdarg>
 using namespace llvm;
 
-static cl::opt<bool> DisableDebugInfoVerifier("disable-debug-info-verifier",
-                                              cl::init(true));
+static cl::opt<bool> VerifyDebugInfo("verify-debug-info", cl::init(false));
 
 namespace {
 class Verifier : public InstVisitor<Verifier> {
@@ -112,7 +111,8 @@ class Verifier : public InstVisitor<Verifier> {
 
 public:
   explicit Verifier(raw_ostream &OS = dbgs())
-      : OS(OS), M(0), Context(0), DL(0), PersonalityFn(0), Broken(false) {}
+      : OS(OS), M(nullptr), Context(nullptr), DL(nullptr),
+        PersonalityFn(nullptr), Broken(false) {}
 
   bool verify(const Function &F) {
     M = F.getParent();
@@ -147,9 +147,9 @@ public:
     // FIXME: We strip const here because the inst visitor strips const.
     visit(const_cast<Function &>(F));
     InstsInThisBlock.clear();
-    PersonalityFn = 0;
+    PersonalityFn = nullptr;
 
-    if (!DisableDebugInfoVerifier)
+    if (VerifyDebugInfo)
       // Verify Debug Info.
       verifyDebugInfo();
 
@@ -187,7 +187,7 @@ public:
     visitModuleFlags(M);
     visitModuleIdents(M);
 
-    if (!DisableDebugInfoVerifier) {
+    if (VerifyDebugInfo) {
       Finder.reset();
       Finder.processModule(M);
       // Verify Debug Info.
@@ -301,9 +301,9 @@ private:
   // CheckFailed - A check failed, so print out the condition and the message
   // that failed.  This provides a nice place to put a breakpoint if you want
   // to see why something is not correct.
-  void CheckFailed(const Twine &Message, const Value *V1 = 0,
-                   const Value *V2 = 0, const Value *V3 = 0,
-                   const Value *V4 = 0) {
+  void CheckFailed(const Twine &Message, const Value *V1 = nullptr,
+                   const Value *V2 = nullptr, const Value *V3 = nullptr,
+                   const Value *V4 = nullptr) {
     OS << Message.str() << "\n";
     WriteValue(V1);
     WriteValue(V2);
@@ -313,7 +313,7 @@ private:
   }
 
   void CheckFailed(const Twine &Message, const Value *V1, Type *T2,
-                   const Value *V3 = 0) {
+                   const Value *V3 = nullptr) {
     OS << Message.str() << "\n";
     WriteValue(V1);
     WriteType(T2);
@@ -321,7 +321,8 @@ private:
     Broken = true;
   }
 
-  void CheckFailed(const Twine &Message, Type *T1, Type *T2 = 0, Type *T3 = 0) {
+  void CheckFailed(const Twine &Message, Type *T1, Type *T2 = nullptr,
+                   Type *T3 = nullptr) {
     OS << Message.str() << "\n";
     WriteType(T1);
     WriteType(T2);
@@ -345,7 +346,7 @@ private:
 
 void Verifier::visit(Instruction &I) {
   for (unsigned i = 0, e = I.getNumOperands(); i != e; ++i)
-    Assert1(I.getOperand(i) != 0, "Operand is null", &I);
+    Assert1(I.getOperand(i) != nullptr, "Operand is null", &I);
   InstVisitor<Verifier>::visit(I);
 }
 
@@ -522,7 +523,7 @@ void Verifier::visitNamedMDNode(const NamedMDNode &NMD) {
 
     Assert1(!MD->isFunctionLocal(),
             "Named metadata operand cannot be function local!", MD);
-    visitMDNode(*MD, 0);
+    visitMDNode(*MD, nullptr);
   }
 }
 
@@ -548,7 +549,7 @@ void Verifier::visitMDNode(MDNode &MD, Function *F) {
 
     // If this was an instruction, bb, or argument, verify that it is in the
     // function that we expect.
-    Function *ActualF = 0;
+    Function *ActualF = nullptr;
     if (Instruction *I = dyn_cast<Instruction>(Op))
       ActualF = I->getParent()->getParent();
     else if (BasicBlock *BB = dyn_cast<BasicBlock>(Op))
@@ -1530,7 +1531,7 @@ void Verifier::VerifyCallSite(CallSite CS) {
   }
 
   // Verify that there's no metadata unless it's a direct call to an intrinsic.
-  if (CS.getCalledFunction() == 0 ||
+  if (CS.getCalledFunction() == nullptr ||
       !CS.getCalledFunction()->getName().startswith("llvm.")) {
     for (FunctionType::param_iterator PI = FTy->param_begin(),
            PE = FTy->param_end(); PI != PE; ++PI)
@@ -1731,11 +1732,11 @@ void Verifier::visitLoadInst(LoadInst &LI) {
             "Atomic load must specify explicit alignment", &LI);
     if (!ElTy->isPointerTy()) {
       Assert2(ElTy->isIntegerTy(),
-              "atomic store operand must have integer type!",
+              "atomic load operand must have integer type!",
               &LI, ElTy);
       unsigned Size = ElTy->getPrimitiveSizeInBits();
       Assert2(Size >= 8 && !(Size & (Size - 1)),
-              "atomic store operand must be power-of-two byte-sized integer",
+              "atomic load operand must be power-of-two byte-sized integer",
               &LI, ElTy);
     }
   } else {
@@ -2020,8 +2021,8 @@ void Verifier::visitInstruction(Instruction &I) {
   // instruction, it is an error!
   for (Use &U : I.uses()) {
     if (Instruction *Used = dyn_cast<Instruction>(U.getUser()))
-      Assert2(Used->getParent() != 0, "Instruction referencing instruction not"
-              " embedded in a basic block!", &I, Used);
+      Assert2(Used->getParent() != nullptr, "Instruction referencing"
+              " instruction not embedded in a basic block!", &I, Used);
     else {
       CheckFailed("Use of instruction is not an instruction!", U);
       return;
@@ -2029,7 +2030,7 @@ void Verifier::visitInstruction(Instruction &I) {
   }
 
   for (unsigned i = 0, e = I.getNumOperands(); i != e; ++i) {
-    Assert1(I.getOperand(i) != 0, "Instruction has null operand!", &I);
+    Assert1(I.getOperand(i) != nullptr, "Instruction has null operand!", &I);
 
     // Check to make sure that only first-class-values are operands to
     // instructions.
@@ -2103,7 +2104,7 @@ void Verifier::visitInstruction(Instruction &I) {
   MDNode *MD = I.getMetadata(LLVMContext::MD_range);
   Assert1(!MD || isa<LoadInst>(I), "Ranges are only for loads!", &I);
 
-  if (!DisableDebugInfoVerifier) {
+  if (VerifyDebugInfo) {
     MD = I.getMetadata(LLVMContext::MD_dbg);
     Finder.processLocation(*M, DILocation(MD));
   }
@@ -2137,18 +2138,18 @@ bool Verifier::VerifyIntrinsicType(Type *Ty,
   case IITDescriptor::Integer: return !Ty->isIntegerTy(D.Integer_Width);
   case IITDescriptor::Vector: {
     VectorType *VT = dyn_cast<VectorType>(Ty);
-    return VT == 0 || VT->getNumElements() != D.Vector_Width ||
+    return !VT || VT->getNumElements() != D.Vector_Width ||
            VerifyIntrinsicType(VT->getElementType(), Infos, ArgTys);
   }
   case IITDescriptor::Pointer: {
     PointerType *PT = dyn_cast<PointerType>(Ty);
-    return PT == 0 || PT->getAddressSpace() != D.Pointer_AddressSpace ||
+    return !PT || PT->getAddressSpace() != D.Pointer_AddressSpace ||
            VerifyIntrinsicType(PT->getElementType(), Infos, ArgTys);
   }
 
   case IITDescriptor::Struct: {
     StructType *ST = dyn_cast<StructType>(Ty);
-    if (ST == 0 || ST->getNumElements() != D.Struct_NumElements)
+    if (!ST || ST->getNumElements() != D.Struct_NumElements)
       return true;
 
     for (unsigned i = 0, e = D.Struct_NumElements; i != e; ++i)
@@ -2307,11 +2308,11 @@ void Verifier::visitIntrinsicFunctionCall(Intrinsic::ID ID, CallInst &CI) {
     MDNode *MD = cast<MDNode>(CI.getArgOperand(0));
     Assert1(MD->getNumOperands() == 1,
                 "invalid llvm.dbg.declare intrinsic call 2", &CI);
-    if (!DisableDebugInfoVerifier)
+    if (VerifyDebugInfo)
       Finder.processDeclare(*M, cast<DbgDeclareInst>(&CI));
   } break;
   case Intrinsic::dbg_value: { //llvm.dbg.value
-    if (!DisableDebugInfoVerifier) {
+    if (VerifyDebugInfo) {
       Assert1(CI.getArgOperand(0) && isa<MDNode>(CI.getArgOperand(0)),
               "invalid llvm.dbg.value intrinsic call 1", &CI);
       Finder.processValue(*M, cast<DbgValueInst>(&CI));
@@ -2381,7 +2382,7 @@ void Verifier::visitIntrinsicFunctionCall(Intrinsic::ID ID, CallInst &CI) {
 
 void Verifier::verifyDebugInfo() {
   // Verify Debug Info.
-  if (!DisableDebugInfoVerifier) {
+  if (VerifyDebugInfo) {
     for (DICompileUnit CU : Finder.compile_units()) {
       Assert1(CU.Verify(), "DICompileUnit does not Verify!", CU);
     }

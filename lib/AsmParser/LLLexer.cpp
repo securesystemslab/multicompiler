@@ -34,6 +34,10 @@ bool LLLexer::Error(LocTy ErrorLoc, const Twine &Msg) const {
   return true;
 }
 
+void LLLexer::Warning(LocTy WarningLoc, const Twine &Msg) const {
+  SM.PrintMessage(WarningLoc, SourceMgr::DK_Warning, Msg);
+}
+
 //===----------------------------------------------------------------------===//
 // Helper functions.
 //===----------------------------------------------------------------------===//
@@ -481,6 +485,8 @@ lltok::Kind LLLexer::LexIdentifier() {
 
   KEYWORD(private);
   KEYWORD(internal);
+  KEYWORD(linker_private);        // NOTE: deprecated, for parser compatibility
+  KEYWORD(linker_private_weak);   // NOTE: deprecated, for parser compatibility
   KEYWORD(available_externally);
   KEYWORD(linkonce);
   KEYWORD(linkonce_odr);
