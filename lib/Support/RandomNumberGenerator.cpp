@@ -23,10 +23,11 @@
 
 using namespace llvm;
 
-// Only read by threads, so no locking required.
+// Initialized once, then only read by threads, so no locking required.
 static std::string SaltData;
 
-static cl::opt<uint64_t>
+// Do not change to cl::opt<uint64_t> since this silently breaks argument parsing.
+static cl::opt<unsigned long long>
 RandomSeed("rng-seed", cl::value_desc("seed"),
            cl::desc("Seed for the random number generator"), cl::init(0));
 
