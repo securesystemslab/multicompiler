@@ -17,20 +17,20 @@ entry:
     ret i32 %e
 }
 
-; SEED1: leal	(%rdi,%rdx), %ecx
-; SEED1-NEXT:	leal	(%rdi,%rsi), %eax
-; SEED1-NEXT:	imull	%ecx, %eax
-; SEED1-NEXT:	addl	%edx, %esi
-; SEED1-NEXT:	imull	%esi, %eax
+; SEED1: leal (%rdi,%rsi), %eax
+; SEED1-NEXT:	addl  %edx, %edi
+; SEED1-NEXT:	imull %edi, %eax
+; SEED1-NEXT:	addl  %edx, %esi
+; SEED1-NEXT:	imull %esi, %eax
 
-; SEED2: leal	(%rdi,%rdx), %ecx
-; SEED2-NEXT:	addl	%esi, %edx
-; SEED2-NEXT:	leal	(%rdi,%rsi), %eax
-; SEED2-NEXT:	imull	%ecx, %eax
-; SEED2-NEXT:	imull	%edx, %eax
+; SEED2: leal (%rdi,%rdx), %ecx
+; SEED2-NEXT:	leal  (%rdi,%rsi), %eax
+; SEED2-NEXT:	imull %ecx, %eax
+; SEED2-NEXT:	addl  %edx, %esi
+; SEED2-NEXT:	imull %esi, %eax
 
-; PERCENTAGE: leal	(%rsi,%rdx), %eax
-; PERCENTAGE:	addl	%edi, %edx
-; PERCENTAGE:	addl	%edi, %esi
-; PERCENTAGE:	imull	%edx, %esi
-; PERCENTAGE:	imull	%esi, %eax
+; PERCENTAGE: leal  (%rdi,%rsi), %eax
+; PERCENTAGE:	addl  %edx, %edi
+; PERCENTAGE:	addl  %edx, %esi
+; PERCENTAGE:	imull %edi, %eax
+; PERCENTAGE:	imull %esi, %eax

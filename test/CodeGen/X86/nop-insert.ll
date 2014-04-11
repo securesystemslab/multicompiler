@@ -7,20 +7,24 @@
 ; This test case checks that NOPs are inserted, and that the RNG seed
 ; affects both the placement and choice of these NOPs.
 
-; CHECK: leaq	(%rsi), %rsi
+; CHECK: leaq (%rdi), %rdi
+; CHECK: movq %rsp, %rsp
 
-; SEED1: nop
-; SEED1-NOT: leaq	(%rsi), %rsi
+; SEED1: leaq (%rsi), %rsi
+; SEED1-NOT: movq
+; SEED1-NOT: nop
 
-; SEED2: leaq	(%rdi), %rdi
-; SEED2: leaq	(%rdi), %rdi
-; SEED2-NOT: leaq	(%rsi), %rsi
+; SEED2: nop
+; SEED2-NOT: movq
+; SEED2-NOT: leaq
 
-; SEED3: nop
+; SEED3-NOT: movq
+; SEED3-NOT: nop
+; SEED3-NOT: leaq
 
-; ENTROPY: movq    %rbp, %rbp
-; ENTROPY: leaq	(%rdi), %rdi
+; ENTROPY: movq %rsp, %rsp
 ; ENTROPY-NOT: nop
+; ENTROPY-NOT: leaq
 
 define i32 @test1(i32 %x, i32 %y, i32 %z) {
 entry:
