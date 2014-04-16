@@ -41,7 +41,7 @@ public:
 private:
   std::default_random_engine generator;
 
-  void Seed(StringRef Salt, uint64_t Seed, unsigned InstanceID);
+  void Seed(StringRef Salt, uint64_t Seed);
 
   RandomNumberGenerator();
   // Noncopyable.

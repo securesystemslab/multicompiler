@@ -15,7 +15,6 @@
 
 #define DEBUG_TYPE "rng"
 #include "llvm/Support/RandomNumberGenerator.h"
-#include "llvm/Support/Atomic.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ManagedStatic.h"
@@ -38,7 +37,6 @@ SaltDataOpt("entropy-data",
             cl::Hidden, cl::location(SaltData));
 
 static ManagedStatic<sys::ThreadLocal<const RandomNumberGenerator> > Instance;
-static unsigned InstanceCount = 0;
 
 void RandomNumberGenerator::SetSalt(const StringRef &Salt) {
   SaltData = Salt;
@@ -56,15 +54,14 @@ RandomNumberGenerator *RandomNumberGenerator::Get() {
   return RNG;
 }
 
+// Note that every new RNG will produce the same stream of
+// pseudo-random numbers, unless SetSalt is called again.
 RandomNumberGenerator::RandomNumberGenerator() {
-  // Make sure each thread is seeded with a different seed
-  unsigned InstanceID = sys::AtomicIncrement(&InstanceCount);
-
   if (RandomSeed == 0 && SaltData.empty())
     DEBUG(errs()
           << "Warning! Using unseeded and unsalted random number generator\n");
 
-  Seed(SaltData, RandomSeed, InstanceID);
+  Seed(SaltData, RandomSeed);
 }
 
 uint64_t RandomNumberGenerator::Random(uint64_t Max) {
@@ -72,21 +69,18 @@ uint64_t RandomNumberGenerator::Random(uint64_t Max) {
   return distribution(generator);
 }
 
-void RandomNumberGenerator::Seed(StringRef Salt, uint64_t Seed,
-                                 unsigned InstanceID) {
+void RandomNumberGenerator::Seed(StringRef Salt, uint64_t Seed) {
   DEBUG(dbgs() << "Re-Seeding RNG from salt and seed\n");
   DEBUG(dbgs() << "Salt: " << Salt << "\n");
   DEBUG(dbgs() << "Seed: " << Seed << "\n");
-  DEBUG(dbgs() << "InstanceID: " << InstanceID << "\n");
 
-  // Sequence: Seed-low, Seed-high, InstanceId, Salt...
-  unsigned SeedSize = Salt.size() + 3;
+  // Sequence: Seed-low, Seed-high, Salt...
+  unsigned SeedSize = Salt.size() + 2;
   unsigned Seeds[SeedSize];
   Seeds[0] = Seed;
   Seeds[1] = Seed >> 32;
-  Seeds[2] = InstanceID;
   for (unsigned i = 0; i < Salt.size(); ++i)
-    Seeds[3 + i] = Salt[i];
+    Seeds[2 + i] = Salt[i];
 
   std::seed_seq SeedSeq(Seeds, Seeds + SeedSize);
   generator.seed(SeedSeq);
