@@ -212,22 +212,6 @@ AMDGPUTargetLowering::AMDGPUTargetLowering(TargetMachine &TM) :
     setOperationAction(ISD::SELECT, VT, Expand);
   }
 
-  setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::i1, Custom);
-  setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::v2i1, Custom);
-  setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::v4i1, Custom);
-
-  setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::i8, Custom);
-  setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::v2i8, Custom);
-  setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::v4i8, Custom);
-
-  setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::i16, Custom);
-  setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::v2i16, Custom);
-  setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::v4i16, Custom);
-
-  setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::i32, Custom);
-
-  setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::Other, Custom);
-
   setTargetDAGCombine(ISD::MUL);
 }
 
@@ -471,28 +455,14 @@ SDValue AMDGPUTargetLowering::LowerGlobalAddress(AMDGPUMachineFunction* MFI,
   }
 }
 
-void AMDGPUTargetLowering::ExtractVectorElements(SDValue Op, SelectionDAG &DAG,
-                                         SmallVectorImpl<SDValue> &Args,
-                                         unsigned Start,
-                                         unsigned Count) const {
-  EVT VT = Op.getValueType();
-  for (unsigned i = Start, e = Start + Count; i != e; ++i) {
-    Args.push_back(DAG.getNode(ISD::EXTRACT_VECTOR_ELT, SDLoc(Op),
-                               VT.getVectorElementType(),
-                               Op, DAG.getConstant(i, MVT::i32)));
-  }
-}
-
 SDValue AMDGPUTargetLowering::LowerCONCAT_VECTORS(SDValue Op,
                                                   SelectionDAG &DAG) const {
   SmallVector<SDValue, 8> Args;
   SDValue A = Op.getOperand(0);
   SDValue B = Op.getOperand(1);
 
-  ExtractVectorElements(A, DAG, Args, 0,
-                        A.getValueType().getVectorNumElements());
-  ExtractVectorElements(B, DAG, Args, 0,
-                        B.getValueType().getVectorNumElements());
+  DAG.ExtractVectorElements(A, Args);
+  DAG.ExtractVectorElements(B, Args);
 
   return DAG.getNode(ISD::BUILD_VECTOR, SDLoc(Op), Op.getValueType(),
                      Args.data(), Args.size());
@@ -502,10 +472,10 @@ SDValue AMDGPUTargetLowering::LowerEXTRACT_SUBVECTOR(SDValue Op,
                                                      SelectionDAG &DAG) const {
 
   SmallVector<SDValue, 8> Args;
-  EVT VT = Op.getValueType();
   unsigned Start = cast<ConstantSDNode>(Op.getOperand(1))->getZExtValue();
-  ExtractVectorElements(Op.getOperand(0), DAG, Args, Start,
-                        VT.getVectorNumElements());
+  EVT VT = Op.getValueType();
+  DAG.ExtractVectorElements(Op.getOperand(0), Args, Start,
+                            VT.getVectorNumElements());
 
   return DAG.getNode(ISD::BUILD_VECTOR, SDLoc(Op), Op.getValueType(),
                      Args.data(), Args.size());
@@ -790,9 +760,24 @@ SDValue AMDGPUTargetLowering::LowerLOAD(SDValue Op, SelectionDAG &DAG) const {
     return DAG.getNode(ISD::getExtForLoadExtType(ExtType), DL, VT, ExtLoad32);
   }
 
+  if (ExtType == ISD::NON_EXTLOAD && VT.getSizeInBits() < 32) {
+    assert(VT == MVT::i1 && "Only i1 non-extloads expected");
+    // FIXME: Copied from PPC
+    // First, load into 32 bits, then truncate to 1 bit.
+
+    SDValue Chain = Load->getChain();
+    SDValue BasePtr = Load->getBasePtr();
+    MachineMemOperand *MMO = Load->getMemOperand();
+
+    SDValue NewLD = DAG.getExtLoad(ISD::EXTLOAD, DL, MVT::i32, Chain,
+                                   BasePtr, MVT::i8, MMO);
+    return DAG.getNode(ISD::TRUNCATE, DL, VT, NewLD);
+  }
+
   // Lower loads constant address space global variable loads
   if (Load->getAddressSpace() == AMDGPUAS::CONSTANT_ADDRESS &&
-      isa<GlobalVariable>(GetUnderlyingObject(Load->getPointerInfo().V))) {
+      isa<GlobalVariable>(
+          GetUnderlyingObject(Load->getMemOperand()->getValue()))) {
 
     SDValue Ptr = DAG.getZExtOrTrunc(Load->getBasePtr(), DL,
         getPointerTy(AMDGPUAS::PRIVATE_ADDRESS));
@@ -1046,7 +1031,7 @@ SDValue AMDGPUTargetLowering::LowerSIGN_EXTEND_INREG(SDValue Op,
     // TODO: Don't scalarize on Evergreen?
     unsigned NElts = VT.getVectorNumElements();
     SmallVector<SDValue, 8> Args;
-    ExtractVectorElements(Src, DAG, Args, 0, NElts);
+    DAG.ExtractVectorElements(Src, Args);
 
     SDValue VTOp = DAG.getValueType(ExtraVT.getScalarType());
     for (unsigned I = 0; I < NElts; ++I)

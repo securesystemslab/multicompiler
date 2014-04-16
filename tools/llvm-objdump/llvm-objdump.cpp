@@ -309,24 +309,25 @@ static void DisassembleObject(const ObjectFile *Obj, bool InlineRelocs) {
     return;
   }
 
-  std::unique_ptr<MCDisassembler> DisAsm(TheTarget->createMCDisassembler(*STI));
+  std::unique_ptr<const MCObjectFileInfo> MOFI(new MCObjectFileInfo);
+  MCContext Ctx(AsmInfo.get(), MRI.get(), MOFI.get());
+
+  std::unique_ptr<MCDisassembler> DisAsm(
+    TheTarget->createMCDisassembler(*STI, Ctx));
+
   if (!DisAsm) {
     errs() << "error: no disassembler for target " << TripleName << "\n";
     return;
   }
 
-  std::unique_ptr<const MCObjectFileInfo> MOFI;
-  std::unique_ptr<MCContext> Ctx;
 
   if (Symbolize) {
-    MOFI.reset(new MCObjectFileInfo);
-    Ctx.reset(new MCContext(AsmInfo.get(), MRI.get(), MOFI.get()));
     std::unique_ptr<MCRelocationInfo> RelInfo(
-        TheTarget->createMCRelocationInfo(TripleName, *Ctx.get()));
+        TheTarget->createMCRelocationInfo(TripleName, Ctx));
     if (RelInfo) {
       std::unique_ptr<MCSymbolizer> Symzer(
-        MCObjectSymbolizer::createObjectSymbolizer(*Ctx.get(),
-                                                   std::move(RelInfo), Obj));
+        MCObjectSymbolizer::createObjectSymbolizer(Ctx, std::move(RelInfo),
+                                                   Obj));
       if (Symzer)
         DisAsm->setSymbolizer(std::move(Symzer));
     }
@@ -664,16 +665,33 @@ static void PrintSectionContents(const ObjectFile *Obj) {
 
 static void PrintCOFFSymbolTable(const COFFObjectFile *coff) {
   const coff_file_header *header;
-  if (error(coff->getHeader(header))) return;
-  int aux_count = 0;
-  const coff_symbol *symbol = 0;
-  for (int i = 0, e = header->NumberOfSymbols; i != e; ++i) {
-    if (aux_count--) {
-      // Figure out which type of aux this is.
-      if (symbol->isSectionDefinition()) { // Section definition.
+  if (error(coff->getHeader(header)))
+    return;
+
+  for (unsigned SI = 0, SE = header->NumberOfSymbols; SI != SE; ++SI) {
+    const coff_symbol *Symbol;
+    StringRef Name;
+    if (error(coff->getSymbol(SI, Symbol)))
+      return;
+
+    if (error(coff->getSymbolName(Symbol, Name)))
+      return;
+
+    outs() << "[" << format("%2d", SI) << "]"
+           << "(sec " << format("%2d", int(Symbol->SectionNumber)) << ")"
+           << "(fl 0x00)" // Flag bits, which COFF doesn't have.
+           << "(ty " << format("%3x", unsigned(Symbol->Type)) << ")"
+           << "(scl " << format("%3x", unsigned(Symbol->StorageClass)) << ") "
+           << "(nx " << unsigned(Symbol->NumberOfAuxSymbols) << ") "
+           << "0x" << format("%08x", unsigned(Symbol->Value)) << " "
+           << Name << "\n";
+
+    for (unsigned AI = 0, AE = Symbol->NumberOfAuxSymbols; AI < AE; ++AI, ++SI) {
+      if (Symbol->isSectionDefinition()) {
         const coff_aux_section_definition *asd;
-        if (error(coff->getAuxSymbol<coff_aux_section_definition>(i, asd)))
+        if (error(coff->getAuxSymbol<coff_aux_section_definition>(SI + 1, asd)))
           return;
+
         outs() << "AUX "
                << format("scnlen 0x%x nreloc %d nlnno %d checksum 0x%x "
                          , unsigned(asd->Length)
@@ -683,21 +701,20 @@ static void PrintCOFFSymbolTable(const COFFObjectFile *coff) {
                << format("assoc %d comdat %d\n"
                          , unsigned(asd->Number)
                          , unsigned(asd->Selection));
-      } else
+      } else if (Symbol->isFileRecord()) {
+        const coff_aux_file *AF;
+        if (error(coff->getAuxSymbol<coff_aux_file>(SI + 1, AF)))
+          return;
+
+        StringRef Name(AF->FileName,
+                       Symbol->NumberOfAuxSymbols * COFF::SymbolSize);
+        outs() << "AUX " << Name.rtrim(StringRef("\0", 1))  << '\n';
+
+        SI = SI + Symbol->NumberOfAuxSymbols;
+        break;
+      } else {
         outs() << "AUX Unknown\n";
-    } else {
-      StringRef name;
-      if (error(coff->getSymbol(i, symbol))) return;
-      if (error(coff->getSymbolName(symbol, name))) return;
-      outs() << "[" << format("%2d", i) << "]"
-             << "(sec " << format("%2d", int(symbol->SectionNumber)) << ")"
-             << "(fl 0x00)" // Flag bits, which COFF doesn't have.
-             << "(ty " << format("%3x", unsigned(symbol->Type)) << ")"
-             << "(scl " << format("%3x", unsigned(symbol->StorageClass)) << ") "
-             << "(nx " << unsigned(symbol->NumberOfAuxSymbols) << ") "
-             << "0x" << format("%08x", unsigned(symbol->Value)) << " "
-             << name << "\n";
-      aux_count = symbol->NumberOfAuxSymbols;
+      }
     }
   }
 }

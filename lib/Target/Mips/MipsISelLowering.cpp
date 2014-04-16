@@ -245,7 +245,7 @@ MipsTargetLowering::MipsTargetLowering(MipsTargetMachine &TM)
   setOperationAction(ISD::FCOPYSIGN,          MVT::f64,   Custom);
   setOperationAction(ISD::FP_TO_SINT,         MVT::i32,   Custom);
 
-  if (hasMips64()) {
+  if (isGP64bit()) {
     setOperationAction(ISD::GlobalAddress,      MVT::i64,   Custom);
     setOperationAction(ISD::BlockAddress,       MVT::i64,   Custom);
     setOperationAction(ISD::GlobalTLSAddress,   MVT::i64,   Custom);
@@ -257,14 +257,14 @@ MipsTargetLowering::MipsTargetLowering(MipsTargetMachine &TM)
     setOperationAction(ISD::FP_TO_SINT,         MVT::i64,   Custom);
   }
 
-  if (!hasMips64()) {
+  if (!isGP64bit()) {
     setOperationAction(ISD::SHL_PARTS,          MVT::i32,   Custom);
     setOperationAction(ISD::SRA_PARTS,          MVT::i32,   Custom);
     setOperationAction(ISD::SRL_PARTS,          MVT::i32,   Custom);
   }
 
   setOperationAction(ISD::ADD,                MVT::i32,   Custom);
-  if (hasMips64())
+  if (isGP64bit())
     setOperationAction(ISD::ADD,                MVT::i64,   Custom);
 
   setOperationAction(ISD::SDIV, MVT::i32, Expand);
@@ -361,7 +361,7 @@ MipsTargetLowering::MipsTargetLowering(MipsTargetMachine &TM)
     setOperationAction(ISD::BSWAP, MVT::i64, Expand);
   }
 
-  if (hasMips64()) {
+  if (isGP64bit()) {
     setLoadExtAction(ISD::SEXTLOAD, MVT::i32, Custom);
     setLoadExtAction(ISD::ZEXTLOAD, MVT::i32, Custom);
     setLoadExtAction(ISD::EXTLOAD, MVT::i32, Custom);
@@ -377,7 +377,7 @@ MipsTargetLowering::MipsTargetLowering(MipsTargetMachine &TM)
   setTargetDAGCombine(ISD::OR);
   setTargetDAGCombine(ISD::ADD);
 
-  setMinFunctionAlignment(hasMips64() ? 3 : 2);
+  setMinFunctionAlignment(isGP64bit() ? 3 : 2);
 
   setStackPointerRegisterToSaveRestore(isN64() ? Mips::SP_64 : Mips::SP);
 
@@ -1754,7 +1754,7 @@ static SDValue lowerFCOPYSIGN64(SDValue Op, SelectionDAG &DAG,
 
 SDValue
 MipsTargetLowering::lowerFCOPYSIGN(SDValue Op, SelectionDAG &DAG) const {
-  if (Subtarget->hasMips64())
+  if (Subtarget->isGP64bit())
     return lowerFCOPYSIGN64(Op, DAG, Subtarget->hasExtractInsert());
 
   return lowerFCOPYSIGN32(Op, DAG, Subtarget->hasExtractInsert());
@@ -3550,7 +3550,7 @@ passByValArg(SDValue Chain, SDLoc DL,
                             DAG.getIntPtrConstant(ByVal.Address));
   Chain = DAG.getMemcpy(Chain, DL, Dst, Src, DAG.getConstant(MemCpySize, PtrTy),
                         Alignment, /*isVolatile=*/false, /*AlwaysInline=*/false,
-                        MachinePointerInfo(0), MachinePointerInfo(0));
+                        MachinePointerInfo(), MachinePointerInfo());
   MemOpChains.push_back(Chain);
 }
 
@@ -3592,7 +3592,7 @@ void MipsTargetLowering::writeVarArgRegs(std::vector<SDValue> &OutChains,
     SDValue PtrOff = DAG.getFrameIndex(FI, getPointerTy());
     SDValue Store = DAG.getStore(Chain, DL, ArgValue, PtrOff,
                                  MachinePointerInfo(), false, false, 0);
-    cast<StoreSDNode>(Store.getNode())->getMemOperand()->setValue(0);
+    cast<StoreSDNode>(Store.getNode())->getMemOperand()->setValue((Value*)0);
     OutChains.push_back(Store);
   }
 }

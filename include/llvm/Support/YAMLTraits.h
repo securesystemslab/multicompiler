@@ -176,7 +176,8 @@ struct has_ScalarEnumerationTraits
   static double test(...);
 
 public:
-  static bool const value = (sizeof(test<ScalarEnumerationTraits<T> >(0)) == 1);
+  static bool const value =
+    (sizeof(test<ScalarEnumerationTraits<T> >(nullptr)) == 1);
 };
 
 
@@ -193,7 +194,7 @@ struct has_ScalarBitSetTraits
   static double test(...);
 
 public:
-  static bool const value = (sizeof(test<ScalarBitSetTraits<T> >(0)) == 1);
+  static bool const value = (sizeof(test<ScalarBitSetTraits<T> >(nullptr)) == 1);
 };
 
 
@@ -232,7 +233,7 @@ struct has_MappingTraits
   static double test(...);
 
 public:
-  static bool const value = (sizeof(test<MappingTraits<T> >(0)) == 1);
+  static bool const value = (sizeof(test<MappingTraits<T> >(nullptr)) == 1);
 };
 
 // Test if MappingTraits<T>::validate() is defined on type T.
@@ -266,7 +267,7 @@ struct has_SequenceMethodTraits
   static double test(...);
 
 public:
-  static bool const value =  (sizeof(test<SequenceTraits<T> >(0)) == 1);
+  static bool const value =  (sizeof(test<SequenceTraits<T> >(nullptr)) == 1);
 };
 
 
@@ -296,7 +297,7 @@ struct has_FlowTraits<T, true>
   static char (&f(...))[2];
 
 public:
-  static bool const value = sizeof(f<Derived>(0)) == 2;
+  static bool const value = sizeof(f<Derived>(nullptr)) == 2;
 };
 
 
@@ -777,7 +778,7 @@ struct ScalarTraits<double> {
 template <typename TNorm, typename TFinal>
 struct MappingNormalization {
   MappingNormalization(IO &i_o, TFinal &Obj)
-      : io(i_o), BufPtr(NULL), Result(Obj) {
+      : io(i_o), BufPtr(nullptr), Result(Obj) {
     if ( io.outputting() ) {
       BufPtr = new (&Buffer) TNorm(io, Obj);
     }

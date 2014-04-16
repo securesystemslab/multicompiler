@@ -193,12 +193,11 @@ void StackColoring::getAnalysisUsage(AnalysisUsage &AU) const {
 }
 
 void StackColoring::dump() const {
-  for (df_iterator<MachineFunction*> FI = df_begin(MF), FE = df_end(MF);
-       FI != FE; ++FI) {
-    DEBUG(dbgs()<<"Inspecting block #"<<BasicBlocks.lookup(*FI)<<
-          " ["<<FI->getName()<<"]\n");
+  for (MachineBasicBlock *MBB : depth_first(MF)) {
+    DEBUG(dbgs() << "Inspecting block #" << BasicBlocks.lookup(MBB) << " ["
+                 << MBB->getName() << "]\n");
 
-    LivenessMap::const_iterator BI = BlockLiveness.find(*FI);
+    LivenessMap::const_iterator BI = BlockLiveness.find(MBB);
     assert(BI != BlockLiveness.end() && "Block not found");
     const BlockLifetimeInfo &BlockInfo = BI->second;
 
@@ -231,20 +230,19 @@ unsigned StackColoring::collectMarkers(unsigned NumSlot) {
   // NOTE: We use the a reverse-post-order iteration to ensure that we obtain a
   // deterministic numbering, and because we'll need a post-order iteration
   // later for solving the liveness dataflow problem.
-  for (df_iterator<MachineFunction*> FI = df_begin(MF), FE = df_end(MF);
-       FI != FE; ++FI) {
+  for (MachineBasicBlock *MBB : depth_first(MF)) {
 
     // Assign a serial number to this basic block.
-    BasicBlocks[*FI] = BasicBlockNumbering.size();
-    BasicBlockNumbering.push_back(*FI);
+    BasicBlocks[MBB] = BasicBlockNumbering.size();
+    BasicBlockNumbering.push_back(MBB);
 
     // Keep a reference to avoid repeated lookups.
-    BlockLifetimeInfo &BlockInfo = BlockLiveness[*FI];
+    BlockLifetimeInfo &BlockInfo = BlockLiveness[MBB];
 
     BlockInfo.Begin.resize(NumSlot);
     BlockInfo.End.resize(NumSlot);
 
-    for (MachineInstr &MI : **FI) {
+    for (MachineInstr &MI : *MBB) {
       if (MI.getOpcode() != TargetOpcode::LIFETIME_START &&
           MI.getOpcode() != TargetOpcode::LIFETIME_END)
         continue;
@@ -511,11 +509,6 @@ void StackColoring::remapInstructions(DenseMap<int, int> &SlotRemap) {
 
       // Update the MachineMemOperand to use the new alloca.
       for (MachineMemOperand *MMO : I.memoperands()) {
-        const Value *V = MMO->getValue();
-
-        if (!V)
-          continue;
-
         // FIXME: In order to enable the use of TBAA when using AA in CodeGen,
         // we'll also need to update the TBAA nodes in MMOs with values
         // derived from the merged allocas. When doing this, we'll need to use
@@ -525,10 +518,10 @@ void StackColoring::remapInstructions(DenseMap<int, int> &SlotRemap) {
 
         // We've replaced IR-level uses of the remapped allocas, so we only
         // need to replace direct uses here.
-        if (!isa<AllocaInst>(V))
+        const AllocaInst *AI = dyn_cast_or_null<AllocaInst>(MMO->getValue());
+        if (!AI)
           continue;
 
-        const AllocaInst *AI= cast<AllocaInst>(V);
         if (!Allocas.count(AI))
           continue;
 

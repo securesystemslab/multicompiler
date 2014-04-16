@@ -269,13 +269,12 @@ namespace {
 
   class DefaultJITMemoryManager;
 
-  class JITSlabAllocator : public SlabAllocator {
+  class JITAllocator {
     DefaultJITMemoryManager &JMM;
   public:
-    JITSlabAllocator(DefaultJITMemoryManager &jmm) : JMM(jmm) { }
-    virtual ~JITSlabAllocator() { }
-    MemSlab *Allocate(size_t Size) override;
-    void Deallocate(MemSlab *Slab) override;
+    JITAllocator(DefaultJITMemoryManager &jmm) : JMM(jmm) { }
+    void *Allocate(size_t Size, size_t /*Alignment*/);
+    void Deallocate(void *Slab, size_t Size);
   };
 
   /// DefaultJITMemoryManager - Manage memory for the JIT code generation.
@@ -313,9 +312,10 @@ namespace {
     // Memory slabs allocated by the JIT.  We refer to them as slabs so we don't
     // confuse them with the blocks of memory described above.
     std::vector<sys::MemoryBlock> CodeSlabs;
-    JITSlabAllocator BumpSlabAllocator;
-    BumpPtrAllocatorImpl<DefaultSlabSize, DefaultSizeThreshold> StubAllocator;
-    BumpPtrAllocatorImpl<DefaultSlabSize, DefaultSizeThreshold> DataAllocator;
+    BumpPtrAllocatorImpl<JITAllocator, DefaultSlabSize,
+                         DefaultSizeThreshold> StubAllocator;
+    BumpPtrAllocatorImpl<JITAllocator, DefaultSlabSize,
+                         DefaultSizeThreshold> DataAllocator;
 
     // Circular list of free blocks.
     FreeRangeHeader *FreeMemoryList;
@@ -568,30 +568,24 @@ namespace {
   };
 }
 
-MemSlab *JITSlabAllocator::Allocate(size_t Size) {
+void *JITAllocator::Allocate(size_t Size, size_t /*Alignment*/) {
   sys::MemoryBlock B = JMM.allocateNewSlab(Size);
-  MemSlab *Slab = (MemSlab*)B.base();
-  Slab->Size = B.size();
-  Slab->NextPtr = 0;
-  return Slab;
+  return B.base();
 }
 
-void JITSlabAllocator::Deallocate(MemSlab *Slab) {
-  sys::MemoryBlock B(Slab, Slab->Size);
+void JITAllocator::Deallocate(void *Slab, size_t Size) {
+  sys::MemoryBlock B(Slab, Size);
   sys::Memory::ReleaseRWX(B);
 }
 
 DefaultJITMemoryManager::DefaultJITMemoryManager()
-  :
+    :
 #ifdef NDEBUG
-    PoisonMemory(false),
+      PoisonMemory(false),
 #else
-    PoisonMemory(true),
+      PoisonMemory(true),
 #endif
-    LastSlab(0, 0),
-    BumpSlabAllocator(*this),
-    StubAllocator(BumpSlabAllocator),
-    DataAllocator(BumpSlabAllocator) {
+      LastSlab(0, 0), StubAllocator(*this), DataAllocator(*this) {
 
   // Allocate space for code.
   sys::MemoryBlock MemBlock = allocateNewSlab(DefaultCodeSlabSize);

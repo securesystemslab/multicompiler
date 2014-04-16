@@ -428,13 +428,6 @@ static const EnumEntry<unsigned> UnwindOpInfo[] = {
   { "R15", 15 }
 };
 
-// Some additional COFF structures not defined by llvm::object.
-namespace {
-  struct coff_aux_file_record {
-    char FileName[18];
-  };
-} // namespace
-
 static uint64_t getOffsetOfLSDA(const Win64EH::UnwindInfo& UI) {
   return static_cast<const char*>(UI.getLanguageSpecificData())
          - reinterpret_cast<const char*>(&UI);
@@ -979,13 +972,15 @@ void COFFDumper::printSymbol(const SymbolRef &Sym) {
       W.printBinary("Unused", makeArrayRef(Aux->Unused));
 
     } else if (Symbol->isFileRecord()) {
-      const coff_aux_file_record *Aux;
+      const coff_aux_file *Aux;
       if (error(getSymbolAuxData(Obj, Symbol + I, Aux)))
         break;
 
       DictScope AS(W, "AuxFileRecord");
-      W.printString("FileName", StringRef(Aux->FileName));
 
+      StringRef Name(Aux->FileName,
+                     Symbol->NumberOfAuxSymbols * COFF::SymbolSize);
+      W.printString("FileName", Name.rtrim(StringRef("\0", 1)));
     } else if (Symbol->isSectionDefinition()) {
       const coff_aux_section_definition *Aux;
       if (error(getSymbolAuxData(Obj, Symbol + I, Aux)))

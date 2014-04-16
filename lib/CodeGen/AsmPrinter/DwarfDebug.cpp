@@ -791,8 +791,7 @@ void DwarfDebug::constructImportedEntityDIE(DwarfCompileUnit *TheCU,
   assert(Module.Verify() &&
          "Use one of the MDNode * overloads to handle invalid metadata");
   assert(Context && "Should always have a context for an imported_module");
-  DIE *IMDie = new DIE(Module.getTag());
-  TheCU->insertDIE(Module, IMDie);
+  DIE *IMDie = TheCU->createAndAddDIE(Module.getTag(), *Context, Module);
   DIE *EntityDie;
   DIDescriptor Entity = resolve(Module.getEntity());
   if (Entity.isNameSpace())
@@ -810,7 +809,6 @@ void DwarfDebug::constructImportedEntityDIE(DwarfCompileUnit *TheCU,
   StringRef Name = Module.getName();
   if (!Name.empty())
     TheCU->addString(IMDie, dwarf::DW_AT_name, Name);
-  Context->addChild(IMDie);
 }
 
 // Emit all Dwarf sections that should come prior to the content. Create
@@ -1212,11 +1210,13 @@ static DebugLocEntry getDebugLocEntry(AsmPrinter *Asm,
     return DebugLocEntry(FLabel, SLabel, MLoc, Var, Unit);
   }
   if (MI->getOperand(0).isImm())
-    return DebugLocEntry(FLabel, SLabel, MI->getOperand(0).getImm(), Unit);
+    return DebugLocEntry(FLabel, SLabel, MI->getOperand(0).getImm(), Var, Unit);
   if (MI->getOperand(0).isFPImm())
-    return DebugLocEntry(FLabel, SLabel, MI->getOperand(0).getFPImm(), Unit);
+    return DebugLocEntry(FLabel, SLabel, MI->getOperand(0).getFPImm(),
+                         Var, Unit);
   if (MI->getOperand(0).isCImm())
-    return DebugLocEntry(FLabel, SLabel, MI->getOperand(0).getCImm(), Unit);
+    return DebugLocEntry(FLabel, SLabel, MI->getOperand(0).getCImm(),
+                         Var, Unit);
 
   llvm_unreachable("Unexpected 3 operand DBG_VALUE instruction!");
 }
@@ -1798,20 +1798,20 @@ void DwarfDebug::recordSourceLine(unsigned Line, unsigned Col, const MDNode *S,
 
 // Compute the size and offset of a DIE. The offset is relative to start of the
 // CU. It returns the offset after laying out the DIE.
-unsigned DwarfFile::computeSizeAndOffset(DIE *Die, unsigned Offset) {
+unsigned DwarfFile::computeSizeAndOffset(DIE &Die, unsigned Offset) {
   // Record the abbreviation.
-  assignAbbrevNumber(Die->getAbbrev());
+  assignAbbrevNumber(Die.getAbbrev());
 
   // Get the abbreviation for this DIE.
-  const DIEAbbrev &Abbrev = Die->getAbbrev();
+  const DIEAbbrev &Abbrev = Die.getAbbrev();
 
   // Set DIE offset
-  Die->setOffset(Offset);
+  Die.setOffset(Offset);
 
   // Start the size with the size of abbreviation code.
-  Offset += getULEB128Size(Die->getAbbrevNumber());
+  Offset += getULEB128Size(Die.getAbbrevNumber());
 
-  const SmallVectorImpl<DIEValue *> &Values = Die->getValues();
+  const SmallVectorImpl<DIEValue *> &Values = Die.getValues();
   const SmallVectorImpl<DIEAbbrevData> &AbbrevData = Abbrev.getData();
 
   // Size the DIE attribute values.
@@ -1820,20 +1820,20 @@ unsigned DwarfFile::computeSizeAndOffset(DIE *Die, unsigned Offset) {
     Offset += Values[i]->SizeOf(Asm, AbbrevData[i].getForm());
 
   // Get the children.
-  const std::vector<DIE *> &Children = Die->getChildren();
+  const auto &Children = Die.getChildren();
 
   // Size the DIE children if any.
   if (!Children.empty()) {
     assert(Abbrev.hasChildren() && "Children flag not set");
 
-    for (DIE *Child : Children)
-      Offset = computeSizeAndOffset(Child, Offset);
+    for (auto &Child : Children)
+      Offset = computeSizeAndOffset(*Child, Offset);
 
     // End of children marker.
     Offset += sizeof(int8_t);
   }
 
-  Die->setSize(Offset - Die->getOffset());
+  Die.setSize(Offset - Die.getOffset());
   return Offset;
 }
 
@@ -1853,7 +1853,7 @@ void DwarfFile::computeSizeAndOffsets() {
 
     // EndOffset here is CU-relative, after laying out
     // all of the CU DIE.
-    unsigned EndOffset = computeSizeAndOffset(TheU->getUnitDie(), Offset);
+    unsigned EndOffset = computeSizeAndOffset(*TheU->getUnitDie(), Offset);
     SecOffset += EndOffset;
   }
 }
@@ -1905,19 +1905,19 @@ void DwarfDebug::emitSectionLabels() {
 }
 
 // Recursively emits a debug information entry.
-void DwarfDebug::emitDIE(DIE *Die) {
+void DwarfDebug::emitDIE(DIE &Die) {
   // Get the abbreviation for this DIE.
-  const DIEAbbrev &Abbrev = Die->getAbbrev();
+  const DIEAbbrev &Abbrev = Die.getAbbrev();
 
   // Emit the code (index) for the abbreviation.
   if (Asm->isVerbose())
     Asm->OutStreamer.AddComment("Abbrev [" + Twine(Abbrev.getNumber()) +
-                                "] 0x" + Twine::utohexstr(Die->getOffset()) +
-                                ":0x" + Twine::utohexstr(Die->getSize()) + " " +
+                                "] 0x" + Twine::utohexstr(Die.getOffset()) +
+                                ":0x" + Twine::utohexstr(Die.getSize()) + " " +
                                 dwarf::TagString(Abbrev.getTag()));
   Asm->EmitULEB128(Abbrev.getNumber());
 
-  const SmallVectorImpl<DIEValue *> &Values = Die->getValues();
+  const SmallVectorImpl<DIEValue *> &Values = Die.getValues();
   const SmallVectorImpl<DIEAbbrevData> &AbbrevData = Abbrev.getData();
 
   // Emit the DIE attribute values.
@@ -1939,10 +1939,8 @@ void DwarfDebug::emitDIE(DIE *Die) {
 
   // Emit the DIE children if any.
   if (Abbrev.hasChildren()) {
-    const std::vector<DIE *> &Children = Die->getChildren();
-
-    for (DIE *Child : Children)
-      emitDIE(Child);
+    for (auto &Child : Die.getChildren())
+      emitDIE(*Child);
 
     Asm->OutStreamer.AddComment("End Of Children Mark");
     Asm->EmitInt8(0);
@@ -1966,7 +1964,7 @@ void DwarfFile::emitUnits(DwarfDebug *DD, const MCSymbol *ASectionSym) {
 
     TheU->emitHeader(ASectionSym);
 
-    DD->emitDIE(Die);
+    DD->emitDIE(*Die);
     Asm->OutStreamer.EmitLabel(TheU->getLabelEnd());
   }
 }

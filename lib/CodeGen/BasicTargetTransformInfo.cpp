@@ -34,7 +34,7 @@ class BasicTTI final : public ImmutablePass, public TargetTransformInfo {
   const TargetLoweringBase *getTLI() const { return TM->getTargetLowering(); }
 
 public:
-  BasicTTI() : ImmutablePass(ID), TM(0) {
+  BasicTTI() : ImmutablePass(ID), TM(nullptr) {
     llvm_unreachable("This pass cannot be directly constructed");
   }
 
@@ -424,12 +424,14 @@ unsigned BasicTTI::getMemoryOpCost(unsigned Opcode, Type *Src,
     // This is a vector load that legalizes to a larger type than the vector
     // itself. Unless the corresponding extending load or truncating store is
     // legal, then this will scalarize.
-    TargetLowering::LegalizeAction LA;
-    MVT MemVT = getTLI()->getSimpleValueType(Src, true);
-    if (Opcode == Instruction::Store)
-      LA = getTLI()->getTruncStoreAction(LT.second, MemVT);
-    else
-      LA = getTLI()->getLoadExtAction(ISD::EXTLOAD, MemVT);
+    TargetLowering::LegalizeAction LA = TargetLowering::Expand;
+    EVT MemVT = getTLI()->getValueType(Src, true);
+    if (MemVT.isSimple() && MemVT != MVT::Other) {
+      if (Opcode == Instruction::Store)
+        LA = getTLI()->getTruncStoreAction(LT.second, MemVT.getSimpleVT());
+      else
+        LA = getTLI()->getLoadExtAction(ISD::EXTLOAD, MemVT.getSimpleVT());
+    }
 
     if (LA != TargetLowering::Legal && LA != TargetLowering::Custom) {
       // This is a vector load/store for some illegal type that is scalarized.

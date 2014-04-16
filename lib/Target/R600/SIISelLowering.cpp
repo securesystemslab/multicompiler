@@ -119,6 +119,22 @@ SITargetLowering::SITargetLowering(TargetMachine &TM) :
   setOperationAction(ISD::SIGN_EXTEND, MVT::i64, Custom);
   setOperationAction(ISD::ZERO_EXTEND, MVT::i64, Custom);
 
+  setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::i1, Custom);
+  setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::v2i1, Custom);
+  setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::v4i1, Custom);
+
+  setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::i8, Custom);
+  setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::v2i8, Custom);
+  setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::v4i8, Custom);
+
+  setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::i16, Custom);
+  setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::v2i16, Custom);
+  setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::v4i16, Custom);
+
+  setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::i32, Custom);
+
+  setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::Other, Custom);
+
   setOperationAction(ISD::INTRINSIC_WO_CHAIN, MVT::Other, Custom);
   setOperationAction(ISD::INTRINSIC_WO_CHAIN, MVT::f32, Custom);
   setOperationAction(ISD::INTRINSIC_WO_CHAIN, MVT::v16i8, Custom);
@@ -126,19 +142,24 @@ SITargetLowering::SITargetLowering(TargetMachine &TM) :
 
   setOperationAction(ISD::INTRINSIC_VOID, MVT::Other, Custom);
 
-  setLoadExtAction(ISD::SEXTLOAD, MVT::i32, Expand);
+  setLoadExtAction(ISD::SEXTLOAD, MVT::i1, Promote);
   setLoadExtAction(ISD::SEXTLOAD, MVT::i8, Custom);
   setLoadExtAction(ISD::SEXTLOAD, MVT::i16, Custom);
-  setLoadExtAction(ISD::ZEXTLOAD, MVT::i32, Expand);
-  setLoadExtAction(ISD::ZEXTLOAD, MVT::i8, Custom);
-  setLoadExtAction(ISD::ZEXTLOAD, MVT::i16, Custom);
+  setLoadExtAction(ISD::SEXTLOAD, MVT::i32, Expand);
   setLoadExtAction(ISD::SEXTLOAD, MVT::v8i16, Expand);
   setLoadExtAction(ISD::SEXTLOAD, MVT::v16i16, Expand);
 
+  setLoadExtAction(ISD::ZEXTLOAD, MVT::i1, Promote);
+  setLoadExtAction(ISD::ZEXTLOAD, MVT::i8, Custom);
+  setLoadExtAction(ISD::ZEXTLOAD, MVT::i16, Custom);
+  setLoadExtAction(ISD::ZEXTLOAD, MVT::i32, Expand);
+
+  setLoadExtAction(ISD::EXTLOAD, MVT::i1, Promote);
   setLoadExtAction(ISD::EXTLOAD, MVT::i8, Custom);
   setLoadExtAction(ISD::EXTLOAD, MVT::i16, Custom);
   setLoadExtAction(ISD::EXTLOAD, MVT::i32, Expand);
   setLoadExtAction(ISD::EXTLOAD, MVT::f32, Expand);
+
   setTruncStoreAction(MVT::i32, MVT::i8, Custom);
   setTruncStoreAction(MVT::i32, MVT::i16, Custom);
   setTruncStoreAction(MVT::f64, MVT::f32, Expand);
@@ -146,6 +167,8 @@ SITargetLowering::SITargetLowering(TargetMachine &TM) :
   setTruncStoreAction(MVT::i128, MVT::i64, Expand);
   setTruncStoreAction(MVT::v8i32, MVT::v8i16, Expand);
   setTruncStoreAction(MVT::v16i32, MVT::v16i16, Expand);
+
+  setOperationAction(ISD::LOAD, MVT::i1, Custom);
 
   setOperationAction(ISD::GlobalAddress, MVT::i32, Custom);
   setOperationAction(ISD::GlobalAddress, MVT::i64, Custom);
@@ -224,7 +247,7 @@ bool SITargetLowering::shouldConvertConstantLoadToIntImm(const APInt &Imm,
 
 SDValue SITargetLowering::LowerParameter(SelectionDAG &DAG, EVT VT, EVT MemVT,
                                          SDLoc DL, SDValue Chain,
-                                         unsigned Offset) const {
+                                         unsigned Offset, bool Signed) const {
   MachineRegisterInfo &MRI = DAG.getMachineFunction().getRegInfo();
   PointerType *PtrTy = PointerType::get(VT.getTypeForEVT(*DAG.getContext()),
                                             AMDGPUAS::CONSTANT_ADDRESS);
@@ -232,7 +255,7 @@ SDValue SITargetLowering::LowerParameter(SelectionDAG &DAG, EVT VT, EVT MemVT,
                            MRI.getLiveInVirtReg(AMDGPU::SGPR0_SGPR1), MVT::i64);
   SDValue Ptr = DAG.getNode(ISD::ADD, DL, MVT::i64, BasePtr,
                                              DAG.getConstant(Offset, MVT::i64));
-  return DAG.getExtLoad(ISD::SEXTLOAD, DL, VT, Chain, Ptr,
+  return DAG.getExtLoad(Signed ? ISD::SEXTLOAD : ISD::ZEXTLOAD, DL, VT, Chain, Ptr,
                             MachinePointerInfo(UndefValue::get(PtrTy)), MemVT,
                             false, false, MemVT.getSizeInBits() >> 3);
 
@@ -340,7 +363,8 @@ SDValue SITargetLowering::LowerFormalArguments(
       // The first 36 bytes of the input buffer contains information about
       // thread group and global sizes.
       SDValue Arg = LowerParameter(DAG, VT, MemVT,  DL, DAG.getRoot(),
-                                   36 + VA.getLocMemOffset());
+                                   36 + VA.getLocMemOffset(),
+                                   Ins[i].Flags.isSExt());
       InVals.push_back(Arg);
       continue;
     }
@@ -533,23 +557,23 @@ SDValue SITargetLowering::LowerOperation(SDValue Op, SelectionDAG &DAG) const {
     switch (IntrinsicID) {
     default: return AMDGPUTargetLowering::LowerOperation(Op, DAG);
     case Intrinsic::r600_read_ngroups_x:
-      return LowerParameter(DAG, VT, VT, DL, DAG.getEntryNode(), 0);
+      return LowerParameter(DAG, VT, VT, DL, DAG.getEntryNode(), 0, false);
     case Intrinsic::r600_read_ngroups_y:
-      return LowerParameter(DAG, VT, VT, DL, DAG.getEntryNode(), 4);
+      return LowerParameter(DAG, VT, VT, DL, DAG.getEntryNode(), 4, false);
     case Intrinsic::r600_read_ngroups_z:
-      return LowerParameter(DAG, VT, VT, DL, DAG.getEntryNode(), 8);
+      return LowerParameter(DAG, VT, VT, DL, DAG.getEntryNode(), 8, false);
     case Intrinsic::r600_read_global_size_x:
-      return LowerParameter(DAG, VT, VT, DL, DAG.getEntryNode(), 12);
+      return LowerParameter(DAG, VT, VT, DL, DAG.getEntryNode(), 12, false);
     case Intrinsic::r600_read_global_size_y:
-      return LowerParameter(DAG, VT, VT, DL, DAG.getEntryNode(), 16);
+      return LowerParameter(DAG, VT, VT, DL, DAG.getEntryNode(), 16, false);
     case Intrinsic::r600_read_global_size_z:
-      return LowerParameter(DAG, VT, VT, DL, DAG.getEntryNode(), 20);
+      return LowerParameter(DAG, VT, VT, DL, DAG.getEntryNode(), 20, false);
     case Intrinsic::r600_read_local_size_x:
-      return LowerParameter(DAG, VT, VT, DL, DAG.getEntryNode(), 24);
+      return LowerParameter(DAG, VT, VT, DL, DAG.getEntryNode(), 24, false);
     case Intrinsic::r600_read_local_size_y:
-      return LowerParameter(DAG, VT, VT, DL, DAG.getEntryNode(), 28);
+      return LowerParameter(DAG, VT, VT, DL, DAG.getEntryNode(), 28, false);
     case Intrinsic::r600_read_local_size_z:
-      return LowerParameter(DAG, VT, VT, DL, DAG.getEntryNode(), 32);
+      return LowerParameter(DAG, VT, VT, DL, DAG.getEntryNode(), 32, false);
     case Intrinsic::r600_read_tgid_x:
       return CreateLiveInRegister(DAG, &AMDGPU::SReg_32RegClass,
                      AMDGPU::SReg_32RegClass.getRegister(NumUserSGPRs + 0), VT);

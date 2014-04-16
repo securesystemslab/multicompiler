@@ -14,6 +14,7 @@
 #define DEBUG_TYPE "arm64-isel"
 #include "ARM64TargetMachine.h"
 #include "MCTargetDesc/ARM64AddressingModes.h"
+#include "llvm/ADT/APSInt.h"
 #include "llvm/CodeGen/SelectionDAGISel.h"
 #include "llvm/IR/Function.h" // To access function attributes.
 #include "llvm/IR/GlobalValue.h"
@@ -179,6 +180,13 @@ private:
   bool isWorthFolding(SDValue V) const;
   bool SelectExtendedSHL(SDValue N, unsigned Size, SDValue &Offset,
                          SDValue &Imm);
+
+  template<unsigned RegWidth>
+  bool SelectCVTFixedPosOperand(SDValue N, SDValue &FixedPos) {
+    return SelectCVTFixedPosOperand(N, FixedPos, RegWidth);
+  }
+
+  bool SelectCVTFixedPosOperand(SDValue N, SDValue &FixedPos, unsigned Width);
 };
 } // end anonymous namespace
 
@@ -532,7 +540,7 @@ bool ARM64DAGToDAGISel::SelectArithExtendedRegister(SDValue N, SDValue &Reg,
     if (!CSD)
       return false;
     ShiftVal = CSD->getZExtValue();
-    if ((ShiftVal & 0x3) != ShiftVal)
+    if (ShiftVal > 4)
       return false;
 
     Ext = getExtendTypeForNode(N.getOperand(0));
@@ -720,8 +728,7 @@ bool ARM64DAGToDAGISel::SelectAddrModeRO(SDValue N, unsigned Size,
   // operation.  If yes, do not try to fold this node into the address
   // computation, since the computation will be kept.
   const SDNode *Node = N.getNode();
-  for (SDNode::use_iterator UI = Node->use_begin(), UE = Node->use_end();
-       UI != UE; ++UI) {
+  for (SDNode *UI : Node->uses()) {
     if (!isa<MemSDNode>(*UI))
       return false;
   }
@@ -1573,12 +1580,10 @@ static void getUsefulBits(SDValue Op, APInt &UsefulBits, unsigned Depth) {
   }
   APInt UsersUsefulBits(UsefulBits.getBitWidth(), 0);
 
-  for (SDNode::use_iterator UseIt = Op.getNode()->use_begin(),
-                            UseEnd = Op.getNode()->use_end();
-       UseIt != UseEnd; ++UseIt) {
+  for (SDNode *Node : Op.getNode()->uses()) {
     // A use cannot produce useful bits
     APInt UsefulBitsForUse = APInt(UsefulBits);
-    getUsefulBitsForUse(*UseIt, UsefulBitsForUse, Op, Depth);
+    getUsefulBitsForUse(Node, UsefulBitsForUse, Op, Depth);
     UsersUsefulBits |= UsefulBitsForUse;
   }
   // UsefulBits contains the produced bits that are meaningful for the
@@ -1752,6 +1757,50 @@ SDNode *ARM64DAGToDAGISel::SelectLIBM(SDNode *N) {
   }
 
   return CurDAG->getMachineNode(Opc, dl, VT, Ops);
+}
+
+bool
+ARM64DAGToDAGISel::SelectCVTFixedPosOperand(SDValue N, SDValue &FixedPos,
+                                              unsigned RegWidth) {
+  APFloat FVal(0.0);
+  if (ConstantFPSDNode *CN = dyn_cast<ConstantFPSDNode>(N))
+    FVal = CN->getValueAPF();
+  else if (LoadSDNode *LN = dyn_cast<LoadSDNode>(N)) {
+    // Some otherwise illegal constants are allowed in this case.
+    if (LN->getOperand(1).getOpcode() != ARM64ISD::ADDlow ||
+        !isa<ConstantPoolSDNode>(LN->getOperand(1)->getOperand(1)))
+      return false;
+
+    ConstantPoolSDNode *CN =
+        dyn_cast<ConstantPoolSDNode>(LN->getOperand(1)->getOperand(1));
+    FVal = cast<ConstantFP>(CN->getConstVal())->getValueAPF();
+  } else
+    return false;
+
+  // An FCVT[SU] instruction performs: convertToInt(Val * 2^fbits) where fbits
+  // is between 1 and 32 for a destination w-register, or 1 and 64 for an
+  // x-register.
+  //
+  // By this stage, we've detected (fp_to_[su]int (fmul Val, THIS_NODE)) so we
+  // want THIS_NODE to be 2^fbits. This is much easier to deal with using
+  // integers.
+  bool IsExact;
+
+  // fbits is between 1 and 64 in the worst-case, which means the fmul
+  // could have 2^64 as an actual operand. Need 65 bits of precision.
+  APSInt IntVal(65, true);
+  FVal.convertToInteger(IntVal, APFloat::rmTowardZero, &IsExact);
+
+  // N.b. isPowerOf2 also checks for > 0.
+  if (!IsExact || !IntVal.isPowerOf2()) return false;
+  unsigned FBits = IntVal.logBase2();
+
+  // Checks above should have guaranteed that we haven't lost information in
+  // finding FBits, but it must still be in range.
+  if (FBits == 0 || FBits > RegWidth) return false;
+
+  FixedPos = CurDAG->getTargetConstant(FBits, MVT::i32);
+  return true;
 }
 
 SDNode *ARM64DAGToDAGISel::Select(SDNode *Node) {

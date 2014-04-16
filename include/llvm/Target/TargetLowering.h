@@ -323,7 +323,7 @@ public:
   bool isTypeLegal(EVT VT) const {
     assert(!VT.isSimple() ||
            (unsigned)VT.getSimpleVT().SimpleTy < array_lengthof(RegClassForVT));
-    return VT.isSimple() && RegClassForVT[VT.getSimpleVT().SimpleTy] != 0;
+    return VT.isSimple() && RegClassForVT[VT.getSimpleVT().SimpleTy] != nullptr;
   }
 
   class ValueTypeActionImpl {
@@ -333,7 +333,7 @@ public:
 
   public:
     ValueTypeActionImpl() {
-      std::fill(ValueTypeActions, array_endof(ValueTypeActions), 0);
+      std::fill(std::begin(ValueTypeActions), std::end(ValueTypeActions), 0);
     }
 
     LegalizeTypeAction getTypeAction(MVT VT) const {
@@ -755,7 +755,7 @@ public:
   /// alignment error (trap) on the target machine.
   virtual bool allowsUnalignedMemoryAccesses(EVT,
                                              unsigned AddrSpace = 0,
-                                             bool * /*Fast*/ = 0) const {
+                                             bool * /*Fast*/ = nullptr) const {
     return false;
   }
 
@@ -1179,7 +1179,7 @@ public:
     int64_t      BaseOffs;
     bool         HasBaseReg;
     int64_t      Scale;
-    AddrMode() : BaseGV(0), BaseOffs(0), HasBaseReg(false), Scale(0) {}
+    AddrMode() : BaseGV(nullptr), BaseOffs(0), HasBaseReg(false), Scale(0) {}
   };
 
   /// Return true if the addressing mode represented by AM is legal for this
@@ -2089,7 +2089,7 @@ public:
       IsVarArg(isVarArg), IsInReg(isInReg), DoesNotReturn(doesNotReturn),
       IsReturnValueUsed(isReturnValueUsed), IsTailCall(isTailCall),
       NumFixedArgs(numFixedArgs), CallConv(callConv), Callee(callee),
-      Args(args), DAG(dag), DL(dl), CS(NULL) {}
+      Args(args), DAG(dag), DL(dl), CS(nullptr) {}
   };
 
   /// This function lowers an abstract call to a function into an actual call.
@@ -2173,7 +2173,7 @@ public:
   /// Returns a 0 terminated array of registers that can be safely used as
   /// scratch registers.
   virtual const MCPhysReg *getScratchRegisters(CallingConv::ID CC) const {
-    return NULL;
+    return nullptr;
   }
 
   /// This callback is used to prepare for a volatile or atomic load.
@@ -2234,7 +2234,7 @@ public:
   /// target does not support "fast" ISel.
   virtual FastISel *createFastISel(FunctionLoweringInfo &,
                                    const TargetLibraryInfo *) const {
-    return 0;
+    return nullptr;
   }
 
 
@@ -2308,7 +2308,7 @@ public:
     AsmOperandInfo(const InlineAsm::ConstraintInfo &info)
       : InlineAsm::ConstraintInfo(info),
         ConstraintType(TargetLowering::C_Unknown),
-        CallOperandVal(0), ConstraintVT(MVT::Other) {
+        CallOperandVal(nullptr), ConstraintVT(MVT::Other) {
     }
   };
 
@@ -2336,7 +2336,7 @@ public:
   /// Op, otherwise an empty SDValue can be passed.
   virtual void ComputeConstraintToUse(AsmOperandInfo &OpInfo,
                                       SDValue Op,
-                                      SelectionDAG *DAG = 0) const;
+                                      SelectionDAG *DAG = nullptr) const;
 
   /// Given a constraint, return the type of constraint it is for this target.
   virtual ConstraintType getConstraintType(const std::string &Constraint) const;
@@ -2374,6 +2374,24 @@ public:
                       std::vector<SDNode*> *Created) const;
   SDValue BuildUDIV(SDNode *N, SelectionDAG &DAG, bool IsAfterLegalization,
                       std::vector<SDNode*> *Created) const;
+
+  //===--------------------------------------------------------------------===//
+  // Legalization utility functions
+  //
+
+  /// Expand a MUL into two nodes.  One that computes the high bits of
+  /// the result and one that computes the low bits.
+  /// \param HiLoVT The value type to use for the Lo and Hi nodes.
+  /// \param LL Low bits of the LHS of the MUL.  You can use this parameter
+  ///        if you want to control how low bits are extracted from the LHS.
+  /// \param LH High bits of the LHS of the MUL.  See LL for meaning.
+  /// \param RL Low bits of the RHS of the MUL.  See LL for meaning
+  /// \param RH High bits of the RHS of the MUL.  See LL for meaning.
+  /// \returns true if the node has been expanded. false if it has not
+  bool expandMUL(SDNode *N, SDValue &Lo, SDValue &Hi, EVT HiLoVT,
+                 SelectionDAG &DAG, SDValue LL = SDValue(),
+		 SDValue LH = SDValue(), SDValue RL = SDValue(),
+		 SDValue RH = SDValue()) const;
 
   //===--------------------------------------------------------------------===//
   // Instruction Emitting Hooks

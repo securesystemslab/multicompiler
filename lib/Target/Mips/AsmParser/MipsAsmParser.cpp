@@ -756,6 +756,20 @@ public:
   /// getEndLoc - Get the location of the last token of this operand.
   SMLoc getEndLoc() const { return EndLoc; }
 
+  virtual ~MipsOperand() {
+    switch (Kind) {
+    case k_Immediate:
+      break;
+    case k_Memory:
+      delete Mem.Base;
+      break;
+    case k_PhysRegister:
+    case k_RegisterIndex:
+    case k_Token:
+      break;
+    }
+  }
+
   virtual void print(raw_ostream &OS) const {
     switch (Kind) {
     case k_Immediate:
@@ -906,10 +920,6 @@ bool MipsAsmParser::needsExpansion(MCInst &Inst) {
   case Mips::LoadImm32Reg:
   case Mips::LoadAddr32Imm:
   case Mips::LoadAddr32Reg:
-  case Mips::SUBi:
-  case Mips::SUBiu:
-  case Mips::DSUBi:
-  case Mips::DSUBiu:
     return true;
   default:
     return false;
@@ -925,30 +935,6 @@ void MipsAsmParser::expandInstruction(MCInst &Inst, SMLoc IDLoc,
     return expandLoadAddressImm(Inst, IDLoc, Instructions);
   case Mips::LoadAddr32Reg:
     return expandLoadAddressReg(Inst, IDLoc, Instructions);
-  case Mips::SUBi:
-    Instructions.push_back(MCInstBuilder(Mips::ADDi)
-                               .addReg(Inst.getOperand(0).getReg())
-                               .addReg(Inst.getOperand(1).getReg())
-                               .addImm(-Inst.getOperand(2).getImm()));
-    return;
-  case Mips::SUBiu:
-    Instructions.push_back(MCInstBuilder(Mips::ADDiu)
-                               .addReg(Inst.getOperand(0).getReg())
-                               .addReg(Inst.getOperand(1).getReg())
-                               .addImm(-Inst.getOperand(2).getImm()));
-    return;
-  case Mips::DSUBi:
-    Instructions.push_back(MCInstBuilder(Mips::DADDi)
-                               .addReg(Inst.getOperand(0).getReg())
-                               .addReg(Inst.getOperand(1).getReg())
-                               .addImm(-Inst.getOperand(2).getImm()));
-    return;
-  case Mips::DSUBiu:
-    Instructions.push_back(MCInstBuilder(Mips::DADDiu)
-                               .addReg(Inst.getOperand(0).getReg())
-                               .addReg(Inst.getOperand(1).getReg())
-                               .addImm(-Inst.getOperand(2).getImm()));
-    return;
   }
 }
 
@@ -1586,6 +1572,8 @@ bool MipsAsmParser::ParseRegister(unsigned &RegNo, SMLoc &StartLoc,
       RegNo = isGP64() ? Operand.getGPR64Reg() : Operand.getGPR32Reg();
     }
 
+    delete &Operand;
+
     return (RegNo == (unsigned)-1);
   }
 
@@ -1654,6 +1642,7 @@ MipsAsmParser::OperandMatchResultTy MipsAsmParser::parseMemOperand(
             SMLoc::getFromPointer(Parser.getTok().getLoc().getPointer() - 1);
 
         // Zero register assumed, add a memory operand with ZERO as its base.
+        // "Base" will be managed by k_Memory.
         MipsOperand *Base = MipsOperand::CreateGPRReg(
             0, getContext().getRegisterInfo(), S, E, *this);
         Operands.push_back(MipsOperand::CreateMem(Base, IdVal, S, E, *this));
@@ -1685,6 +1674,7 @@ MipsAsmParser::OperandMatchResultTy MipsAsmParser::parseMemOperand(
   // Replace the register operand with the memory operand.
   MipsOperand *op = static_cast<MipsOperand *>(Operands.back());
   // Remove the register from the operands.
+  // "op" will be managed by k_Memory.
   Operands.pop_back();
   // Add the memory operand.
   if (const MCBinaryExpr *BE = dyn_cast<MCBinaryExpr>(IdVal)) {

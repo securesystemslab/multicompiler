@@ -38,7 +38,7 @@ void MCTargetStreamer::emitAssignment(MCSymbol *Symbol, const MCExpr *Value) {}
 
 MCStreamer::MCStreamer(MCContext &Ctx)
     : Context(Ctx), EmitEHFrame(true), EmitDebugFrame(false),
-      CurrentW64UnwindInfo(0), LastSymbol(0) {
+      CurrentW64UnwindInfo(nullptr), LastSymbol(nullptr) {
   SectionStack.push_back(std::pair<MCSectionSubPair, MCSectionSubPair>());
 }
 
@@ -53,8 +53,8 @@ void MCStreamer::reset() {
   W64UnwindInfos.clear();
   EmitEHFrame = true;
   EmitDebugFrame = false;
-  CurrentW64UnwindInfo = 0;
-  LastSymbol = 0;
+  CurrentW64UnwindInfo = nullptr;
+  LastSymbol = nullptr;
   SectionStack.clear();
   SectionStack.push_back(std::pair<MCSectionSubPair, MCSectionSubPair>());
 }
@@ -203,7 +203,7 @@ MCSymbol *MCStreamer::getDwarfLineTableSymbol(unsigned CUID) {
 
 MCDwarfFrameInfo *MCStreamer::getCurrentFrameInfo() {
   if (FrameInfos.empty())
-    return 0;
+    return nullptr;
   return &FrameInfos.back();
 }
 
@@ -278,6 +278,10 @@ void MCStreamer::EmitCFIStartProcImpl(MCDwarfFrameInfo &Frame) {
 }
 
 void MCStreamer::RecordProcStart(MCDwarfFrameInfo &Frame) {
+  // Report an error if we haven't seen a symbol yet where we'd bind
+  // .cfi_startproc.
+  if (!LastSymbol)
+    report_fatal_error("No symbol to start a frame");
   Frame.Function = LastSymbol;
   // We need to create a local symbol to avoid relocations.
   Frame.Begin = getContext().CreateTempSymbol();
@@ -641,7 +645,7 @@ void MCStreamer::Finish() {
 
 MCSymbolData &MCStreamer::getOrCreateSymbolData(const MCSymbol *Symbol) {
   report_fatal_error("Not supported!");
-  return *(static_cast<MCSymbolData*>(0));
+  return *(static_cast<MCSymbolData*>(nullptr));
 }
 
 void MCStreamer::EmitAssignment(MCSymbol *Symbol, const MCExpr *Value) {

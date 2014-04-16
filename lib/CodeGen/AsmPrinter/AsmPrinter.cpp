@@ -62,7 +62,7 @@ STATISTIC(EmittedInsts, "Number of machine instrs printed");
 
 char AsmPrinter::ID = 0;
 
-typedef DenseMap<GCStrategy*,GCMetadataPrinter*> gcp_map_type;
+typedef DenseMap<GCStrategy*, std::unique_ptr<GCMetadataPrinter>> gcp_map_type;
 static gcp_map_type &getGCMap(void *&P) {
   if (P == 0)
     P = new gcp_map_type();
@@ -114,8 +114,6 @@ AsmPrinter::~AsmPrinter() {
   if (GCMetadataPrinters != 0) {
     gcp_map_type &GCMap = getGCMap(GCMetadataPrinters);
 
-    for (gcp_map_type::iterator I = GCMap.begin(), E = GCMap.end(); I != E; ++I)
-      delete I->second;
     delete &GCMap;
     GCMetadataPrinters = 0;
   }
@@ -210,7 +208,7 @@ bool AsmPrinter::doInitialization(Module &M) {
   GCModuleInfo *MI = getAnalysisIfAvailable<GCModuleInfo>();
   assert(MI && "AsmPrinter didn't require GCModuleInfo?");
   for (GCModuleInfo::iterator I = MI->begin(), E = MI->end(); I != E; ++I)
-    if (GCMetadataPrinter *MP = GetOrCreateGCPrinter(*I))
+    if (GCMetadataPrinter *MP = GetOrCreateGCPrinter(**I))
       MP->beginAssembly(*this);
 
   // Emit module-level inline asm if it exists.
@@ -966,7 +964,7 @@ bool AsmPrinter::doFinalization(Module &M) {
   GCModuleInfo *MI = getAnalysisIfAvailable<GCModuleInfo>();
   assert(MI && "AsmPrinter didn't require GCModuleInfo?");
   for (GCModuleInfo::iterator I = MI->end(), E = MI->begin(); I != E; )
-    if (GCMetadataPrinter *MP = GetOrCreateGCPrinter(*--I))
+    if (GCMetadataPrinter *MP = GetOrCreateGCPrinter(**--I))
       MP->finishAssembly(*this);
 
   // Emit llvm.ident metadata in an '.ident' directive.
@@ -2231,25 +2229,25 @@ isBlockOnlyReachableByFallthrough(const MachineBasicBlock *MBB) const {
 
 
 
-GCMetadataPrinter *AsmPrinter::GetOrCreateGCPrinter(GCStrategy *S) {
-  if (!S->usesMetadata())
+GCMetadataPrinter *AsmPrinter::GetOrCreateGCPrinter(GCStrategy &S) {
+  if (!S.usesMetadata())
     return 0;
 
   gcp_map_type &GCMap = getGCMap(GCMetadataPrinters);
-  gcp_map_type::iterator GCPI = GCMap.find(S);
+  gcp_map_type::iterator GCPI = GCMap.find(&S);
   if (GCPI != GCMap.end())
-    return GCPI->second;
+    return GCPI->second.get();
 
-  const char *Name = S->getName().c_str();
+  const char *Name = S.getName().c_str();
 
   for (GCMetadataPrinterRegistry::iterator
          I = GCMetadataPrinterRegistry::begin(),
          E = GCMetadataPrinterRegistry::end(); I != E; ++I)
     if (strcmp(Name, I->getName()) == 0) {
-      GCMetadataPrinter *GMP = I->instantiate();
-      GMP->S = S;
-      GCMap.insert(std::make_pair(S, GMP));
-      return GMP;
+      std::unique_ptr<GCMetadataPrinter> GMP = I->instantiate();
+      GMP->S = &S;
+      auto IterBool = GCMap.insert(std::make_pair(&S, std::move(GMP)));
+      return IterBool.first->second.get();
     }
 
   report_fatal_error("no GCMetadataPrinter registered for GC: " + Twine(Name));

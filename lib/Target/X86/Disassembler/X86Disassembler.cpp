@@ -74,9 +74,11 @@ static bool translateInstruction(MCInst &target,
                                 InternalInstruction &source,
                                 const MCDisassembler *Dis);
 
-X86GenericDisassembler::X86GenericDisassembler(const MCSubtargetInfo &STI,
-                                               const MCInstrInfo *MII)
-  : MCDisassembler(STI), MII(MII) {
+X86GenericDisassembler::X86GenericDisassembler(
+                                         const MCSubtargetInfo &STI,
+                                         MCContext &Ctx,
+                                         std::unique_ptr<const MCInstrInfo> MII)
+  : MCDisassembler(STI, Ctx), MII(std::move(MII)) {
   switch (STI.getFeatureBits() &
           (X86::Mode16Bit | X86::Mode32Bit | X86::Mode64Bit)) {
   case X86::Mode16Bit:
@@ -91,10 +93,6 @@ X86GenericDisassembler::X86GenericDisassembler(const MCSubtargetInfo &STI,
   default:
     llvm_unreachable("Invalid CPU mode");
   }
-}
-
-X86GenericDisassembler::~X86GenericDisassembler() {
-  delete MII;
 }
 
 /// regionReader - a callback function that wraps the readByte method from
@@ -147,7 +145,7 @@ X86GenericDisassembler::getInstruction(MCInst &instr,
                               (const void*)&region,
                               loggerFn,
                               (void*)&vStream,
-                              (const void*)MII,
+                              (const void*)MII.get(),
                               address,
                               fMode);
 
@@ -803,9 +801,10 @@ static bool translateInstruction(MCInst &mcInst,
 }
 
 static MCDisassembler *createX86Disassembler(const Target &T,
-                                             const MCSubtargetInfo &STI) {
-  return new X86Disassembler::X86GenericDisassembler(STI,
-                                                     T.createMCInstrInfo());
+                                             const MCSubtargetInfo &STI,
+                                             MCContext &Ctx) {
+  std::unique_ptr<const MCInstrInfo> MII(T.createMCInstrInfo());
+  return new X86Disassembler::X86GenericDisassembler(STI, Ctx, std::move(MII));
 }
 
 extern "C" void LLVMInitializeX86Disassembler() { 

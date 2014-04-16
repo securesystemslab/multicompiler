@@ -1,4 +1,4 @@
-//===-- BlockFrequencyImpl.h - Block Frequency Implementation --*- C++ -*--===//
+//==- BlockFrequencyInfoImpl.h - Block Frequency Implementation -*- C++ -*-===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -7,12 +7,12 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// Shared implementation of BlockFrequency for IR and Machine Instructions.
+// Shared implementation of BlockFrequencyInfo for IR and Machine Instructions.
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LLVM_ANALYSIS_BLOCKFREQUENCYIMPL_H
-#define LLVM_ANALYSIS_BLOCKFREQUENCYIMPL_H
+#ifndef LLVM_ANALYSIS_BLOCKFREQUENCYINFOIMPL_H
+#define LLVM_ANALYSIS_BLOCKFREQUENCYINFOIMPL_H
 
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/PostOrderIterator.h"
@@ -29,20 +29,40 @@
 namespace llvm {
 
 
+class BranchProbabilityInfo;
 class BlockFrequencyInfo;
+class MachineBranchProbabilityInfo;
 class MachineBlockFrequencyInfo;
 
-/// BlockFrequencyImpl implements block frequency algorithm for IR and
+namespace bfi_detail {
+template <class BlockT> struct TypeMap {};
+template <> struct TypeMap<BasicBlock> {
+  typedef BasicBlock BlockT;
+  typedef Function FunctionT;
+  typedef BranchProbabilityInfo BranchProbabilityInfoT;
+};
+template <> struct TypeMap<MachineBasicBlock> {
+  typedef MachineBasicBlock BlockT;
+  typedef MachineFunction FunctionT;
+  typedef MachineBranchProbabilityInfo BranchProbabilityInfoT;
+};
+}
+
+/// BlockFrequencyInfoImpl implements block frequency algorithm for IR and
 /// Machine Instructions. Algorithm starts with value ENTRY_FREQ
 /// for the entry block and then propagates frequencies using branch weights
 /// from (Machine)BranchProbabilityInfo. LoopInfo is not required because
 /// algorithm can find "backedges" by itself.
-template<class BlockT, class FunctionT, class BlockProbInfoT>
-class BlockFrequencyImpl {
+template <class BT>
+class BlockFrequencyInfoImpl {
+  typedef typename bfi_detail::TypeMap<BT>::BlockT BlockT;
+  typedef typename bfi_detail::TypeMap<BT>::FunctionT FunctionT;
+  typedef typename bfi_detail::TypeMap<BT>::BranchProbabilityInfoT
+  BranchProbabilityInfoT;
 
   DenseMap<const BlockT *, BlockFrequency> Freqs;
 
-  BlockProbInfoT *BPI;
+  BranchProbabilityInfoT *BPI;
 
   FunctionT *Fn;
 
@@ -137,13 +157,13 @@ class BlockFrequencyImpl {
       PE = GraphTraits< Inverse<BlockT *> >::child_end(BB);
 
     if (PI == PE)
-      return 0;
+      return nullptr;
 
     BlockT *Pred = *PI;
 
     ++PI;
     if (PI != PE)
-      return 0;
+      return nullptr;
 
     return Pred;
   }
@@ -267,9 +287,9 @@ class BlockFrequencyImpl {
   friend class BlockFrequencyInfo;
   friend class MachineBlockFrequencyInfo;
 
-  BlockFrequencyImpl() { }
+  BlockFrequencyInfoImpl() { }
 
-  void doFunction(FunctionT *fn, BlockProbInfoT *bpi) {
+  void doFunction(FunctionT *fn, BranchProbabilityInfoT *bpi) {
     Fn = fn;
     BPI = bpi;
 
@@ -293,7 +313,7 @@ class BlockFrequencyImpl {
     // Travel over all blocks in postorder.
     for (pot_iterator I = pot_begin(), E = pot_end(); I != E; ++I) {
       BlockT *BB = *I;
-      BlockT *LastTail = 0;
+      BlockT *LastTail = nullptr;
       DEBUG(dbgs() << "POT: " << getBlockName(BB) << "\n");
 
       for (typename GT::ChildIteratorType

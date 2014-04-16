@@ -160,6 +160,10 @@ def HasMips32    :    Predicate<"Subtarget.hasMips32()">,
                       AssemblerPredicate<"FeatureMips32">;
 def HasMips32r2  :    Predicate<"Subtarget.hasMips32r2()">,
                       AssemblerPredicate<"FeatureMips32r2">;
+def IsGP64bit    :    Predicate<"Subtarget.isGP64bit()">,
+                      AssemblerPredicate<"FeatureGP64Bit">;
+def IsGP32bit    :    Predicate<"!Subtarget.isGP64bit()">,
+                      AssemblerPredicate<"!FeatureGP64Bit">;
 def HasMips64    :    Predicate<"Subtarget.hasMips64()">,
                       AssemblerPredicate<"FeatureMips64">;
 def IsGP32       :    Predicate<"!Subtarget.isGP64()">,
@@ -312,6 +316,10 @@ def MipsInvertedImmoperand : AsmOperandClass {
 }
 
 def InvertedImOperand : Operand<i32> {
+  let ParserMatchClass = MipsInvertedImmoperand;
+}
+
+def InvertedImOperand64 : Operand<i64> {
   let ParserMatchClass = MipsInvertedImmoperand;
 }
 
@@ -1224,9 +1232,14 @@ def  : InstAlias<"tltu $rs, $rt", (TLTU GPR32Opnd:$rs, GPR32Opnd:$rt, 0), 1>;
 def  : InstAlias<"tne $rs, $rt", (TNE GPR32Opnd:$rs, GPR32Opnd:$rt, 0), 1>;
 def : InstAlias<"sub, $rd, $rs, $imm",
                 (ADDi GPR32Opnd:$rd, GPR32Opnd:$rs, InvertedImOperand:$imm)>;
+def : InstAlias<"sub $rs, $imm",
+                (ADDi GPR32Opnd:$rs, GPR32Opnd:$rs, InvertedImOperand:$imm),
+                0>;
 def : InstAlias<"subu, $rd, $rs, $imm",
                 (ADDiu GPR32Opnd:$rd, GPR32Opnd:$rs, InvertedImOperand:$imm)>;
-
+def : InstAlias<"subu $rs, $imm",
+                (ADDiu GPR32Opnd:$rs, GPR32Opnd:$rs, InvertedImOperand:$imm),
+                0>;
 //===----------------------------------------------------------------------===//
 // Assembler Pseudo Instructions
 //===----------------------------------------------------------------------===//

@@ -86,6 +86,30 @@ R600TargetLowering::R600TargetLowering(TargetMachine &TM) :
   setOperationAction(ISD::SELECT, MVT::v4i32, Expand);
   setOperationAction(ISD::SELECT, MVT::v4f32, Expand);
 
+  // Expand sign extension of vectors
+  if (!Subtarget->hasBFE())
+    setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::i1, Expand);
+
+  setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::v2i1, Expand);
+  setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::v4i1, Expand);
+
+  if (!Subtarget->hasBFE())
+    setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::i8, Expand);
+  setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::v2i8, Expand);
+  setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::v4i8, Expand);
+
+  if (!Subtarget->hasBFE())
+    setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::i16, Expand);
+  setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::v2i16, Expand);
+  setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::v4i16, Expand);
+
+  setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::i32, Legal);
+  setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::v2i32, Expand);
+  setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::v4i32, Expand);
+
+  setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::Other, Expand);
+
+
   // Legalize loads and stores to the private address space.
   setOperationAction(ISD::LOAD, MVT::i32, Custom);
   setOperationAction(ISD::LOAD, MVT::v2i32, Custom);
@@ -1233,8 +1257,8 @@ SDValue R600TargetLowering::LowerLOAD(SDValue Op, SelectionDAG &DAG) const
       ((LoadNode->getExtensionType() == ISD::NON_EXTLOAD) ||
        (LoadNode->getExtensionType() == ISD::ZEXTLOAD))) {
     SDValue Result;
-    if (isa<ConstantExpr>(LoadNode->getSrcValue()) ||
-        isa<Constant>(LoadNode->getSrcValue()) ||
+    if (isa<ConstantExpr>(LoadNode->getMemOperand()->getValue()) ||
+        isa<Constant>(LoadNode->getMemOperand()->getValue()) ||
         isa<ConstantSDNode>(Ptr)) {
       SDValue Slots[4];
       for (unsigned i = 0; i < 4; i++) {
@@ -1394,7 +1418,12 @@ SDValue R600TargetLowering::LowerFormalArguments(
 
     // The first 36 bytes of the input buffer contains information about
     // thread group and global sizes.
-    SDValue Arg = DAG.getExtLoad(ISD::SEXTLOAD, DL, VT, Chain,
+
+    // FIXME: This should really check the extload type, but the handling of
+    // extload vecto parameters seems to be broken.
+    //ISD::LoadExtType Ext = Ins[i].Flags.isSExt() ? ISD::SEXTLOAD : ISD::ZEXTLOAD;
+    ISD::LoadExtType Ext = ISD::SEXTLOAD;
+    SDValue Arg = DAG.getExtLoad(Ext, DL, VT, Chain,
                                  DAG.getConstant(36 + VA.getLocMemOffset(), MVT::i32),
                                  MachinePointerInfo(UndefValue::get(PtrTy)),
                                  MemVT, false, false, 4);

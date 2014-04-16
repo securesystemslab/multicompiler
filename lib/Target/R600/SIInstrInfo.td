@@ -196,15 +196,17 @@ class SOP2_SHIFT_64 <bits<7> op, string opName, list<dag> pattern> : SOP2 <
   opName#" $dst, $src0, $src1", pattern
 >;
 
-class SOPC_32 <bits<7> op, string opName, list<dag> pattern> : SOPC <
-  op, (outs SCCReg:$dst), (ins SSrc_32:$src0, SSrc_32:$src1),
-  opName#" $dst, $src0, $src1", pattern
->;
 
-class SOPC_64 <bits<7> op, string opName, list<dag> pattern> : SOPC <
-  op, (outs SCCReg:$dst), (ins SSrc_64:$src0, SSrc_64:$src1),
-  opName#" $dst, $src0, $src1", pattern
->;
+class SOPC_Helper <bits<7> op, RegisterClass rc, ValueType vt,
+                    string opName, PatLeaf cond> : SOPC <
+  op, (outs SCCReg:$dst), (ins rc:$src0, rc:$src1),
+  opName#" $dst, $src0, $src1", []>;
+
+class SOPC_32<bits<7> op, string opName, PatLeaf cond = COND_NULL>
+  : SOPC_Helper<op, SSrc_32, i32, opName, cond>;
+
+class SOPC_64<bits<7> op, string opName, PatLeaf cond = COND_NULL>
+  : SOPC_Helper<op, SSrc_64, i64, opName, cond>;
 
 class SOPK_32 <bits<5> op, string opName, list<dag> pattern> : SOPK <
   op, (outs SReg_32:$dst), (ins i16imm:$src0),
@@ -220,7 +222,7 @@ multiclass SMRD_Helper <bits<5> op, string asm, RegisterClass baseClass,
                         RegisterClass dstClass> {
   def _IMM : SMRD <
     op, 1, (outs dstClass:$dst),
-    (ins baseClass:$sbase, i32imm:$offset),
+    (ins baseClass:$sbase, u32imm:$offset),
     asm#" $dst, $sbase, $offset", []
   >;
 
@@ -402,7 +404,7 @@ class DS_1A <bits<8> op, dag outs, dag ins, string asm, list<dag> pat> :
 class DS_Load_Helper <bits<8> op, string asm, RegisterClass regClass> : DS_1A <
   op,
   (outs regClass:$vdst),
-  (ins i1imm:$gds, VReg_32:$addr, i16imm:$offset),
+  (ins i1imm:$gds, VReg_32:$addr, u16imm:$offset),
   asm#" $vdst, $addr, $offset, [M0]",
   []> {
   let data0 = 0;
@@ -414,7 +416,7 @@ class DS_Load_Helper <bits<8> op, string asm, RegisterClass regClass> : DS_1A <
 class DS_Load2_Helper <bits<8> op, string asm, RegisterClass regClass> : DS <
   op,
   (outs regClass:$vdst),
-  (ins i1imm:$gds, VReg_32:$addr, i8imm:$offset0, i8imm:$offset1),
+  (ins i1imm:$gds, VReg_32:$addr, u8imm:$offset0, u8imm:$offset1),
   asm#" $gds, $vdst, $addr, $offset0, $offset1, [M0]",
   []> {
   let data0 = 0;
@@ -426,7 +428,7 @@ class DS_Load2_Helper <bits<8> op, string asm, RegisterClass regClass> : DS <
 class DS_Store_Helper <bits<8> op, string asm, RegisterClass regClass> : DS_1A <
   op,
   (outs),
-  (ins i1imm:$gds, VReg_32:$addr, regClass:$data0, i16imm:$offset),
+  (ins i1imm:$gds, VReg_32:$addr, regClass:$data0, u16imm:$offset),
   asm#" $addr, $data0, $offset [M0]",
   []> {
   let data1 = 0;
@@ -438,7 +440,7 @@ class DS_Store_Helper <bits<8> op, string asm, RegisterClass regClass> : DS_1A <
 class DS_Store2_Helper <bits<8> op, string asm, RegisterClass regClass> : DS_1A <
   op,
   (outs),
-  (ins i1imm:$gds, VReg_32:$addr, regClass:$data0, i8imm:$offset0, i8imm:$offset1),
+  (ins i1imm:$gds, VReg_32:$addr, regClass:$data0, u8imm:$offset0, u8imm:$offset1),
   asm#" $addr, $data0, $data1, $offset0, $offset1 [M0]",
   []> {
   let mayStore = 1;
@@ -449,7 +451,7 @@ class DS_Store2_Helper <bits<8> op, string asm, RegisterClass regClass> : DS_1A 
 class DS_1A1D_RET <bits<8> op, string asm, RegisterClass rc> : DS_1A <
   op,
   (outs rc:$vdst),
-  (ins i1imm:$gds, VReg_32:$addr, VReg_32:$data0, i16imm:$offset),
+  (ins i1imm:$gds, VReg_32:$addr, VReg_32:$data0, u16imm:$offset),
   asm#" $vdst, $addr, $data0, $offset, [M0]",
   []> {
 
@@ -461,7 +463,7 @@ class DS_1A1D_RET <bits<8> op, string asm, RegisterClass rc> : DS_1A <
 class MTBUF_Store_Helper <bits<3> op, string asm, RegisterClass regClass> : MTBUF <
   op,
   (outs),
-  (ins regClass:$vdata, i16imm:$offset, i1imm:$offen, i1imm:$idxen, i1imm:$glc,
+  (ins regClass:$vdata, u16imm:$offset, i1imm:$offen, i1imm:$idxen, i1imm:$glc,
    i1imm:$addr64, i8imm:$dfmt, i8imm:$nfmt, VReg_32:$vaddr,
    SReg_128:$srsrc, i1imm:$slc, i1imm:$tfe, SSrc_32:$soffset),
   asm#" $vdata, $offset, $offen, $idxen, $glc, $addr64, $dfmt,"
@@ -480,7 +482,7 @@ multiclass MUBUF_Load_Helper <bits<7> op, string asm, RegisterClass regClass> {
       let offen = 0, idxen = 0 in {
         def _OFFSET : MUBUF <op, (outs regClass:$vdata),
                              (ins SReg_128:$srsrc, VReg_32:$vaddr,
-                             i16imm:$offset, SSrc_32:$soffset, i1imm:$glc,
+                             u16imm:$offset, SSrc_32:$soffset, i1imm:$glc,
                              i1imm:$slc, i1imm:$tfe),
                              asm#" $vdata, $srsrc + $offset + $soffset, glc=$glc, slc=$slc, tfe=$tfe", []>;
       }
@@ -496,7 +498,7 @@ multiclass MUBUF_Load_Helper <bits<7> op, string asm, RegisterClass regClass> {
       let offen = 0, idxen = 1 in {
         def _IDXEN  : MUBUF <op, (outs regClass:$vdata),
                              (ins SReg_128:$srsrc, VReg_32:$vaddr,
-                             i16imm:$offset, SSrc_32:$soffset, i1imm:$glc,
+                             u16imm:$offset, SSrc_32:$soffset, i1imm:$glc,
                              i1imm:$slc, i1imm:$tfe),
                              asm#" $vdata, $srsrc[$vaddr] + $offset + $soffset, glc=$glc, slc=$slc, tfe=$tfe", []>;
       }
@@ -512,7 +514,7 @@ multiclass MUBUF_Load_Helper <bits<7> op, string asm, RegisterClass regClass> {
 
     let offen = 0, idxen = 0, addr64 = 1, glc = 0, slc = 0, tfe = 0, soffset = 128 /* ZERO */ in {
       def _ADDR64 : MUBUF <op, (outs regClass:$vdata),
-                           (ins SReg_128:$srsrc, VReg_64:$vaddr, i16imm:$offset),
+                           (ins SReg_128:$srsrc, VReg_64:$vaddr, u16imm:$offset),
                            asm#" $vdata, $srsrc + $vaddr + $offset", []>;
     }
   }
@@ -520,7 +522,7 @@ multiclass MUBUF_Load_Helper <bits<7> op, string asm, RegisterClass regClass> {
 
 class MUBUF_Store_Helper <bits<7> op, string name, RegisterClass vdataClass> :
     MUBUF <op, (outs), (ins vdataClass:$vdata, SReg_128:$srsrc, VReg_64:$vaddr,
-                            i16imm:$offset),
+                            u16imm:$offset),
           name#" $vdata, $srsrc + $vaddr + $offset",
          []> {
 
@@ -541,7 +543,7 @@ class MUBUF_Store_Helper <bits<7> op, string name, RegisterClass vdataClass> :
 class MTBUF_Load_Helper <bits<3> op, string asm, RegisterClass regClass> : MTBUF <
   op,
   (outs regClass:$dst),
-  (ins i16imm:$offset, i1imm:$offen, i1imm:$idxen, i1imm:$glc, i1imm:$addr64,
+  (ins u16imm:$offset, i1imm:$offen, i1imm:$idxen, i1imm:$glc, i1imm:$addr64,
        i8imm:$dfmt, i8imm:$nfmt, VReg_32:$vaddr, SReg_128:$srsrc,
        i1imm:$slc, i1imm:$tfe, SSrc_32:$soffset),
   asm#" $dst, $offset, $offen, $idxen, $glc, $addr64, $dfmt,"

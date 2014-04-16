@@ -9,6 +9,7 @@
 
 #include "llvm/MC/MCDwarf.h"
 #include "llvm/ADT/Hashing.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/Twine.h"
 #include "llvm/Config/config.h"
@@ -121,7 +122,7 @@ EmitDwarfLineTable(MCStreamer *MCOS, const MCSection *Section,
   unsigned Flags = DWARF2_LINE_DEFAULT_IS_STMT ? DWARF2_FLAG_IS_STMT : 0;
   unsigned Isa = 0;
   unsigned Discriminator = 0;
-  MCSymbol *LastLabel = NULL;
+  MCSymbol *LastLabel = nullptr;
 
   // Loop through each MCLineEntry and encode the dwarf line number table.
   for (auto it = LineEntries.begin(),
@@ -727,28 +728,24 @@ static void EmitGenDwarfInfo(MCStreamer *MCOS,
   // Third part: the list of label DIEs.
 
   // Loop on saved info for dwarf labels and create the DIEs for them.
-  const std::vector<const MCGenDwarfLabelEntry *> &Entries =
-    MCOS->getContext().getMCGenDwarfLabelEntries();
-  for (std::vector<const MCGenDwarfLabelEntry *>::const_iterator it =
-       Entries.begin(), ie = Entries.end(); it != ie;
-       ++it) {
-    const MCGenDwarfLabelEntry *Entry = *it;
-
+  const std::vector<MCGenDwarfLabelEntry> &Entries =
+      MCOS->getContext().getMCGenDwarfLabelEntries();
+  for (const auto &Entry : Entries) {
     // The DW_TAG_label DIE abbrev (2).
     MCOS->EmitULEB128IntValue(2);
 
     // AT_name, of the label without any leading underbar.
-    MCOS->EmitBytes(Entry->getName());
+    MCOS->EmitBytes(Entry.getName());
     MCOS->EmitIntValue(0, 1); // NULL byte to terminate the string.
 
     // AT_decl_file, index into the file table.
-    MCOS->EmitIntValue(Entry->getFileNumber(), 4);
+    MCOS->EmitIntValue(Entry.getFileNumber(), 4);
 
     // AT_decl_line, source line number.
-    MCOS->EmitIntValue(Entry->getLineNumber(), 4);
+    MCOS->EmitIntValue(Entry.getLineNumber(), 4);
 
     // AT_low_pc, start address of the label.
-    const MCExpr *AT_low_pc = MCSymbolRefExpr::Create(Entry->getLabel(),
+    const MCExpr *AT_low_pc = MCSymbolRefExpr::Create(Entry.getLabel(),
                                              MCSymbolRefExpr::VK_None, context);
     MCOS->EmitValue(AT_low_pc, AddrSize);
 
@@ -760,14 +757,6 @@ static void EmitGenDwarfInfo(MCStreamer *MCOS,
 
     // Add the NULL DIE terminating the DW_TAG_unspecified_parameters DIE's.
     MCOS->EmitIntValue(0, 1);
-  }
-  // Deallocate the MCGenDwarfLabelEntry classes that saved away the info
-  // for the dwarf labels.
-  for (std::vector<const MCGenDwarfLabelEntry *>::const_iterator it =
-       Entries.begin(), ie = Entries.end(); it != ie;
-       ++it) {
-    const MCGenDwarfLabelEntry *Entry = *it;
-    delete Entry;
   }
 
   // Add the NULL DIE terminating the Compile Unit DIE's.
@@ -790,8 +779,8 @@ void MCGenDwarfInfo::Emit(MCStreamer *MCOS) {
   MCSymbol *LineSectionSymbol = nullptr;
   if (CreateDwarfSectionSymbols)
     LineSectionSymbol = MCOS->getDwarfLineTableSymbol(0);
-  MCSymbol *AbbrevSectionSymbol = NULL;
-  MCSymbol *InfoSectionSymbol = NULL;
+  MCSymbol *AbbrevSectionSymbol = nullptr;
+  MCSymbol *InfoSectionSymbol = nullptr;
   MCOS->SwitchSection(context.getObjectFileInfo()->getDwarfInfoSection());
   if (CreateDwarfSectionSymbols) {
     InfoSectionSymbol = context.CreateTempSymbol();
@@ -856,9 +845,8 @@ void MCGenDwarfLabelEntry::Make(MCSymbol *Symbol, MCStreamer *MCOS,
   MCOS->EmitLabel(Label);
 
   // Create and entry for the info and add it to the other entries.
-  MCGenDwarfLabelEntry *Entry =
-    new MCGenDwarfLabelEntry(Name, FileNumber, LineNumber, Label);
-  MCOS->getContext().addMCGenDwarfLabelEntry(Entry);
+  MCOS->getContext().addMCGenDwarfLabelEntry(
+      MCGenDwarfLabelEntry(Name, FileNumber, LineNumber, Label));
 }
 
 static int getDataAlignmentFactor(MCStreamer &streamer) {
@@ -894,7 +882,7 @@ static unsigned getSizeForEncoding(MCStreamer &streamer,
 
 static void EmitFDESymbol(MCStreamer &streamer, const MCSymbol &symbol,
                        unsigned symbolEncoding, bool isEH,
-                       const char *comment = 0) {
+                       const char *comment = nullptr) {
   MCContext &context = streamer.getContext();
   const MCAsmInfo *asmInfo = context.getAsmInfo();
   const MCExpr *v = asmInfo->getExprForFDESymbol(&symbol,
@@ -929,7 +917,7 @@ namespace {
   public:
     FrameEmitterImpl(bool usingCFI, bool isEH)
       : CFAOffset(0), CIENum(0), UsingCFI(usingCFI), IsEH(isEH),
-        SectionStart(0) {}
+        SectionStart(nullptr) {}
 
     void setSectionStart(const MCSymbol *Label) { SectionStart = Label; }
 
@@ -1356,7 +1344,7 @@ const MCSymbol &FrameEmitterImpl::EmitCIE(MCStreamer &streamer,
   if (!IsSimple) {
     const std::vector<MCCFIInstruction> &Instructions =
         MAI->getInitialFrameState();
-    EmitCFIInstructions(streamer, Instructions, NULL);
+    EmitCFIInstructions(streamer, Instructions, nullptr);
   }
 
   // Padding
@@ -1443,8 +1431,12 @@ MCSymbol *FrameEmitterImpl::EmitFDE(MCStreamer &streamer,
 
 namespace {
   struct CIEKey {
-    static const CIEKey getEmptyKey() { return CIEKey(0, 0, -1, false, false); }
-    static const CIEKey getTombstoneKey() { return CIEKey(0, -1, 0, false, false); }
+    static const CIEKey getEmptyKey() {
+      return CIEKey(nullptr, 0, -1, false, false);
+    }
+    static const CIEKey getTombstoneKey() {
+      return CIEKey(nullptr, -1, 0, false, false);
+    }
 
     CIEKey(const MCSymbol* Personality_, unsigned PersonalityEncoding_,
            unsigned LsdaEncoding_, bool IsSignalFrame_, bool IsSimple_) :
@@ -1526,10 +1518,10 @@ void MCDwarfFrameEmitter::Emit(MCStreamer &Streamer, MCAsmBackend *MAB,
   Streamer.EmitLabel(SectionStart);
   Emitter.setSectionStart(SectionStart);
 
-  MCSymbol *FDEEnd = NULL;
+  MCSymbol *FDEEnd = nullptr;
   DenseMap<CIEKey, const MCSymbol*> CIEStarts;
 
-  const MCSymbol *DummyDebugKey = NULL;
+  const MCSymbol *DummyDebugKey = nullptr;
   NeedsEHFrameSection = !MOFI->getSupportsCompactUnwindWithoutEHFrame();
   for (unsigned i = 0, n = FrameArray.size(); i < n; ++i) {
     const MCDwarfFrameInfo &Frame = FrameArray[i];
@@ -1537,7 +1529,7 @@ void MCDwarfFrameEmitter::Emit(MCStreamer &Streamer, MCAsmBackend *MAB,
     // Emit the label from the previous iteration
     if (FDEEnd) {
       Streamer.EmitLabel(FDEEnd);
-      FDEEnd = NULL;
+      FDEEnd = nullptr;
     }
 
     if (!NeedsEHFrameSection && Frame.CompactUnwindEncoding !=

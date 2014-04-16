@@ -84,6 +84,7 @@ ARM64TargetLowering::ARM64TargetLowering(ARM64TargetMachine &TM)
   // Set up the register classes.
   addRegisterClass(MVT::i32, &ARM64::GPR32allRegClass);
   addRegisterClass(MVT::i64, &ARM64::GPR64allRegClass);
+  addRegisterClass(MVT::f16, &ARM64::FPR16RegClass);
   addRegisterClass(MVT::f32, &ARM64::FPR32RegClass);
   addRegisterClass(MVT::f64, &ARM64::FPR64RegClass);
   addRegisterClass(MVT::f128, &ARM64::FPR128RegClass);
@@ -370,10 +371,13 @@ ARM64TargetLowering::ARM64TargetLowering(ARM64TargetMachine &TM)
   setLoadExtAction(ISD::EXTLOAD, MVT::f64, Expand);
   setLoadExtAction(ISD::EXTLOAD, MVT::f80, Expand);
   setLoadExtAction(ISD::SEXTLOAD, MVT::i1, Expand);
+  setTruncStoreAction(MVT::f32, MVT::f16, Expand);
   setTruncStoreAction(MVT::f64, MVT::f32, Expand);
+  setTruncStoreAction(MVT::f64, MVT::f16, Expand);
   setTruncStoreAction(MVT::f128, MVT::f80, Expand);
   setTruncStoreAction(MVT::f128, MVT::f64, Expand);
   setTruncStoreAction(MVT::f128, MVT::f32, Expand);
+  setTruncStoreAction(MVT::f128, MVT::f16, Expand);
   setTruncStoreAction(MVT::v2i32, MVT::v2i16, Expand);
   // Indexed loads and stores are supported.
   for (unsigned im = (unsigned)ISD::PRE_INC;
@@ -1398,8 +1402,8 @@ static bool isLegalArithImmed(uint64_t C) {
   return (C >> 12 == 0) || ((C & 0xFFFULL) == 0 && C >> 24 == 0);
 }
 
-static SDValue emitComparison(SDValue LHS, SDValue RHS, SDLoc dl,
-                              SelectionDAG &DAG) {
+static SDValue emitComparison(SDValue LHS, SDValue RHS, ISD::CondCode CC,
+                              SDLoc dl, SelectionDAG &DAG) {
   EVT VT = LHS.getValueType();
 
   if (VT.isFloatingPoint())
@@ -1409,7 +1413,26 @@ static SDValue emitComparison(SDValue LHS, SDValue RHS, SDLoc dl,
   // SUBS means that it's possible to get CSE with subtract operations.
   // A later phase can perform the optimization of setting the destination
   // register to WZR/XZR if it ends up being unused.
-  return DAG.getNode(ARM64ISD::SUBS, dl, DAG.getVTList(VT, MVT::i32), LHS, RHS)
+
+  // We'd like to combine a (CMP op1, (sub 0, op2) into a CMN instruction on the
+  // grounds that "op1 - (-op2) == op1 + op2". However, the C and V flags can be
+  // set differently by this operation. It comes down to whether "SInt(~op2)+1
+  // == SInt(~op2+1)" (and the same for UInt). If they are then everything is
+  // fine. If not then the optimization is wrong. Thus general comparisons are
+  // only valid if op2 != 0.
+
+  // So, finally, the only LLVM-native comparisons that don't mention C and V
+  // are SETEQ and SETNE. They're the only ones we can safely use CMN for in the
+  // absence of information about op2.
+  unsigned Opcode = ARM64ISD::SUBS;
+  if (RHS.getOpcode() == ISD::SUB && isa<ConstantSDNode>(RHS.getOperand(0)) &&
+      cast<ConstantSDNode>(RHS.getOperand(0))->getZExtValue() == 0 &&
+      (CC == ISD::SETEQ || CC == ISD::SETNE)) {
+    Opcode = ARM64ISD::ADDS;
+    RHS = RHS.getOperand(1);
+  }
+
+  return DAG.getNode(Opcode, dl, DAG.getVTList(VT, MVT::i32), LHS, RHS)
       .getValue(1);
 }
 
@@ -1470,7 +1493,7 @@ static SDValue getARM64Cmp(SDValue LHS, SDValue RHS, ISD::CondCode CC,
     }
   }
 
-  SDValue Cmp = emitComparison(LHS, RHS, dl, DAG);
+  SDValue Cmp = emitComparison(LHS, RHS, CC, dl, DAG);
   ARM64CC::CondCode ARM64CC = changeIntCCToARM64CC(CC);
   ARM64cc = DAG.getConstant(ARM64CC, MVT::i32);
   return Cmp;
@@ -3067,7 +3090,7 @@ SDValue ARM64TargetLowering::LowerBR_CC(SDValue Op, SelectionDAG &DAG) const {
 
   // Unfortunately, the mapping of LLVM FP CC's onto ARM64 CC's isn't totally
   // clean.  Some of them require two branches to implement.
-  SDValue Cmp = emitComparison(LHS, RHS, dl, DAG);
+  SDValue Cmp = emitComparison(LHS, RHS, CC, dl, DAG);
   ARM64CC::CondCode CC1, CC2;
   changeFPCCToARM64CC(CC, CC1, CC2);
   SDValue CC1Val = DAG.getConstant(CC1, MVT::i32);
@@ -3247,7 +3270,7 @@ SDValue ARM64TargetLowering::LowerSETCC(SDValue Op, SelectionDAG &DAG) const {
 
   // If that fails, we'll need to perform an FCMP + CSEL sequence.  Go ahead
   // and do the comparison.
-  SDValue Cmp = emitComparison(LHS, RHS, dl, DAG);
+  SDValue Cmp = emitComparison(LHS, RHS, CC, dl, DAG);
 
   ARM64CC::CondCode CC1, CC2;
   changeFPCCToARM64CC(CC, CC1, CC2);
@@ -3495,7 +3518,7 @@ SDValue ARM64TargetLowering::LowerSELECT_CC(SDValue Op,
 
   // If that fails, we'll need to perform an FCMP + CSEL sequence.  Go ahead
   // and do the comparison.
-  SDValue Cmp = emitComparison(LHS, RHS, dl, DAG);
+  SDValue Cmp = emitComparison(LHS, RHS, CC, dl, DAG);
 
   // Unfortunately, the mapping of LLVM FP CC's onto ARM64 CC's isn't totally
   // clean.  Some of them require two CSELs to implement.
@@ -3522,6 +3545,17 @@ SDValue ARM64TargetLowering::LowerJumpTable(SDValue Op,
   JumpTableSDNode *JT = cast<JumpTableSDNode>(Op);
   EVT PtrVT = getPointerTy();
   SDLoc DL(Op);
+
+  if (getTargetMachine().getCodeModel() == CodeModel::Large &&
+      !Subtarget->isTargetMachO()) {
+    const unsigned char MO_NC = ARM64II::MO_NC;
+    return DAG.getNode(
+        ARM64ISD::WrapperLarge, DL, PtrVT,
+        DAG.getTargetJumpTable(JT->getIndex(), PtrVT, ARM64II::MO_G3),
+        DAG.getTargetJumpTable(JT->getIndex(), PtrVT, ARM64II::MO_G2 | MO_NC),
+        DAG.getTargetJumpTable(JT->getIndex(), PtrVT, ARM64II::MO_G1 | MO_NC),
+        DAG.getTargetJumpTable(JT->getIndex(), PtrVT, ARM64II::MO_G0 | MO_NC));
+  }
 
   SDValue Hi = DAG.getTargetJumpTable(JT->getIndex(), PtrVT, ARM64II::MO_PAGE);
   SDValue Lo = DAG.getTargetJumpTable(JT->getIndex(), PtrVT,
@@ -3815,8 +3849,8 @@ SDValue ARM64TargetLowering::LowerShiftRightParts(SDValue Op,
                                    DAG.getConstant(VTBits, MVT::i64));
   SDValue Tmp2 = DAG.getNode(ISD::SHL, dl, VT, ShOpHi, RevShAmt);
 
-  SDValue Cmp =
-      emitComparison(ExtraShAmt, DAG.getConstant(0, MVT::i64), dl, DAG);
+  SDValue Cmp = emitComparison(ExtraShAmt, DAG.getConstant(0, MVT::i64),
+                               ISD::SETGE, dl, DAG);
   SDValue CCVal = DAG.getConstant(ARM64CC::GE, MVT::i32);
 
   SDValue FalseValLo = DAG.getNode(ISD::OR, dl, VT, Tmp1, Tmp2);
@@ -3862,8 +3896,8 @@ SDValue ARM64TargetLowering::LowerShiftLeftParts(SDValue Op,
 
   SDValue FalseVal = DAG.getNode(ISD::OR, dl, VT, Tmp1, Tmp2);
 
-  SDValue Cmp =
-      emitComparison(ExtraShAmt, DAG.getConstant(0, MVT::i64), dl, DAG);
+  SDValue Cmp = emitComparison(ExtraShAmt, DAG.getConstant(0, MVT::i64),
+                               ISD::SETGE, dl, DAG);
   SDValue CCVal = DAG.getConstant(ARM64CC::GE, MVT::i32);
   SDValue Hi = DAG.getNode(ARM64ISD::CSEL, dl, VT, Tmp3, FalseVal, CCVal, Cmp);
 
@@ -7322,9 +7356,8 @@ bool ARM64TargetLowering::isUsedByReturnOnly(SDNode *N, SDValue &Chain) const {
     return false;
 
   bool HasRet = false;
-  for (SDNode::use_iterator UI = Copy->use_begin(), UE = Copy->use_end();
-       UI != UE; ++UI) {
-    if (UI->getOpcode() != ARM64ISD::RET_FLAG)
+  for (SDNode *Node : Copy->uses()) {
+    if (Node->getOpcode() != ARM64ISD::RET_FLAG)
       return false;
     HasRet = true;
   }

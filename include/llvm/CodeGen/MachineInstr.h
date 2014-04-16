@@ -246,9 +246,10 @@ public:
 
   /// getDebugVariable() - Return the debug variable referenced by
   /// this DBG_VALUE instruction.
-  const MDNode *getDebugVariable() const {
+  DIVariable getDebugVariable() const {
     assert(isDebugValue() && "not a DBG_VALUE");
-    return getOperand(getNumOperands() - 1).getMetadata();
+    const MDNode *Var = getOperand(getNumOperands() - 1).getMetadata();
+    return DIVariable(Var);
   }
 
   /// emitError - Emit an error referring to the source location of this
@@ -316,6 +317,22 @@ public:
   iterator_range<const_mop_iterator> implicit_operands() const {
     return iterator_range<const_mop_iterator>(explicit_operands().end(),
                                               operands_end());
+  }
+  iterator_range<mop_iterator> defs() {
+    return iterator_range<mop_iterator>(
+        operands_begin(), operands_begin() + getDesc().getNumDefs());
+  }
+  iterator_range<const_mop_iterator> defs() const {
+    return iterator_range<const_mop_iterator>(
+        operands_begin(), operands_begin() + getDesc().getNumDefs());
+  }
+  iterator_range<mop_iterator> uses() {
+    return iterator_range<mop_iterator>(
+        operands_begin() + getDesc().getNumDefs(), operands_end());
+  }
+  iterator_range<const_mop_iterator> uses() const {
+    return iterator_range<const_mop_iterator>(
+        operands_begin() + getDesc().getNumDefs(), operands_end());
   }
 
   /// Access to memory operands of the instruction
@@ -759,7 +776,8 @@ public:
   /// is a read of a super-register.
   /// This does not count partial redefines of virtual registers as reads:
   ///   %reg1024:6 = OP.
-  bool readsRegister(unsigned Reg, const TargetRegisterInfo *TRI = NULL) const {
+  bool readsRegister(unsigned Reg,
+                     const TargetRegisterInfo *TRI = nullptr) const {
     return findRegisterUseOperandIdx(Reg, false, TRI) != -1;
   }
 
@@ -775,12 +793,13 @@ public:
   /// partial defines.
   /// If Ops is not null, all operand indices for Reg are added.
   std::pair<bool,bool> readsWritesVirtualRegister(unsigned Reg,
-                                      SmallVectorImpl<unsigned> *Ops = 0) const;
+                                SmallVectorImpl<unsigned> *Ops = nullptr) const;
 
   /// killsRegister - Return true if the MachineInstr kills the specified
   /// register. If TargetRegisterInfo is passed, then it also checks if there is
   /// a kill of a super-register.
-  bool killsRegister(unsigned Reg, const TargetRegisterInfo *TRI = NULL) const {
+  bool killsRegister(unsigned Reg,
+                     const TargetRegisterInfo *TRI = nullptr) const {
     return findRegisterUseOperandIdx(Reg, true, TRI) != -1;
   }
 
@@ -788,7 +807,8 @@ public:
   /// specified register. If TargetRegisterInfo is passed, then it also checks
   /// if there is a def of a super-register.
   /// NOTE: It's ignoring subreg indices on virtual registers.
-  bool definesRegister(unsigned Reg, const TargetRegisterInfo *TRI=NULL) const {
+  bool definesRegister(unsigned Reg,
+                       const TargetRegisterInfo *TRI = nullptr) const {
     return findRegisterDefOperandIdx(Reg, false, false, TRI) != -1;
   }
 
@@ -803,7 +823,7 @@ public:
   /// instruction. If TargetRegisterInfo is passed, then it also checks
   /// if there is a dead def of a super-register.
   bool registerDefIsDead(unsigned Reg,
-                         const TargetRegisterInfo *TRI = NULL) const {
+                         const TargetRegisterInfo *TRI = nullptr) const {
     return findRegisterDefOperandIdx(Reg, true, false, TRI) != -1;
   }
 
@@ -811,14 +831,14 @@ public:
   /// the specific register or -1 if it is not found. It further tightens
   /// the search criteria to a use that kills the register if isKill is true.
   int findRegisterUseOperandIdx(unsigned Reg, bool isKill = false,
-                                const TargetRegisterInfo *TRI = NULL) const;
+                                const TargetRegisterInfo *TRI = nullptr) const;
 
   /// findRegisterUseOperand - Wrapper for findRegisterUseOperandIdx, it returns
   /// a pointer to the MachineOperand rather than an index.
   MachineOperand *findRegisterUseOperand(unsigned Reg, bool isKill = false,
-                                         const TargetRegisterInfo *TRI = NULL) {
+                                      const TargetRegisterInfo *TRI = nullptr) {
     int Idx = findRegisterUseOperandIdx(Reg, isKill, TRI);
-    return (Idx == -1) ? NULL : &getOperand(Idx);
+    return (Idx == -1) ? nullptr : &getOperand(Idx);
   }
 
   /// findRegisterDefOperandIdx() - Returns the operand index that is a def of
@@ -829,14 +849,14 @@ public:
   /// This may also return a register mask operand when Overlap is true.
   int findRegisterDefOperandIdx(unsigned Reg,
                                 bool isDead = false, bool Overlap = false,
-                                const TargetRegisterInfo *TRI = NULL) const;
+                                const TargetRegisterInfo *TRI = nullptr) const;
 
   /// findRegisterDefOperand - Wrapper for findRegisterDefOperandIdx, it returns
   /// a pointer to the MachineOperand rather than an index.
   MachineOperand *findRegisterDefOperand(unsigned Reg, bool isDead = false,
-                                         const TargetRegisterInfo *TRI = NULL) {
+                                      const TargetRegisterInfo *TRI = nullptr) {
     int Idx = findRegisterDefOperandIdx(Reg, isDead, false, TRI);
-    return (Idx == -1) ? NULL : &getOperand(Idx);
+    return (Idx == -1) ? nullptr : &getOperand(Idx);
   }
 
   /// findFirstPredOperandIdx() - Find the index of the first operand in the
@@ -854,7 +874,7 @@ public:
   /// The flag operand is an immediate that can be decoded with methods like
   /// InlineAsm::hasRegClassConstraint().
   ///
-  int findInlineAsmFlagIdx(unsigned OpIdx, unsigned *GroupNo = 0) const;
+  int findInlineAsmFlagIdx(unsigned OpIdx, unsigned *GroupNo = nullptr) const;
 
   /// getRegClassConstraint - Compute the static register class constraint for
   /// operand OpIdx.  For normal instructions, this is derived from the
@@ -916,7 +936,8 @@ public:
   /// check if the register def is tied to a source operand, due to either
   /// two-address elimination or inline assembly constraints. Returns the
   /// first tied use operand index by reference if UseOpIdx is not null.
-  bool isRegTiedToUseOperand(unsigned DefOpIdx, unsigned *UseOpIdx = 0) const {
+  bool isRegTiedToUseOperand(unsigned DefOpIdx,
+                             unsigned *UseOpIdx = nullptr) const {
     const MachineOperand &MO = getOperand(DefOpIdx);
     if (!MO.isReg() || !MO.isDef() || !MO.isTied())
       return false;
@@ -928,7 +949,8 @@ public:
   /// isRegTiedToDefOperand - Return true if the use operand of the specified
   /// index is tied to an def operand. It also returns the def operand index by
   /// reference if DefOpIdx is not null.
-  bool isRegTiedToDefOperand(unsigned UseOpIdx, unsigned *DefOpIdx = 0) const {
+  bool isRegTiedToDefOperand(unsigned UseOpIdx,
+                             unsigned *DefOpIdx = nullptr) const {
     const MachineOperand &MO = getOperand(UseOpIdx);
     if (!MO.isReg() || !MO.isUse() || !MO.isTied())
       return false;
@@ -967,7 +989,8 @@ public:
 
   /// addRegisterDefined - We have determined MI defines a register. Make sure
   /// there is an operand defining Reg.
-  void addRegisterDefined(unsigned Reg, const TargetRegisterInfo *RegInfo = 0);
+  void addRegisterDefined(unsigned Reg,
+                          const TargetRegisterInfo *RegInfo = nullptr);
 
   /// setPhysRegsDeadExcept - Mark every physreg used by this instruction as
   /// dead except those in the UsedRegs list.
@@ -1021,7 +1044,7 @@ public:
   //
   // Debugging support
   //
-  void print(raw_ostream &OS, const TargetMachine *TM = 0,
+  void print(raw_ostream &OS, const TargetMachine *TM = nullptr,
              bool SkipOpers = false) const;
   void dump() const;
 
@@ -1122,7 +1145,7 @@ private:
 /// useful for CSE, etc.
 struct MachineInstrExpressionTrait : DenseMapInfo<MachineInstr*> {
   static inline MachineInstr *getEmptyKey() {
-    return 0;
+    return nullptr;
   }
 
   static inline MachineInstr *getTombstoneKey() {

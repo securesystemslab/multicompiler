@@ -70,7 +70,7 @@ LLVMDisasmContextRef LLVMCreateDisasmCPU(const char *Triple, const char *CPU,
     return 0;
 
   // Set up disassembler.
-  MCDisassembler *DisAsm = TheTarget->createMCDisassembler(*STI);
+  MCDisassembler *DisAsm = TheTarget->createMCDisassembler(*STI, *Ctx);
   if (!DisAsm)
     return 0;
 
@@ -82,8 +82,7 @@ LLVMDisasmContextRef LLVMCreateDisasmCPU(const char *Triple, const char *CPU,
   std::unique_ptr<MCSymbolizer> Symbolizer(TheTarget->createMCSymbolizer(
       Triple, GetOpInfo, SymbolLookUp, DisInfo, Ctx, RelInfo.release()));
   DisAsm->setSymbolizer(std::move(Symbolizer));
-  DisAsm->setupForSymbolicDisassembly(GetOpInfo, SymbolLookUp, DisInfo,
-                                      Ctx, RelInfo);
+
   // Set up the instruction printer.
   int AsmPrinterVariant = MAI->getAssemblerDialect();
   MCInstPrinter *IP = TheTarget->createMCInstPrinter(AsmPrinterVariant,

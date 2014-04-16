@@ -21,29 +21,10 @@
 
 namespace llvm {
 
-SlabAllocator::~SlabAllocator() { }
+namespace detail {
 
-MallocSlabAllocator::~MallocSlabAllocator() { }
-
-MemSlab *MallocSlabAllocator::Allocate(size_t Size) {
-  MemSlab *Slab = (MemSlab*)Allocator.Allocate(Size, 0);
-  Slab->Size = Size;
-  Slab->NextPtr = nullptr;
-  return Slab;
-}
-
-void MallocSlabAllocator::Deallocate(MemSlab *Slab) {
-  Allocator.Deallocate(Slab);
-}
-
-void BumpPtrAllocatorBase::PrintStats() const {
-  unsigned NumSlabs = 0;
-  size_t TotalMemory = 0;
-  for (MemSlab *Slab = CurSlab; Slab; Slab = Slab->NextPtr) {
-    TotalMemory += Slab->Size;
-    ++NumSlabs;
-  }
-
+void printBumpPtrAllocatorStats(unsigned NumSlabs, size_t BytesAllocated,
+                                size_t TotalMemory) {
   errs() << "\nNumber of memory regions: " << NumSlabs << '\n'
          << "Bytes used: " << BytesAllocated << '\n'
          << "Bytes allocated: " << TotalMemory << '\n'
@@ -51,13 +32,7 @@ void BumpPtrAllocatorBase::PrintStats() const {
          << " (includes alignment, etc)\n";
 }
 
-size_t BumpPtrAllocatorBase::getTotalMemory() const {
-  size_t TotalMemory = 0;
-  for (MemSlab *Slab = CurSlab; Slab; Slab = Slab->NextPtr) {
-    TotalMemory += Slab->Size;
-  }
-  return TotalMemory;
-}
+} // End namespace detail.
 
 void PrintRecyclerStats(size_t Size,
                         size_t Align,

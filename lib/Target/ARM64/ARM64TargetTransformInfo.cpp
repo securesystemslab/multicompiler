@@ -154,7 +154,7 @@ unsigned ARM64TTI::getIntImmCost(const APInt &Imm, Type *Ty) const {
   assert(Ty->isIntegerTy());
 
   unsigned BitSize = Ty->getPrimitiveSizeInBits();
-  if (BitSize == 0 || BitSize > 128)
+  if (BitSize == 0)
     return ~0U;
 
   // Sign-extend all constants to a multiple of 64-bit.
@@ -179,8 +179,10 @@ unsigned ARM64TTI::getIntImmCost(unsigned Opcode, unsigned Idx,
   assert(Ty->isIntegerTy());
 
   unsigned BitSize = Ty->getPrimitiveSizeInBits();
-  if (BitSize == 0 || BitSize > 128)
-    return ~0U;
+  // There is no cost model for constants with a bit size of 0. Return TCC_Free
+  // here, so that constant hoisting will ignore this constant.
+  if (BitSize == 0)
+    return TCC_Free;
 
   unsigned ImmIdx = ~0U;
   switch (Opcode) {
@@ -201,14 +203,18 @@ unsigned ARM64TTI::getIntImmCost(unsigned Opcode, unsigned Idx,
   case Instruction::SDiv:
   case Instruction::URem:
   case Instruction::SRem:
-  case Instruction::Shl:
-  case Instruction::LShr:
-  case Instruction::AShr:
   case Instruction::And:
   case Instruction::Or:
   case Instruction::Xor:
   case Instruction::ICmp:
     ImmIdx = 1;
+    break;
+  // Always return TCC_Free for the shift value of a shift instruction.
+  case Instruction::Shl:
+  case Instruction::LShr:
+  case Instruction::AShr:
+    if (Idx == 1)
+      return TCC_Free;
     break;
   case Instruction::Trunc:
   case Instruction::ZExt:
@@ -238,8 +244,10 @@ unsigned ARM64TTI::getIntImmCost(Intrinsic::ID IID, unsigned Idx,
   assert(Ty->isIntegerTy());
 
   unsigned BitSize = Ty->getPrimitiveSizeInBits();
-  if (BitSize == 0 || BitSize > 128)
-    return ~0U;
+  // There is no cost model for constants with a bit size of 0. Return TCC_Free
+  // here, so that constant hoisting will ignore this constant.
+  if (BitSize == 0)
+    return TCC_Free;
 
   switch (IID) {
   default:

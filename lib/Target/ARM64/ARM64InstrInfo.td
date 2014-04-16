@@ -416,6 +416,13 @@ def : Pat<(ARM64WrapperLarge tconstpool:$g3, tconstpool:$g2,
                           tconstpool:$g1, 16),
                   tconstpool:$g0, 0)>;
 
+def : Pat<(ARM64WrapperLarge tjumptable:$g3, tjumptable:$g2,
+                             tjumptable:$g1, tjumptable:$g0),
+          (MOVKXi (MOVKXi (MOVKXi (MOVZXi tjumptable:$g3, 48),
+                                  tjumptable:$g2, 32),
+                          tjumptable:$g1, 16),
+                  tjumptable:$g0, 0)>;
+
 
 //===----------------------------------------------------------------------===//
 // Arithmetic instructions.
@@ -645,13 +652,18 @@ defm CLZ    : OneOperandData<0b100, "clz", ctlz>;
 defm RBIT   : OneOperandData<0b000, "rbit">;
 def  REV16Wr : OneWRegData<0b001, "rev16",
                                   UnOpFrag<(rotr (bswap node:$LHS), (i64 16))>>;
-def  REV16Xr : OneXRegData<0b001, "rev16",
-                                  UnOpFrag<(rotr (bswap node:$LHS), (i64 16))>>;
+def  REV16Xr : OneXRegData<0b001, "rev16", null_frag>;
 
 def : Pat<(cttz GPR32:$Rn),
           (CLZWr (RBITWr GPR32:$Rn))>;
 def : Pat<(cttz GPR64:$Rn),
           (CLZXr (RBITXr GPR64:$Rn))>;
+def : Pat<(ctlz (or (shl (xor (sra GPR32:$Rn, (i64 31)), GPR32:$Rn), (i64 1)),
+                (i32 1))),
+          (CLSWr GPR32:$Rn)>;
+def : Pat<(ctlz (or (shl (xor (sra GPR64:$Rn, (i64 63)), GPR64:$Rn), (i64 1)),
+                (i64 1))),
+          (CLSXr GPR64:$Rn)>;
 
 // Unlike the other one operand instructions, the instructions with the "rev"
 // mnemonic do *not* just different in the size bit, but actually use different
@@ -660,6 +672,11 @@ def REVWr   : OneWRegData<0b010, "rev", bswap>;
 def REVXr   : OneXRegData<0b011, "rev", bswap>;
 def REV32Xr : OneXRegData<0b010, "rev32",
                                  UnOpFrag<(rotr (bswap node:$LHS), (i64 32))>>;
+
+// The bswap commutes with the rotr so we want a pattern for both possible
+// orders.
+def : Pat<(bswap (rotr GPR32:$Rn, (i64 16))), (REV16Wr GPR32:$Rn)>;
+def : Pat<(bswap (rotr GPR64:$Rn, (i64 32))), (REV32Xr GPR64:$Rn)>;
 
 //===----------------------------------------------------------------------===//
 // Bitfield immediate extraction instruction.
@@ -1012,7 +1029,7 @@ def LDRXro  : Load64RO<0b11,   0, 0b01, GPR64, "ldr",
 def LDRBro : Load8RO<0b00,   1, 0b01, FPR8,   "ldr",
                       [(set FPR8:$Rt, (load ro_indexed8:$addr))]>;
 def LDRHro : Load16RO<0b01,  1, 0b01, FPR16,  "ldr",
-                      [(set FPR16:$Rt, (load ro_indexed16:$addr))]>;
+                      [(set (f16 FPR16:$Rt), (load ro_indexed16:$addr))]>;
 def LDRSro : Load32RO<0b10,    1, 0b01, FPR32,  "ldr",
                       [(set (f32 FPR32:$Rt), (load ro_indexed32:$addr))]>;
 def LDRDro : Load64RO<0b11,    1, 0b01, FPR64,  "ldr",
@@ -1091,6 +1108,8 @@ def : Pat<(i64 (zextloadi8 ro_indexed8:$addr)),
     (SUBREG_TO_REG (i64 0), (LDRBBro ro_indexed8:$addr), sub_32)>;
 def : Pat<(i64 (zextloadi16 ro_indexed16:$addr)),
     (SUBREG_TO_REG (i64 0), (LDRHHro ro_indexed16:$addr), sub_32)>;
+def : Pat<(i64 (zextloadi32 ro_indexed32:$addr)),
+    (SUBREG_TO_REG (i64 0), (LDRWro ro_indexed32:$addr), sub_32)>;
 
 // zextloadi1 -> zextloadi8
 def : Pat<(i32 (zextloadi1 ro_indexed8:$addr)), (LDRBBro ro_indexed8:$addr)>;
@@ -1122,7 +1141,7 @@ def LDRWui : LoadUI<0b10, 0, 0b01, GPR32, am_indexed32, "ldr",
 def LDRBui : LoadUI<0b00, 1, 0b01, FPR8, am_indexed8, "ldr",
                     [(set FPR8:$Rt, (load am_indexed8:$addr))]>;
 def LDRHui : LoadUI<0b01, 1, 0b01, FPR16, am_indexed16, "ldr",
-                    [(set FPR16:$Rt, (load am_indexed16:$addr))]>;
+                    [(set (f16 FPR16:$Rt), (load am_indexed16:$addr))]>;
 def LDRSui : LoadUI<0b10, 1, 0b01, FPR32, am_indexed32, "ldr",
                     [(set (f32 FPR32:$Rt), (load am_indexed32:$addr))]>;
 def LDRDui : LoadUI<0b11, 1, 0b01, FPR64, am_indexed64, "ldr",
@@ -1251,7 +1270,7 @@ def LDURWi : LoadUnscaled<0b10, 0, 0b01, GPR32, am_unscaled32, "ldur",
 def LDURBi : LoadUnscaled<0b00, 1, 0b01, FPR8,  am_unscaled8, "ldur",
                           [(set FPR8:$Rt, (load am_unscaled8:$addr))]>;
 def LDURHi : LoadUnscaled<0b01, 1, 0b01, FPR16, am_unscaled16, "ldur",
-                          [(set FPR16:$Rt, (load am_unscaled16:$addr))]>;
+                          [(set (f16 FPR16:$Rt), (load am_unscaled16:$addr))]>;
 def LDURSi : LoadUnscaled<0b10, 1, 0b01, FPR32, am_unscaled32, "ldur",
                           [(set (f32 FPR32:$Rt), (load am_unscaled32:$addr))]>;
 def LDURDi : LoadUnscaled<0b11, 1, 0b01, FPR64, am_unscaled64, "ldur",
@@ -1565,7 +1584,7 @@ def : Pat<(truncstorei32 GPR64:$Rt, ro_indexed32:$addr),
 def STRBro : Store8RO<0b00,  1, 0b00, FPR8,  "str",
                             [(store FPR8:$Rt, ro_indexed8:$addr)]>;
 def STRHro : Store16RO<0b01, 1, 0b00, FPR16, "str",
-                            [(store FPR16:$Rt, ro_indexed16:$addr)]>;
+                            [(store (f16 FPR16:$Rt), ro_indexed16:$addr)]>;
 def STRSro : Store32RO<0b10,   1, 0b00, FPR32, "str",
                             [(store (f32 FPR32:$Rt), ro_indexed32:$addr)]>;
 def STRDro : Store64RO<0b11,   1, 0b00, FPR64, "str",
@@ -1613,7 +1632,7 @@ def STRWui : StoreUI<0b10, 0, 0b00, GPR32, am_indexed32, "str",
 def STRBui : StoreUI<0b00, 1, 0b00, FPR8, am_indexed8, "str",
                      [(store FPR8:$Rt, am_indexed8:$addr)]>;
 def STRHui : StoreUI<0b01, 1, 0b00, FPR16, am_indexed16, "str",
-                     [(store FPR16:$Rt, am_indexed16:$addr)]>;
+                     [(store (f16 FPR16:$Rt), am_indexed16:$addr)]>;
 def STRSui : StoreUI<0b10, 1, 0b00, FPR32, am_indexed32, "str",
                      [(store (f32 FPR32:$Rt), am_indexed32:$addr)]>;
 def STRDui : StoreUI<0b11, 1, 0b00, FPR64, am_indexed64, "str",
@@ -1676,7 +1695,7 @@ def STURWi : StoreUnscaled<0b10, 0, 0b00, GPR32, am_unscaled32, "stur",
 def STURBi : StoreUnscaled<0b00, 1, 0b00, FPR8,  am_unscaled8, "stur",
                            [(store FPR8:$Rt, am_unscaled8:$addr)]>;
 def STURHi : StoreUnscaled<0b01, 1, 0b00, FPR16, am_unscaled16, "stur",
-                           [(store FPR16:$Rt, am_unscaled16:$addr)]>;
+                           [(store (f16 FPR16:$Rt), am_unscaled16:$addr)]>;
 def STURSi : StoreUnscaled<0b10, 1, 0b00, FPR32, am_unscaled32, "stur",
                            [(store (f32 FPR32:$Rt), am_unscaled32:$addr)]>;
 def STURDi : StoreUnscaled<0b11, 1, 0b00, FPR64, am_unscaled64, "stur",
@@ -2022,6 +2041,20 @@ def : Pat<(f32 (fma (fneg FPR32:$Rn), FPR32:$Rm, FPR32:$Ra)),
 
 def : Pat<(f64 (fma (fneg FPR64:$Rn), FPR64:$Rm, FPR64:$Ra)),
           (FMSUBDrrr FPR64:$Rn, FPR64:$Rm, FPR64:$Ra)>;
+
+// We handled -(a + b*c) for FNMADD above, now it's time for "(-a) + (-b)*c" and
+// "(-a) + b*(-c)".
+def : Pat<(f32 (fma (fneg FPR32:$Rn), FPR32:$Rm, (fneg FPR32:$Ra))),
+          (FNMADDSrrr FPR32:$Rn, FPR32:$Rm, FPR32:$Ra)>;
+
+def : Pat<(f64 (fma (fneg FPR64:$Rn), FPR64:$Rm, (fneg FPR64:$Ra))),
+          (FNMADDDrrr FPR64:$Rn, FPR64:$Rm, FPR64:$Ra)>;
+
+def : Pat<(f32 (fma FPR32:$Rn, (fneg FPR32:$Rm), (fneg FPR32:$Ra))),
+          (FNMADDSrrr FPR32:$Rn, FPR32:$Rm, FPR32:$Ra)>;
+
+def : Pat<(f64 (fma FPR64:$Rn, (fneg FPR64:$Rm), (fneg FPR64:$Ra))),
+          (FNMADDDrrr FPR64:$Rn, FPR64:$Rm, FPR64:$Ra)>;
 
 //===----------------------------------------------------------------------===//
 // Floating point comparison instructions.

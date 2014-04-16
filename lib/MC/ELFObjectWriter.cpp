@@ -17,6 +17,7 @@
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/StringMap.h"
 #include "llvm/MC/MCAsmBackend.h"
+#include "llvm/MC/MCAsmInfo.h"
 #include "llvm/MC/MCAsmLayout.h"
 #include "llvm/MC/MCAssembler.h"
 #include "llvm/MC/MCContext.h"
@@ -27,6 +28,7 @@
 #include "llvm/MC/MCObjectWriter.h"
 #include "llvm/MC/MCSectionELF.h"
 #include "llvm/MC/MCValue.h"
+#include "llvm/Support/Compression.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/Endian.h"
 #include "llvm/Support/ELF.h"
@@ -252,6 +254,8 @@ class ELFObjectWriter : public MCObjectWriter {
 
     void CreateRelocationSections(MCAssembler &Asm, MCAsmLayout &Layout,
                                   RelMapTy &RelMap);
+
+    void CompressDebugSections(MCAssembler &Asm, MCAsmLayout &Layout);
 
     void WriteRelocations(MCAssembler &Asm, MCAsmLayout &Layout,
                           const RelMapTy &RelMap);
@@ -505,8 +509,8 @@ uint64_t ELFObjectWriter::SymbolValue(MCSymbolData &OrigData,
       Symbol = &A->getSymbol();
       Data = &Layout.getAssembler().getSymbolData(*Symbol);
     } else {
-      Symbol = 0;
-      Data = 0;
+      Symbol = nullptr;
+      Data = nullptr;
     }
   }
 
@@ -807,6 +811,13 @@ bool ELFObjectWriter::shouldRelocateWithSymbol(const MCSymbolRefExpr *RefA,
   // are just an offset (@tpoff), require a symbol in some linkers (gold,
   // but not bfd ld).
   if (Flags & ELF::SHF_TLS)
+    return true;
+
+  // If the symbol is a thumb function the final relocation must set the lowest
+  // bit. With a symbol that is done by just having the symbol have that bit
+  // set, so we would lose the bit if we relocated with the section.
+  // FIXME: We could use the section but add the bit to the relocation value.
+  if (SD->getFlags() & ELF_Other_ThumbFunc)
     return true;
 
   if (TargetObjectWriter->needsRelocateWithSymbol(Type))
@@ -1165,6 +1176,121 @@ void ELFObjectWriter::CreateRelocationSections(MCAssembler &Asm,
                         EntrySize, Group);
     RelMap[&Section] = RelaSection;
     Asm.getOrCreateSectionData(*RelaSection);
+  }
+}
+
+static SmallVector<char, 128>
+getUncompressedData(MCAsmLayout &Layout,
+                    MCSectionData::FragmentListType &Fragments) {
+  SmallVector<char, 128> UncompressedData;
+  for (const MCFragment &F : Fragments) {
+    const SmallVectorImpl<char> *Contents;
+    switch (F.getKind()) {
+    case MCFragment::FT_Data:
+      Contents = &cast<MCDataFragment>(F).getContents();
+      break;
+    case MCFragment::FT_Dwarf:
+      Contents = &cast<MCDwarfLineAddrFragment>(F).getContents();
+      break;
+    case MCFragment::FT_DwarfFrame:
+      Contents = &cast<MCDwarfCallFrameFragment>(F).getContents();
+      break;
+    default:
+      llvm_unreachable(
+          "Not expecting any other fragment types in a debug_* section");
+    }
+    UncompressedData.append(Contents->begin(), Contents->end());
+  }
+  return UncompressedData;
+}
+
+// Include the debug info compression header:
+// "ZLIB" followed by 8 bytes representing the uncompressed size of the section,
+// useful for consumers to preallocate a buffer to decompress into.
+static void
+prependCompressionHeader(uint64_t Size,
+                         SmallVectorImpl<char> &CompressedContents) {
+  static const StringRef Magic = "ZLIB";
+  if (sys::IsLittleEndianHost)
+    Size = sys::SwapByteOrder(Size);
+  CompressedContents.insert(CompressedContents.begin(),
+                            Magic.size() + sizeof(Size), 0);
+  std::copy(Magic.begin(), Magic.end(), CompressedContents.begin());
+  std::copy(reinterpret_cast<char *>(&Size),
+            reinterpret_cast<char *>(&Size + 1),
+            CompressedContents.begin() + Magic.size());
+}
+
+// Return a single fragment containing the compressed contents of the whole
+// section. Null if the section was not compressed for any reason.
+static std::unique_ptr<MCDataFragment>
+getCompressedFragment(MCAsmLayout &Layout,
+                      MCSectionData::FragmentListType &Fragments) {
+  std::unique_ptr<MCDataFragment> CompressedFragment(new MCDataFragment());
+
+  // Gather the uncompressed data from all the fragments, recording the
+  // alignment fragment, if seen, and any fixups.
+  SmallVector<char, 128> UncompressedData =
+      getUncompressedData(Layout, Fragments);
+
+  SmallVectorImpl<char> &CompressedContents = CompressedFragment->getContents();
+
+  zlib::Status Success = zlib::compress(
+      StringRef(UncompressedData.data(), UncompressedData.size()),
+      CompressedContents);
+  if (Success != zlib::StatusOK)
+    return nullptr;
+
+  prependCompressionHeader(UncompressedData.size(), CompressedContents);
+
+  return CompressedFragment;
+}
+
+static void CompressDebugSection(MCAssembler &Asm, MCAsmLayout &Layout,
+                                 const MCSectionELF &Section,
+                                 MCSectionData &SD) {
+  StringRef SectionName = Section.getSectionName();
+  MCSectionData::FragmentListType &Fragments = SD.getFragmentList();
+
+  std::unique_ptr<MCDataFragment> CompressedFragment =
+      getCompressedFragment(Layout, Fragments);
+
+  // Leave the section as-is if the fragments could not be compressed.
+  if (!CompressedFragment)
+    return;
+
+  // Invalidate the layout for the whole section since it will have new and
+  // different fragments now.
+  Layout.invalidateFragmentsFrom(&Fragments.front());
+  Fragments.clear();
+
+  // Complete the initialization of the new fragment
+  CompressedFragment->setParent(&SD);
+  CompressedFragment->setLayoutOrder(0);
+  Fragments.push_back(CompressedFragment.release());
+
+  // Rename from .debug_* to .zdebug_*
+  Asm.getContext().renameELFSection(&Section,
+                                    (".z" + SectionName.drop_front(1)).str());
+}
+
+void ELFObjectWriter::CompressDebugSections(MCAssembler &Asm,
+                                            MCAsmLayout &Layout) {
+  if (!Asm.getContext().getAsmInfo()->compressDebugSections())
+    return;
+
+  for (MCSectionData &SD : Asm) {
+    const MCSectionELF &Section =
+        static_cast<const MCSectionELF &>(SD.getSection());
+    StringRef SectionName = Section.getSectionName();
+
+    // Compressing debug_frame requires handling alignment fragments which is
+    // more work (possibly generalizing MCAssembler.cpp:writeFragment to allow
+    // for writing to arbitrary buffers) for little benefit.
+    if (!SectionName.startswith(".debug_") || SectionName == ".debug_frame")
+      continue;
+
+    CompressDebugSection(Asm, Layout, Section, SD);
   }
 }
 
@@ -1651,6 +1777,8 @@ void ELFObjectWriter::WriteObject(MCAssembler &Asm,
   SectionIndexMapTy SectionIndexMap;
 
   unsigned NumUserSections = Asm.size();
+
+  CompressDebugSections(Asm, const_cast<MCAsmLayout &>(Layout));
 
   DenseMap<const MCSectionELF*, const MCSectionELF*> RelMap;
   CreateRelocationSections(Asm, const_cast<MCAsmLayout&>(Layout), RelMap);

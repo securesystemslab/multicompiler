@@ -137,7 +137,7 @@ namespace llvm {
 
     /// The information gathered from labels that will have dwarf label
     /// entries when generating dwarf assembly source files.
-    std::vector<const MCGenDwarfLabelEntry *> MCGenDwarfLabelEntries;
+    std::vector<MCGenDwarfLabelEntry> MCGenDwarfLabelEntries;
 
     /// The string to embed in the debug information for the compile unit, if
     /// non-empty.
@@ -155,7 +155,11 @@ namespace llvm {
     /// The Compile Unit ID that we are currently processing.
     unsigned DwarfCompileUnitID;
 
-    void *MachOUniquingMap, *ELFUniquingMap, *COFFUniquingMap;
+    typedef std::pair<std::string, std::string> SectionGroupPair;
+
+    StringMap<const MCSectionMachO*> MachOUniquingMap;
+    std::map<SectionGroupPair, const MCSectionELF *> ELFUniquingMap;
+    std::map<SectionGroupPair, const MCSectionCOFF *> COFFUniquingMap;
 
     /// Do automatic reset in destructor
     bool AutoReset;
@@ -167,8 +171,8 @@ namespace llvm {
 
   public:
     explicit MCContext(const MCAsmInfo *MAI, const MCRegisterInfo *MRI,
-                       const MCObjectFileInfo *MOFI, const SourceMgr *Mgr = 0,
-                       bool DoAutoReset = true);
+                       const MCObjectFileInfo *MOFI,
+                       const SourceMgr *Mgr = nullptr, bool DoAutoReset = true);
     ~MCContext();
 
     const SourceMgr *getSourceManager() const { return SrcMgr; }
@@ -259,6 +263,8 @@ namespace llvm {
                                       unsigned Flags, SectionKind Kind,
                                       unsigned EntrySize, StringRef Group);
 
+    void renameELFSection(const MCSectionELF *Section, StringRef Name);
+
     const MCSectionELF *CreateELFGroupSection();
 
     const MCSectionCOFF *getCOFFSection(StringRef Section,
@@ -266,7 +272,7 @@ namespace llvm {
                                         SectionKind Kind,
                                         StringRef COMDATSymName,
                                         int Selection,
-                                        const MCSectionCOFF *Assoc = 0);
+                                        const MCSectionCOFF *Assoc = nullptr);
 
     const MCSectionCOFF *getCOFFSection(StringRef Section,
                                         unsigned Characteristics,
@@ -377,11 +383,10 @@ namespace llvm {
     void setGenDwarfSectionEndSym(MCSymbol *Sym) {
       GenDwarfSectionEndSym = Sym;
     }
-    const std::vector<const MCGenDwarfLabelEntry *>
-      &getMCGenDwarfLabelEntries() const {
+    const std::vector<MCGenDwarfLabelEntry> &getMCGenDwarfLabelEntries() const {
       return MCGenDwarfLabelEntries;
     }
-    void addMCGenDwarfLabelEntry(const MCGenDwarfLabelEntry *E) {
+    void addMCGenDwarfLabelEntry(const MCGenDwarfLabelEntry &E) {
       MCGenDwarfLabelEntries.push_back(E);
     }
 
