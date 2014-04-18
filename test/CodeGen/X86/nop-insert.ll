@@ -1,8 +1,8 @@
 ; RUN: llc < %s -nop-insertion | FileCheck %s
-; RUN: llc < %s -nop-insertion -entropy-data="test" -rng-seed=1 | FileCheck %s --check-prefix=SEED1
-; RUN: llc < %s -nop-insertion -entropy-data="test" -rng-seed=25 | FileCheck %s --check-prefix=SEED2
-; RUN: llc < %s -nop-insertion -entropy-data="test" -rng-seed=1534 | FileCheck %s --check-prefix=SEED3
-; RUN: llc < %s -nop-insertion -entropy-data="different entropy" -rng-seed=1 | FileCheck %s --check-prefix=ENTROPY
+; RUN: llc < %s -nop-insertion -salt-data="test" -rng-seed=1 | FileCheck %s --check-prefix=SEED1
+; RUN: llc < %s -nop-insertion -salt-data="test" -rng-seed=25 | FileCheck %s --check-prefix=SEED2
+; RUN: llc < %s -nop-insertion -salt-data="test" -rng-seed=1534 | FileCheck %s --check-prefix=SEED3
+; RUN: llc < %s -nop-insertion -salt-data="different entropy" -rng-seed=1 | FileCheck %s --check-prefix=SALT
 
 ; This test case checks that NOPs are inserted, and that the RNG seed
 ; affects both the placement (position of imull) and choice of these NOPs.
@@ -30,11 +30,11 @@
 ; SEED3-NOT: leaq
 ; SEED3-NOT: nop
 
-; ENTROPY: imull
-; ENTROPY: nop
-; ENTROPY: nop
-; ENTROPY-NOT: leaq
-; ENTROPY-NOT: movq
+; SALT: imull
+; SALT: nop
+; SALT: nop
+; SALT-NOT: leaq
+; SALT-NOT: movq
 
 define i32 @test1(i32 %x, i32 %y, i32 %z) {
 entry:
