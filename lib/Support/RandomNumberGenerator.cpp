@@ -31,8 +31,8 @@ RandomSeed("rng-seed", cl::value_desc("seed"),
            cl::desc("Seed for the random number generator"), cl::init(0));
 
 static cl::opt<std::string, true>
-SaltDataOpt("entropy-data",
-            cl::desc("Entropy data for the RNG (testing only, should be set "
+SaltDataOpt("salt-data",
+            cl::desc("Salt data for the RNG (testing only, should be set "
                      "by command line options"),
             cl::Hidden, cl::location(SaltData));
 
