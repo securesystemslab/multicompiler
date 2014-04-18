@@ -46,7 +46,7 @@ RandomNumberGenerator *RandomNumberGenerator::Get() {
   RandomNumberGenerator *RNG =
       const_cast<RandomNumberGenerator *>(Instance->get());
 
-  if (RNG == 0) {
+  if (RNG == nullptr) {
     RNG = new RandomNumberGenerator;
     Instance->set(RNG);
   }
@@ -75,12 +75,11 @@ void RandomNumberGenerator::Seed(StringRef Salt, uint64_t Seed) {
   DEBUG(dbgs() << "Seed: " << Seed << "\n");
 
   // Sequence: Seed-low, Seed-high, Salt...
-  unsigned SeedSize = Salt.size() + 2;
-  unsigned Seeds[SeedSize];
+  size_t SeedSize = Salt.size() + 2;
+  uint32_t Seeds[SeedSize];
   Seeds[0] = Seed;
   Seeds[1] = Seed >> 32;
-  for (unsigned i = 0; i < Salt.size(); ++i)
-    Seeds[2 + i] = Salt[i];
+  std::copy_n(Salt.begin(), Salt.size(), Seeds + 2);
 
   std::seed_seq SeedSeq(Seeds, Seeds + SeedSize);
   generator.seed(SeedSeq);
