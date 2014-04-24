@@ -19,6 +19,8 @@
 using namespace llvm;
 using namespace PatternMatch;
 
+#define DEBUG_TYPE "instcombine"
+
 /// DecomposeSimpleLinearExpr - Analyze 'Val', seeing if it is a simple linear
 /// expression.  If so, decompose it, returning some value X, such that Val is
 /// X*Scale+Offset.

@@ -26,7 +26,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "loop-unswitch"
 #include "llvm/Transforms/Scalar.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallPtrSet.h"
@@ -52,6 +51,8 @@
 #include <map>
 #include <set>
 using namespace llvm;
+
+#define DEBUG_TYPE "loop-unswitch"
 
 STATISTIC(NumBranches, "Number of branches unswitched");
 STATISTIC(NumSwitches, "Number of switches unswitched");
@@ -180,15 +181,6 @@ namespace {
       BranchesInfo.forgetLoop(currentLoop);
     }
 
-    /// RemoveLoopFromWorklist - If the specified loop is on the loop worklist,
-    /// remove it.
-    void RemoveLoopFromWorklist(Loop *L) {
-      std::vector<Loop*>::iterator I = std::find(LoopProcessWorklist.begin(),
-                                                 LoopProcessWorklist.end(), L);
-      if (I != LoopProcessWorklist.end())
-        LoopProcessWorklist.erase(I);
-    }
-
     void initLoopData() {
       loopHeader = currentLoop->getHeader();
       loopPreheader = currentLoop->getLoopPreheader();
@@ -212,7 +204,6 @@ namespace {
                                         Instruction *InsertPt);
 
     void SimplifyCode(std::vector<Instruction*> &Worklist, Loop *L);
-    void RemoveLoopFromHierarchy(Loop *L);
     bool IsTrivialUnswitchCondition(Value *Cond, Constant **Val = 0,
                                     BasicBlock **LoopExit = 0);
 
@@ -946,17 +937,6 @@ static void ReplaceUsesOfWith(Instruction *I, Value *V,
   I->replaceAllUsesWith(V);
   I->eraseFromParent();
   ++NumSimplify;
-}
-
-/// RemoveLoopFromHierarchy - We have discovered that the specified loop has
-/// become unwrapped, either because the backedge was deleted, or because the
-/// edge into the header was removed.  If the edge into the header from the
-/// latch block was removed, the loop is unwrapped but subloops are still alive,
-/// so they just reparent loops.  If the loops are actually dead, they will be
-/// removed later.
-void LoopUnswitch::RemoveLoopFromHierarchy(Loop *L) {
-  LPM->deleteLoopFromQueue(L);
-  RemoveLoopFromWorklist(L);
 }
 
 // RewriteLoopBodyWithConditionConstant - We know either that the value LIC has

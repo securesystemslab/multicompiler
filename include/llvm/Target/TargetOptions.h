@@ -15,6 +15,7 @@
 #ifndef LLVM_TARGET_TARGETOPTIONS_H
 #define LLVM_TARGET_TARGETOPTIONS_H
 
+#include "llvm/MC/MCTargetOptions.h"
 #include <string>
 
 namespace llvm {
@@ -51,6 +52,7 @@ namespace llvm {
           EnableFastISel(false), PositionIndependentExecutable(false),
           NOPInsertion(false), UseInitArray(false),
           DisableIntegratedAS(false), CompressDebugSections(false),
+          TrapUnreachable(false),
           TrapFuncName(""), FloatABIType(FloatABI::Default),
           AllowFPOpFusion(FPOpFusion::Standard) {}
 
@@ -165,6 +167,9 @@ namespace llvm {
     /// Compress DWARF debug sections.
     unsigned CompressDebugSections : 1;
 
+    /// Emit target-specific trap instruction for 'unreachable' IR instructions.
+    unsigned TrapUnreachable : 1;
+
     /// getTrapFunctionName - If this returns a non-empty string, this means
     /// isel should lower Intrinsic::trap to a call to the specified function
     /// name instead of an ISD::TRAP node.
@@ -196,6 +201,9 @@ namespace llvm {
     /// via the llvm.fma.* intrinsic) will always be honored, regardless of
     /// the value of this option.
     FPOpFusion::FPOpFusionMode AllowFPOpFusion;
+
+    /// Machine level options.
+    MCTargetOptions MCOptions;
   };
 
 // Comparison operators:
@@ -219,9 +227,11 @@ inline bool operator==(const TargetOptions &LHS,
     ARE_EQUAL(EnableFastISel) &&
     ARE_EQUAL(PositionIndependentExecutable) &&
     ARE_EQUAL(UseInitArray) &&
+    ARE_EQUAL(TrapUnreachable) &&
     ARE_EQUAL(TrapFuncName) &&
     ARE_EQUAL(FloatABIType) &&
-    ARE_EQUAL(AllowFPOpFusion);
+    ARE_EQUAL(AllowFPOpFusion) &&
+    ARE_EQUAL(MCOptions);
 #undef ARE_EQUAL
 }
 

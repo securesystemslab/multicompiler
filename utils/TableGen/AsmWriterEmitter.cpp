@@ -29,6 +29,8 @@
 #include <vector>
 using namespace llvm;
 
+#define DEBUG_TYPE "asm-writer-emitter"
+
 namespace {
 class AsmWriterEmitter {
   RecordKeeper &Records;
@@ -708,19 +710,6 @@ public:
         return false;
 
     return true;
-  }
-
-  bool operator()(const IAPrinter &RHS) {
-    if (Conds.size() < RHS.Conds.size())
-      return true;
-
-    unsigned Idx = 0;
-    for (std::vector<std::string>::iterator
-           I = Conds.begin(), E = Conds.end(); I != E; ++I)
-      if (*I != RHS.Conds[Idx++])
-        return *I < RHS.Conds[Idx++];
-
-    return false;
   }
 };
 

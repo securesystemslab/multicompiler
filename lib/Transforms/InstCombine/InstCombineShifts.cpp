@@ -19,6 +19,8 @@
 using namespace llvm;
 using namespace PatternMatch;
 
+#define DEBUG_TYPE "instcombine"
+
 Instruction *InstCombiner::commonShiftTransforms(BinaryOperator &I) {
   assert(I.getOperand(1)->getType() == I.getOperand(0)->getType());
   Value *Op0 = I.getOperand(0), *Op1 = I.getOperand(1);
@@ -335,21 +337,12 @@ Instruction *InstCombiner::FoldShiftByConstant(Value *Op0, Constant *Op1,
                  GetShiftedValue(Op0, COp1->getZExtValue(), isLeftShift, *this));
   }
 
-
   // See if we can simplify any instructions used by the instruction whose sole
   // purpose is to compute bits we don't care about.
   uint32_t TypeBits = Op0->getType()->getScalarSizeInBits();
 
-  // shl i32 X, 32 = 0 and srl i8 Y, 9 = 0, ... just don't eliminate
-  // a signed shift.
-  //
-  if (COp1->uge(TypeBits)) {
-    if (I.getOpcode() != Instruction::AShr)
-      return ReplaceInstUsesWith(I, Constant::getNullValue(Op0->getType()));
-    // ashr i32 X, 32 --> ashr i32 X, 31
-    I.setOperand(1, ConstantInt::get(I.getType(), TypeBits-1));
-    return &I;
-  }
+  assert(!COp1->uge(TypeBits) &&
+         "Shift over the type width should have been removed already");
 
   // ((X*C1) << C2) == (X * (C1 << C2))
   if (BinaryOperator *BO = dyn_cast<BinaryOperator>(Op0))

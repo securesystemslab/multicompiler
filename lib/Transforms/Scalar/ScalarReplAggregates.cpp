@@ -19,7 +19,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "scalarrepl"
 #include "llvm/Transforms/Scalar.h"
 #include "llvm/ADT/SetVector.h"
 #include "llvm/ADT/SmallVector.h"
@@ -51,6 +50,8 @@
 #include "llvm/Transforms/Utils/PromoteMemToReg.h"
 #include "llvm/Transforms/Utils/SSAUpdater.h"
 using namespace llvm;
+
+#define DEBUG_TYPE "scalarrepl"
 
 STATISTIC(NumReplaced,  "Number of allocas broken up");
 STATISTIC(NumPromoted,  "Number of allocas promoted");
@@ -2108,7 +2109,8 @@ void SROA::RewriteLifetimeIntrinsic(IntrinsicInst *II, AllocaInst *AI,
   if (NewOffset) {
     // Splice the first element and index 'NewOffset' bytes in.  SROA will
     // split the alloca again later.
-    Value *V = Builder.CreateBitCast(NewElts[Idx], Builder.getInt8PtrTy());
+    unsigned AS = AI->getType()->getAddressSpace();
+    Value *V = Builder.CreateBitCast(NewElts[Idx], Builder.getInt8PtrTy(AS));
     V = Builder.CreateGEP(V, Builder.getInt64(NewOffset));
 
     IdxTy = NewElts[Idx]->getAllocatedType();

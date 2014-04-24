@@ -11,8 +11,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "WinCOFFStreamer"
-
 #include "llvm/MC/MCStreamer.h"
 #include "llvm/MC/MCAsmBackend.h"
 #include "llvm/MC/MCAsmLayout.h"
@@ -34,6 +32,8 @@
 #include "llvm/Support/raw_ostream.h"
 
 using namespace llvm;
+
+#define DEBUG_TYPE "WinCOFFStreamer"
 
 namespace {
 class WinCOFFStreamer : public MCObjectStreamer {
@@ -266,8 +266,7 @@ void WinCOFFStreamer::EmitTBSSSymbol(const MCSection *Section, MCSymbol *Symbol,
 }
 
 void WinCOFFStreamer::EmitFileDirective(StringRef Filename) {
-  // Ignore for now, linkers don't care, and proper debug
-  // info will be a much large effort.
+  getAssembler().addFileName(Filename);
 }
 
 // TODO: Implement this if you want to emit .comment section in COFF obj files.

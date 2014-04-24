@@ -50,7 +50,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "tailcallelim"
 #include "llvm/Transforms/Scalar.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallPtrSet.h"
@@ -75,6 +74,8 @@
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
 #include "llvm/Transforms/Utils/Local.h"
 using namespace llvm;
+
+#define DEBUG_TYPE "tailcallelim"
 
 STATISTIC(NumEliminated, "Number of tail calls removed");
 STATISTIC(NumRetDuped,   "Number of return duplicated");
@@ -202,6 +203,15 @@ bool TailCallElim::runOnFunction(Function &F) {
           return false;
       }
     }
+  }
+
+  // If any byval or inalloca args are captured, exit. They are also allocated
+  // in our stack frame.
+  for (Argument &Arg : F.args()) {
+    if (Arg.hasByValOrInAllocaAttr())
+      PointerMayBeCaptured(&Arg, &ACT);
+    if (ACT.Captured)
+      return false;
   }
 
   // Second pass, change any tail recursive calls to loops.

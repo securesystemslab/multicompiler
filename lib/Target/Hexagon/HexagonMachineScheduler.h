@@ -14,7 +14,6 @@
 #ifndef HEXAGONASMPRINTER_H
 #define HEXAGONASMPRINTER_H
 
-#include "llvm/ADT/OwningPtr.h"
 #include "llvm/ADT/PriorityQueue.h"
 #include "llvm/Analysis/AliasAnalysis.h"
 #include "llvm/CodeGen/LiveIntervalAnalysis.h"
@@ -94,8 +93,9 @@ VLIWResourceModel(const TargetMachine &TM, const TargetSchedModel *SM) :
 /// top-level schedule() driver.
 class VLIWMachineScheduler : public ScheduleDAGMILive {
 public:
-  VLIWMachineScheduler(MachineSchedContext *C, MachineSchedStrategy *S):
-    ScheduleDAGMILive(C, S) {}
+  VLIWMachineScheduler(MachineSchedContext *C,
+                       std::unique_ptr<MachineSchedStrategy> S)
+      : ScheduleDAGMILive(C, std::move(S)) {}
 
   /// Schedule - This is called back from ScheduleDAGInstrs::Run() when it's
   /// time to do some work.

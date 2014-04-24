@@ -32,12 +32,6 @@
 #include <cstdlib>
 
 namespace llvm {
-template <typename T> struct ReferenceAdder {
-  typedef T &result;
-};
-template <typename T> struct ReferenceAdder<T &> {
-  typedef T result;
-};
 
 /// \brief CRTP base class providing obvious overloads for the core \c
 /// Allocate() methods of LLVM-style allocators.
@@ -94,9 +88,6 @@ public:
 
 class MallocAllocator : public AllocatorBase<MallocAllocator> {
 public:
-  MallocAllocator() {}
-  ~MallocAllocator() {}
-
   void Reset() {}
 
   void *Allocate(size_t Size, size_t /*Alignment*/) { return malloc(Size); }
@@ -141,9 +132,6 @@ template <typename AllocatorT = MallocAllocator, size_t SlabSize = 4096,
 class BumpPtrAllocatorImpl
     : public AllocatorBase<
           BumpPtrAllocatorImpl<AllocatorT, SlabSize, SizeThreshold>> {
-  BumpPtrAllocatorImpl(const BumpPtrAllocatorImpl &) LLVM_DELETED_FUNCTION;
-  void operator=(const BumpPtrAllocatorImpl &) LLVM_DELETED_FUNCTION;
-
 public:
   static_assert(SizeThreshold <= SlabSize,
                 "The SizeThreshold must be at most the SlabSize to ensure "
@@ -156,9 +144,41 @@ public:
   BumpPtrAllocatorImpl(T &&Allocator)
       : CurPtr(nullptr), End(nullptr), BytesAllocated(0),
         Allocator(std::forward<T &&>(Allocator)) {}
+
+  // Manually implement a move constructor as we must clear the old allocators
+  // slabs as a matter of correctness.
+  BumpPtrAllocatorImpl(BumpPtrAllocatorImpl &&Old)
+      : CurPtr(Old.CurPtr), End(Old.End), Slabs(std::move(Old.Slabs)),
+        CustomSizedSlabs(std::move(Old.CustomSizedSlabs)),
+        BytesAllocated(Old.BytesAllocated),
+        Allocator(std::move(Old.Allocator)) {
+    Old.CurPtr = Old.End = nullptr;
+    Old.BytesAllocated = 0;
+    Old.Slabs.clear();
+    Old.CustomSizedSlabs.clear();
+  }
+
   ~BumpPtrAllocatorImpl() {
     DeallocateSlabs(Slabs.begin(), Slabs.end());
     DeallocateCustomSizedSlabs();
+  }
+
+  BumpPtrAllocatorImpl &operator=(BumpPtrAllocatorImpl &&RHS) {
+    DeallocateSlabs(Slabs.begin(), Slabs.end());
+    DeallocateCustomSizedSlabs();
+
+    CurPtr = RHS.CurPtr;
+    End = RHS.End;
+    BytesAllocated = RHS.BytesAllocated;
+    Slabs = std::move(RHS.Slabs);
+    CustomSizedSlabs = std::move(RHS.CustomSizedSlabs);
+    Allocator = std::move(RHS.Allocator);
+
+    RHS.CurPtr = RHS.End = nullptr;
+    RHS.BytesAllocated = 0;
+    RHS.Slabs.clear();
+    RHS.CustomSizedSlabs.clear();
+    return *this;
   }
 
   /// \brief Deallocate all but the current slab and reset the current pointer
@@ -339,8 +359,14 @@ template <typename T> class SpecificBumpPtrAllocator {
 
 public:
   SpecificBumpPtrAllocator() : Allocator() {}
-
+  SpecificBumpPtrAllocator(SpecificBumpPtrAllocator &&Old)
+      : Allocator(std::move(Old.Allocator)) {}
   ~SpecificBumpPtrAllocator() { DestroyAll(); }
+
+  SpecificBumpPtrAllocator &operator=(SpecificBumpPtrAllocator &&RHS) {
+    Allocator = std::move(RHS.Allocator);
+    return *this;
+  }
 
   /// Call the destructor of each allocated object and deallocate all but the
   /// current slab and reset the current pointer to the beginning of it, freeing
@@ -374,8 +400,6 @@ public:
 
   /// \brief Allocate space for an array of objects without constructing them.
   T *Allocate(size_t num = 1) { return Allocator.Allocate<T>(num); }
-
-private:
 };
 
 }  // end namespace llvm

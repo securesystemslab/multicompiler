@@ -710,13 +710,16 @@ private:
 
 public:
   X86AsmParser(MCSubtargetInfo &sti, MCAsmParser &parser,
-               const MCInstrInfo &MII)
+               const MCInstrInfo &MII,
+               const MCTargetOptions &Options)
       : MCTargetAsmParser(), STI(sti), Parser(parser), InstInfo(0) {
 
     // Initialize the set of available features.
     setAvailableFeatures(ComputeAvailableFeatures(STI.getFeatureBits()));
-    Instrumentation.reset(CreateX86AsmInstrumentation(STI));
+    Instrumentation.reset(
+        CreateX86AsmInstrumentation(Options, Parser.getContext(), STI));
   }
+
   bool ParseRegister(unsigned &RegNo, SMLoc &StartLoc, SMLoc &EndLoc) override;
 
   bool
@@ -2070,8 +2073,10 @@ ParseInstruction(ParseInstructionInfo &Info, StringRef Name, SMLoc NameLoc,
       (Name == "smov" || Name == "smovb" || Name == "smovw" ||
        Name == "smovl" || Name == "smovd" || Name == "smovq"))) {
     if (Operands.size() == 1) {
-      if (Name == "movsd")
+      if (Name == "movsd") {
+        delete Operands.back();
         Operands.back() = X86Operand::CreateToken("movsl", NameLoc);
+      }
       if (isParsingIntelSyntax()) {
         Operands.push_back(DefaultMemDIOperand(NameLoc));
         Operands.push_back(DefaultMemSIOperand(NameLoc));

@@ -12,7 +12,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "x86-isel"
 #include "X86ISelLowering.h"
 #include "Utils/X86ShuffleDecode.h"
 #include "X86CallingConv.h"
@@ -51,6 +50,8 @@
 #include <bitset>
 #include <cctype>
 using namespace llvm;
+
+#define DEBUG_TYPE "x86-isel"
 
 STATISTIC(NumTailCalls, "Number of tail calls");
 
@@ -5703,6 +5704,41 @@ static SDValue LowerVectorBroadcast(SDValue Op, const X86Subtarget* Subtarget,
   return SDValue();
 }
 
+/// \brief For an EXTRACT_VECTOR_ELT with a constant index return the real
+/// underlying vector and index.
+///
+/// Modifies \p ExtractedFromVec to the real vector and returns the real
+/// index.
+static int getUnderlyingExtractedFromVec(SDValue &ExtractedFromVec,
+                                         SDValue ExtIdx) {
+  int Idx = cast<ConstantSDNode>(ExtIdx)->getZExtValue();
+  if (!isa<ShuffleVectorSDNode>(ExtractedFromVec))
+    return Idx;
+
+  // For 256-bit vectors, LowerEXTRACT_VECTOR_ELT_SSE4 may have already
+  // lowered this:
+  //   (extract_vector_elt (v8f32 %vreg1), Constant<6>)
+  // to:
+  //   (extract_vector_elt (vector_shuffle<2,u,u,u>
+  //                           (extract_subvector (v8f32 %vreg0), Constant<4>),
+  //                           undef)
+  //                       Constant<0>)
+  // In this case the vector is the extract_subvector expression and the index
+  // is 2, as specified by the shuffle.
+  ShuffleVectorSDNode *SVOp = cast<ShuffleVectorSDNode>(ExtractedFromVec);
+  SDValue ShuffleVec = SVOp->getOperand(0);
+  MVT ShuffleVecVT = ShuffleVec.getSimpleValueType();
+  assert(ShuffleVecVT.getVectorElementType() ==
+         ExtractedFromVec.getSimpleValueType().getVectorElementType());
+
+  int ShuffleIdx = SVOp->getMaskElt(Idx);
+  if (isUndefOrInRange(ShuffleIdx, 0, ShuffleVecVT.getVectorNumElements())) {
+    ExtractedFromVec = ShuffleVec;
+    return ShuffleIdx;
+  }
+  return Idx;
+}
+
 static SDValue buildFromShuffleMostly(SDValue Op, SelectionDAG &DAG) {
   MVT VT = Op.getSimpleValueType();
 
@@ -5736,13 +5772,13 @@ static SDValue buildFromShuffleMostly(SDValue Op, SelectionDAG &DAG) {
 
     SDValue ExtractedFromVec = Op.getOperand(i).getOperand(0);
     SDValue ExtIdx = Op.getOperand(i).getOperand(1);
+    // Quit if non-constant index.
+    if (!isa<ConstantSDNode>(ExtIdx))
+      return SDValue();
+    int Idx = getUnderlyingExtractedFromVec(ExtractedFromVec, ExtIdx);
 
     // Quit if extracted from vector of different type.
     if (ExtractedFromVec.getValueType() != VT)
-      return SDValue();
-
-    // Quit if non-constant index.
-    if (!isa<ConstantSDNode>(ExtIdx))
       return SDValue();
 
     if (VecIn1.getNode() == 0)
@@ -5754,8 +5790,6 @@ static SDValue buildFromShuffleMostly(SDValue Op, SelectionDAG &DAG) {
         // Quit if more than 2 vectors to shuffle
         return SDValue();
     }
-
-    unsigned Idx = cast<ConstantSDNode>(ExtIdx)->getZExtValue();
 
     if (ExtractedFromVec == VecIn1)
       Mask[i] = Idx;
@@ -14333,7 +14367,6 @@ const char *X86TargetLowering::getTargetNodeName(unsigned Opcode) const {
   case X86ISD::OR:                 return "X86ISD::OR";
   case X86ISD::XOR:                return "X86ISD::XOR";
   case X86ISD::AND:                return "X86ISD::AND";
-  case X86ISD::BZHI:               return "X86ISD::BZHI";
   case X86ISD::BEXTR:              return "X86ISD::BEXTR";
   case X86ISD::MUL_IMM:            return "X86ISD::MUL_IMM";
   case X86ISD::PTEST:              return "X86ISD::PTEST";
@@ -14360,6 +14393,7 @@ const char *X86TargetLowering::getTargetNodeName(unsigned Opcode) const {
   case X86ISD::UNPCKH:             return "X86ISD::UNPCKH";
   case X86ISD::VBROADCAST:         return "X86ISD::VBROADCAST";
   case X86ISD::VBROADCASTM:        return "X86ISD::VBROADCASTM";
+  case X86ISD::VEXTRACT:           return "X86ISD::VEXTRACT";
   case X86ISD::VPERMILP:           return "X86ISD::VPERMILP";
   case X86ISD::VPERM2X128:         return "X86ISD::VPERM2X128";
   case X86ISD::VPERMV:             return "X86ISD::VPERMV";
@@ -18419,39 +18453,12 @@ static SDValue PerformAndCombine(SDNode *N, SelectionDAG &DAG,
   if (R.getNode())
     return R;
 
-  // Create BEXTR and BZHI instructions
-  // BZHI is X & ((1 << Y) - 1)
+  // Create BEXTR instructions
   // BEXTR is ((X >> imm) & (2**size-1))
   if (VT == MVT::i32 || VT == MVT::i64) {
     SDValue N0 = N->getOperand(0);
     SDValue N1 = N->getOperand(1);
     SDLoc DL(N);
-
-    if (Subtarget->hasBMI2()) {
-      // Check for (and (add (shl 1, Y), -1), X)
-      if (N0.getOpcode() == ISD::ADD && isAllOnes(N0.getOperand(1))) {
-        SDValue N00 = N0.getOperand(0);
-        if (N00.getOpcode() == ISD::SHL) {
-          SDValue N001 = N00.getOperand(1);
-          assert(N001.getValueType() == MVT::i8 && "unexpected type");
-          ConstantSDNode *C = dyn_cast<ConstantSDNode>(N00.getOperand(0));
-          if (C && C->getZExtValue() == 1)
-            return DAG.getNode(X86ISD::BZHI, DL, VT, N1, N001);
-        }
-      }
-
-      // Check for (and X, (add (shl 1, Y), -1))
-      if (N1.getOpcode() == ISD::ADD && isAllOnes(N1.getOperand(1))) {
-        SDValue N10 = N1.getOperand(0);
-        if (N10.getOpcode() == ISD::SHL) {
-          SDValue N101 = N10.getOperand(1);
-          assert(N101.getValueType() == MVT::i8 && "unexpected type");
-          ConstantSDNode *C = dyn_cast<ConstantSDNode>(N10.getOperand(0));
-          if (C && C->getZExtValue() == 1)
-            return DAG.getNode(X86ISD::BZHI, DL, VT, N0, N101);
-        }
-      }
-    }
 
     // Check for BEXTR.
     if ((Subtarget->hasBMI() || Subtarget->hasTBM()) &&

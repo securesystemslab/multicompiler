@@ -11,8 +11,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "delay-slot-filler"
-
 #include "MCTargetDesc/MipsMCNaCl.h"
 #include "Mips.h"
 #include "MipsInstrInfo.h"
@@ -32,6 +30,8 @@
 #include "llvm/Target/TargetRegisterInfo.h"
 
 using namespace llvm;
+
+#define DEBUG_TYPE "delay-slot-filler"
 
 STATISTIC(FilledSlots, "Number of delay slots filled");
 STATISTIC(UsefulSlots, "Number of delay slots filled with instructions that"
@@ -610,7 +610,7 @@ bool Filler::searchSuccBBs(MachineBasicBlock &MBB, Iter Slot) const {
   RegDefsUses RegDU(TM);
   bool HasMultipleSuccs = false;
   BB2BrMap BrMap;
-  OwningPtr<InspectMemInstr> IM;
+  std::unique_ptr<InspectMemInstr> IM;
   Iter Filler;
 
   // Iterate over SuccBB's predecessor list.

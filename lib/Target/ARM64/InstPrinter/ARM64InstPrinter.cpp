@@ -11,7 +11,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "asm-printer"
 #include "ARM64InstPrinter.h"
 #include "MCTargetDesc/ARM64AddressingModes.h"
 #include "Utils/ARM64BaseInfo.h"
@@ -23,6 +22,8 @@
 #include "llvm/Support/Format.h"
 #include "llvm/Support/raw_ostream.h"
 using namespace llvm;
+
+#define DEBUG_TYPE "asm-printer"
 
 #define GET_INSTRUCTION_NAME
 #define PRINT_ALIAS_INSTR
@@ -104,7 +105,7 @@ void ARM64InstPrinter::printInst(const MCInst *MI, raw_ostream &O,
 
       if (AsmMnemonic) {
         O << '\t' << AsmMnemonic << '\t' << getRegisterName(Op0.getReg())
-          << ", " << getRegisterName(Op1.getReg());
+          << ", " << getRegisterName(getWRegFromXReg(Op1.getReg()));
         printAnnotation(O, Annot);
         return;
       }
@@ -1253,11 +1254,15 @@ void ARM64InstPrinter::printMemoryPostIndexed(const MCInst *MI, unsigned OpNum,
 
 void ARM64InstPrinter::printMemoryRegOffset(const MCInst *MI, unsigned OpNum,
                                             raw_ostream &O, int LegalShiftAmt) {
-  O << '[' << getRegisterName(MI->getOperand(OpNum).getReg()) << ", "
-    << getRegisterName(MI->getOperand(OpNum + 1).getReg());
-
   unsigned Val = MI->getOperand(OpNum + 2).getImm();
   ARM64_AM::ExtendType ExtType = ARM64_AM::getMemExtendType(Val);
+
+  O << '[' << getRegisterName(MI->getOperand(OpNum).getReg()) << ", ";
+  if (ExtType == ARM64_AM::UXTW || ExtType == ARM64_AM::SXTW)
+    O << getRegisterName(getWRegFromXReg(MI->getOperand(OpNum + 1).getReg()));
+  else
+    O << getRegisterName(MI->getOperand(OpNum + 1).getReg());
+
   bool DoShift = ARM64_AM::getMemDoShift(Val);
 
   if (ExtType == ARM64_AM::UXTX) {

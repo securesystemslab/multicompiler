@@ -28,8 +28,50 @@
 #include "llvm/CodeGen/SelectionDAG.h"
 #include "llvm/CodeGen/TargetLoweringObjectFileImpl.h"
 #include "llvm/IR/DataLayout.h"
+#include "llvm/IR/DiagnosticInfo.h"
+#include "llvm/IR/DiagnosticPrinter.h"
 
 using namespace llvm;
+
+namespace {
+
+/// Diagnostic information for unimplemented or unsupported feature reporting.
+class DiagnosticInfoUnsupported : public DiagnosticInfo {
+private:
+  const Twine &Description;
+  const Function &Fn;
+
+  static int KindID;
+
+  static int getKindID() {
+    if (KindID == 0)
+      KindID = llvm::getNextAvailablePluginDiagnosticKind();
+    return KindID;
+  }
+
+public:
+  DiagnosticInfoUnsupported(const Function &Fn, const Twine &Desc,
+                          DiagnosticSeverity Severity = DS_Error)
+    : DiagnosticInfo(getKindID(), Severity),
+      Description(Desc),
+      Fn(Fn) { }
+
+  const Function &getFunction() const { return Fn; }
+  const Twine &getDescription() const { return Description; }
+
+  void print(DiagnosticPrinter &DP) const override {
+    DP << "unsupported " << getDescription() << " in " << Fn.getName();
+  }
+
+  static bool classof(const DiagnosticInfo *DI) {
+    return DI->getKind() == getKindID();
+  }
+};
+
+int DiagnosticInfoUnsupported::KindID = 0;
+}
+
+
 static bool allocateStack(unsigned ValNo, MVT ValVT, MVT LocVT,
                       CCValAssign::LocInfo LocInfo,
                       ISD::ArgFlagsTy ArgFlags, CCState &State) {
@@ -310,6 +352,23 @@ SDValue AMDGPUTargetLowering::LowerReturn(
 //===---------------------------------------------------------------------===//
 // Target specific lowering
 //===---------------------------------------------------------------------===//
+
+SDValue AMDGPUTargetLowering::LowerCall(CallLoweringInfo &CLI,
+                                        SmallVectorImpl<SDValue> &InVals) const {
+  SDValue Callee = CLI.Callee;
+  SelectionDAG &DAG = CLI.DAG;
+
+  const Function &Fn = *DAG.getMachineFunction().getFunction();
+
+  StringRef FuncName("<unknown>");
+
+  if (const GlobalAddressSDNode *G = dyn_cast<GlobalAddressSDNode>(Callee))
+    FuncName = G->getGlobal()->getName();
+
+  DiagnosticInfoUnsupported NoCalls(Fn, "call to function " + FuncName);
+  DAG.getContext()->diagnose(NoCalls);
+  return SDValue();
+}
 
 SDValue AMDGPUTargetLowering::LowerOperation(SDValue Op, SelectionDAG &DAG)
     const {
@@ -685,32 +744,46 @@ SDValue AMDGPUTargetLowering::MergeVectorStore(const SDValue &Op,
   }
 
   SDLoc DL(Op);
-  const SDValue &Value = Store->getValue();
+  SDValue Value = Store->getValue();
   EVT VT = Value.getValueType();
-  const SDValue &Ptr = Store->getBasePtr();
+  EVT ElemVT = VT.getVectorElementType();
+  SDValue Ptr = Store->getBasePtr();
   EVT MemEltVT = MemVT.getVectorElementType();
   unsigned MemEltBits = MemEltVT.getSizeInBits();
   unsigned MemNumElements = MemVT.getVectorNumElements();
-  EVT PackedVT = EVT::getIntegerVT(*DAG.getContext(), MemVT.getSizeInBits());
-  SDValue Mask = DAG.getConstant((1 << MemEltBits) - 1, PackedVT);
+  unsigned PackedSize = MemVT.getStoreSizeInBits();
+  SDValue Mask = DAG.getConstant((1 << MemEltBits) - 1, MVT::i32);
+
+  assert(Value.getValueType().getScalarSizeInBits() >= 32);
 
   SDValue PackedValue;
   for (unsigned i = 0; i < MemNumElements; ++i) {
-    EVT ElemVT = VT.getVectorElementType();
     SDValue Elt = DAG.getNode(ISD::EXTRACT_VECTOR_ELT, DL, ElemVT, Value,
                               DAG.getConstant(i, MVT::i32));
-    Elt = DAG.getZExtOrTrunc(Elt, DL, PackedVT);
-    Elt = DAG.getNode(ISD::AND, DL, PackedVT, Elt, Mask);
-    SDValue Shift = DAG.getConstant(MemEltBits * i, PackedVT);
-    Elt = DAG.getNode(ISD::SHL, DL, PackedVT, Elt, Shift);
+    Elt = DAG.getZExtOrTrunc(Elt, DL, MVT::i32);
+    Elt = DAG.getNode(ISD::AND, DL, MVT::i32, Elt, Mask); // getZeroExtendInReg
+
+    SDValue Shift = DAG.getConstant(MemEltBits * i, MVT::i32);
+    Elt = DAG.getNode(ISD::SHL, DL, MVT::i32, Elt, Shift);
+
     if (i == 0) {
       PackedValue = Elt;
     } else {
-      PackedValue = DAG.getNode(ISD::OR, DL, PackedVT, PackedValue, Elt);
+      PackedValue = DAG.getNode(ISD::OR, DL, MVT::i32, PackedValue, Elt);
     }
   }
+
+  if (PackedSize < 32) {
+    EVT PackedVT = EVT::getIntegerVT(*DAG.getContext(), PackedSize);
+    return DAG.getTruncStore(Store->getChain(), DL, PackedValue, Ptr,
+                             Store->getMemOperand()->getPointerInfo(),
+                             PackedVT,
+                             Store->isNonTemporal(), Store->isVolatile(),
+                             Store->getAlignment());
+  }
+
   return DAG.getStore(Store->getChain(), DL, PackedValue, Ptr,
-                      MachinePointerInfo(Store->getMemOperand()->getValue()),
+                      Store->getMemOperand()->getPointerInfo(),
                       Store->isVolatile(),  Store->isNonTemporal(),
                       Store->getAlignment());
 }
@@ -1017,81 +1090,22 @@ SDValue AMDGPUTargetLowering::LowerSIGN_EXTEND_INREG(SDValue Op,
   MVT VT = Op.getSimpleValueType();
   MVT ScalarVT = VT.getScalarType();
 
-  unsigned SrcBits = ExtraVT.getScalarType().getSizeInBits();
-  unsigned DestBits = ScalarVT.getSizeInBits();
-  unsigned BitsDiff = DestBits - SrcBits;
-
-  if (!Subtarget->hasBFE())
-    return ExpandSIGN_EXTEND_INREG(Op, BitsDiff, DAG);
+  if (!VT.isVector())
+    return SDValue();
 
   SDValue Src = Op.getOperand(0);
-  if (VT.isVector()) {
-    SDLoc DL(Op);
-    // Need to scalarize this, and revisit each of the scalars later.
-    // TODO: Don't scalarize on Evergreen?
-    unsigned NElts = VT.getVectorNumElements();
-    SmallVector<SDValue, 8> Args;
-    DAG.ExtractVectorElements(Src, Args);
+  SDLoc DL(Op);
 
-    SDValue VTOp = DAG.getValueType(ExtraVT.getScalarType());
-    for (unsigned I = 0; I < NElts; ++I)
-      Args[I] = DAG.getNode(ISD::SIGN_EXTEND_INREG, DL, ScalarVT, Args[I], VTOp);
+  // TODO: Don't scalarize on Evergreen?
+  unsigned NElts = VT.getVectorNumElements();
+  SmallVector<SDValue, 8> Args;
+  DAG.ExtractVectorElements(Src, Args, 0, NElts);
 
-    return DAG.getNode(ISD::BUILD_VECTOR, DL, VT, Args.data(), Args.size());
-  }
+  SDValue VTOp = DAG.getValueType(ExtraVT.getScalarType());
+  for (unsigned I = 0; I < NElts; ++I)
+    Args[I] = DAG.getNode(ISD::SIGN_EXTEND_INREG, DL, ScalarVT, Args[I], VTOp);
 
-  if (SrcBits == 32) {
-    SDLoc DL(Op);
-
-    // If the source is 32-bits, this is really half of a 2-register pair, and
-    // we need to discard the unused half of the pair.
-    SDValue TruncSrc = DAG.getNode(ISD::TRUNCATE, DL, MVT::i32, Src);
-    return DAG.getNode(ISD::SIGN_EXTEND, DL, VT, TruncSrc);
-  }
-
-  unsigned NElts = VT.isVector() ? VT.getVectorNumElements() : 1;
-
-  // TODO: Match 64-bit BFE. SI has a 64-bit BFE, but it's scalar only so it
-  // might not be worth the effort, and will need to expand to shifts when
-  // fixing SGPR copies.
-  if (SrcBits < 32 && DestBits <= 32) {
-    SDLoc DL(Op);
-    MVT ExtVT = (NElts == 1) ? MVT::i32 : MVT::getVectorVT(MVT::i32, NElts);
-
-    if (DestBits != 32)
-      Src = DAG.getNode(ISD::ZERO_EXTEND, DL, ExtVT, Src);
-
-    // FIXME: This should use TargetConstant, but that hits assertions for
-    // Evergreen.
-    SDValue Ext = DAG.getNode(AMDGPUISD::BFE_I32, DL, ExtVT,
-                              Op.getOperand(0), // Operand
-                              DAG.getConstant(0, ExtVT), // Offset
-                              DAG.getConstant(SrcBits, ExtVT)); // Width
-
-    // Truncate to the original type if necessary.
-    if (ScalarVT == MVT::i32)
-      return Ext;
-    return DAG.getNode(ISD::TRUNCATE, DL, VT, Ext);
-  }
-
-  // For small types, extend to 32-bits first.
-  if (SrcBits < 32) {
-    SDLoc DL(Op);
-    MVT ExtVT = (NElts == 1) ? MVT::i32 : MVT::getVectorVT(MVT::i32, NElts);
-
-    SDValue TruncSrc = DAG.getNode(ISD::TRUNCATE, DL, ExtVT, Src);
-    SDValue Ext32 = DAG.getNode(AMDGPUISD::BFE_I32,
-                                DL,
-                                ExtVT,
-                                TruncSrc, // Operand
-                                DAG.getConstant(0, ExtVT), // Offset
-                                DAG.getConstant(SrcBits, ExtVT)); // Width
-
-    return DAG.getNode(ISD::SIGN_EXTEND, DL, VT, Ext32);
-  }
-
-  // For everything else, use the standard bitshift expansion.
-  return ExpandSIGN_EXTEND_INREG(Op, BitsDiff, DAG);
+  return DAG.getNode(ISD::BUILD_VECTOR, DL, VT, Args.data(), Args.size());
 }
 
 //===----------------------------------------------------------------------===//
@@ -1158,6 +1172,8 @@ SDValue AMDGPUTargetLowering::PerformDAGCombine(SDNode *N,
         break;
       }
 
+      // We need to use sext even for MUL_U24, because MUL_U24 is used
+      // for signed multiply of 8 and 16-bit types.
       SDValue Reg = DAG.getSExtOrTrunc(Mul, DL, VT);
 
       return Reg;

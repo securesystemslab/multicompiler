@@ -11,7 +11,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "isel"
 #include "SelectionDAGBuilder.h"
 #include "SDNodeDbgValue.h"
 #include "llvm/ADT/BitVector.h"
@@ -61,6 +60,8 @@
 #include "llvm/Target/TargetSelectionDAGInfo.h"
 #include <algorithm>
 using namespace llvm;
+
+#define DEBUG_TYPE "isel"
 
 /// LimitFloatPrecision - Generate low-precision inline sequences for
 /// some float libcalls (6, 8 or 12 bits).
@@ -753,7 +754,7 @@ SDValue RegsForValue::getCopyFromRegs(SelectionDAG &DAG,
   }
 
   return DAG.getNode(ISD::MERGE_VALUES, dl,
-                     DAG.getVTList(&ValueVTs[0], ValueVTs.size()),
+                     DAG.getVTList(ValueVTs),
                      &Values[0], ValueVTs.size());
 }
 
@@ -2059,7 +2060,7 @@ void SelectionDAGBuilder::visitLandingPad(const LandingPadInst &LP) {
 
   // Merge into one.
   SDValue Res = DAG.getNode(ISD::MERGE_VALUES, getCurSDLoc(),
-                            DAG.getVTList(&ValueVTs[0], ValueVTs.size()),
+                            DAG.getVTList(ValueVTs),
                             &Ops[0], 2);
   setValue(&LP, Res);
 }
@@ -2765,6 +2766,11 @@ void SelectionDAGBuilder::visitIndirectBr(const IndirectBrInst &I) {
                           getValue(I.getAddress())));
 }
 
+void SelectionDAGBuilder::visitUnreachable(const UnreachableInst &I) {
+  if (DAG.getTarget().Options.TrapUnreachable)
+    DAG.setRoot(DAG.getNode(ISD::TRAP, getCurSDLoc(), MVT::Other, DAG.getRoot()));
+}
+
 void SelectionDAGBuilder::visitFSub(const User &I) {
   // -0.0 - X --> fneg
   Type *Ty = I.getType();
@@ -2887,7 +2893,7 @@ void SelectionDAGBuilder::visitSelect(const User &I) {
                                     FalseVal.getResNo() + i));
 
   setValue(&I, DAG.getNode(ISD::MERGE_VALUES, getCurSDLoc(),
-                           DAG.getVTList(&ValueVTs[0], NumValues),
+                           DAG.getVTList(ValueVTs),
                            &Values[0], NumValues));
 }
 
@@ -3262,7 +3268,7 @@ void SelectionDAGBuilder::visitInsertValue(const InsertValueInst &I) {
                 SDValue(Agg.getNode(), Agg.getResNo() + i);
 
   setValue(&I, DAG.getNode(ISD::MERGE_VALUES, getCurSDLoc(),
-                           DAG.getVTList(&AggValueVTs[0], NumAggValues),
+                           DAG.getVTList(AggValueVTs),
                            &Values[0], NumAggValues));
 }
 
@@ -3297,7 +3303,7 @@ void SelectionDAGBuilder::visitExtractValue(const ExtractValueInst &I) {
         SDValue(Agg.getNode(), Agg.getResNo() + i);
 
   setValue(&I, DAG.getNode(ISD::MERGE_VALUES, getCurSDLoc(),
-                           DAG.getVTList(&ValValueVTs[0], NumValValues),
+                           DAG.getVTList(ValValueVTs),
                            &Values[0], NumValValues));
 }
 
@@ -3511,7 +3517,7 @@ void SelectionDAGBuilder::visitLoad(const LoadInst &I) {
   }
 
   setValue(&I, DAG.getNode(ISD::MERGE_VALUES, getCurSDLoc(),
-                           DAG.getVTList(&ValueVTs[0], NumValues),
+                           DAG.getVTList(ValueVTs),
                            &Values[0], NumValues));
 }
 
@@ -3796,7 +3802,7 @@ void SelectionDAGBuilder::visitTargetIntrinsic(const CallInst &I,
   if (HasChain)
     ValueVTs.push_back(MVT::Other);
 
-  SDVTList VTs = DAG.getVTList(ValueVTs.data(), ValueVTs.size());
+  SDVTList VTs = DAG.getVTList(ValueVTs);
 
   // Create the node.
   SDValue Result;
@@ -5550,7 +5556,7 @@ void SelectionDAGBuilder::LowerCallTo(ImmutableCallSite CS, SDValue Callee,
 
     setValue(CS.getInstruction(),
              DAG.getNode(ISD::MERGE_VALUES, getCurSDLoc(),
-                         DAG.getVTList(&RetTys[0], RetTys.size()),
+                         DAG.getVTList(RetTys),
                          &Values[0], Values.size()));
   }
 
@@ -7064,7 +7070,7 @@ void SelectionDAGBuilder::visitPatchpoint(const CallInst &CI) {
     // There is always a chain and a glue type at the end
     ValueVTs.push_back(MVT::Other);
     ValueVTs.push_back(MVT::Glue);
-    NodeTys = DAG.getVTList(ValueVTs.data(), ValueVTs.size());
+    NodeTys = DAG.getVTList(ValueVTs);
   } else
     NodeTys = DAG.getVTList(MVT::Other, MVT::Glue);
 
@@ -7139,8 +7145,7 @@ TargetLowering::LowerCallTo(TargetLowering::CallLoweringInfo &CLI) const {
       SDValue Op = SDValue(Args[i].Node.getNode(),
                            Args[i].Node.getResNo() + Value);
       ISD::ArgFlagsTy Flags;
-      unsigned OriginalAlignment =
-        getDataLayout()->getABITypeAlignment(ArgTy);
+      unsigned OriginalAlignment = getDataLayout()->getABITypeAlignment(ArgTy);
 
       if (Args[i].isZExt)
         Flags.setZExt();
@@ -7281,7 +7286,7 @@ TargetLowering::LowerCallTo(TargetLowering::CallLoweringInfo &CLI) const {
     return std::make_pair(SDValue(), CLI.Chain);
 
   SDValue Res = CLI.DAG.getNode(ISD::MERGE_VALUES, CLI.DL,
-                                CLI.DAG.getVTList(&RetTys[0], RetTys.size()),
+                                CLI.DAG.getVTList(RetTys),
                             &ReturnValues[0], ReturnValues.size());
   return std::make_pair(Res, CLI.Chain);
 }
@@ -7367,8 +7372,7 @@ void SelectionDAGISel::LowerArguments(const Function &F) {
       EVT VT = ValueVTs[Value];
       Type *ArgTy = VT.getTypeForEVT(*DAG.getContext());
       ISD::ArgFlagsTy Flags;
-      unsigned OriginalAlignment =
-        DL->getABITypeAlignment(ArgTy);
+      unsigned OriginalAlignment = DL->getABITypeAlignment(ArgTy);
 
       if (F.getAttributes().hasAttribute(Idx, Attribute::ZExt))
         Flags.setZExt();

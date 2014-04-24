@@ -22,6 +22,8 @@
 using namespace llvm;
 using namespace PatternMatch;
 
+#define DEBUG_TYPE "instcombine"
+
 STATISTIC(NumSimplified, "Number of library calls simplified");
 
 /// getPromotedType - Return the specified type promoted as it would be to pass
@@ -554,6 +556,47 @@ Instruction *InstCombiner::visitCallInst(CallInst &CI) {
     break;
   }
 
+  // Constant fold <A x Bi> << Ci.
+  // FIXME: We don't handle _dq because it's a shift of an i128, but is
+  // represented in the IR as <2 x i64>. A per element shift is wrong.
+  case Intrinsic::x86_sse2_psll_d:
+  case Intrinsic::x86_sse2_psll_q:
+  case Intrinsic::x86_sse2_psll_w:
+  case Intrinsic::x86_sse2_pslli_d:
+  case Intrinsic::x86_sse2_pslli_q:
+  case Intrinsic::x86_sse2_pslli_w:
+  case Intrinsic::x86_avx2_psll_d:
+  case Intrinsic::x86_avx2_psll_q:
+  case Intrinsic::x86_avx2_psll_w:
+  case Intrinsic::x86_avx2_pslli_d:
+  case Intrinsic::x86_avx2_pslli_q:
+  case Intrinsic::x86_avx2_pslli_w: {
+    // Simplify if count is constant. To 0 if > BitWidth, otherwise to shl.
+    auto CDV = dyn_cast<ConstantDataVector>(II->getArgOperand(1));
+    auto CInt = dyn_cast<ConstantInt>(II->getArgOperand(1));
+    if (!CDV && !CInt)
+      break;
+    ConstantInt *Count;
+    if (CDV)
+      Count = cast<ConstantInt>(CDV->getElementAsConstant(0));
+    else
+      Count = CInt;
+
+    auto Vec = II->getArgOperand(0);
+    auto VT = cast<VectorType>(Vec->getType());
+    if (Count->getZExtValue() >
+        VT->getElementType()->getPrimitiveSizeInBits() - 1)
+      return ReplaceInstUsesWith(
+          CI, ConstantAggregateZero::get(Vec->getType()));
+    else {
+      unsigned VWidth = VT->getNumElements();
+      // Get a constant vector of the same type as the first operand.
+      auto VTCI = ConstantInt::get(VT->getElementType(), Count->getZExtValue());
+      return BinaryOperator::CreateShl(
+          Vec, Builder->CreateVectorSplat(VWidth, VTCI));
+    }
+    break;
+  }
 
   case Intrinsic::x86_sse41_pmovsxbw:
   case Intrinsic::x86_sse41_pmovsxwd:
@@ -572,6 +615,88 @@ Instruction *InstCombiner::visitCallInst(CallInst &CI) {
                                                  UndefElts)) {
       II->setArgOperand(0, TmpV);
       return II;
+    }
+    break;
+  }
+
+  case Intrinsic::x86_sse4a_insertqi: {
+    // insertqi x, y, 64, 0 can just copy y's lower bits and leave the top
+    // ones undef
+    // TODO: eventually we should lower this intrinsic to IR
+    if (auto CIWidth = dyn_cast<ConstantInt>(II->getArgOperand(2))) {
+      if (auto CIStart = dyn_cast<ConstantInt>(II->getArgOperand(3))) {
+        if (CIWidth->equalsInt(64) && CIStart->isZero()) {
+          Value *Vec = II->getArgOperand(1);
+          Value *Undef = UndefValue::get(Vec->getType());
+          const uint32_t Mask[] = { 0, 2 };
+          return ReplaceInstUsesWith(
+              CI,
+              Builder->CreateShuffleVector(
+                  Vec, Undef, ConstantDataVector::get(
+                                  II->getContext(), ArrayRef<uint32_t>(Mask))));
+
+        } else if (auto Source =
+                       dyn_cast<IntrinsicInst>(II->getArgOperand(0))) {
+          if (Source->hasOneUse() &&
+              Source->getArgOperand(1) == II->getArgOperand(1)) {
+            // If the source of the insert has only one use and it's another
+            // insert (and they're both inserting from the same vector), try to
+            // bundle both together.
+            auto CISourceWidth =
+                dyn_cast<ConstantInt>(Source->getArgOperand(2));
+            auto CISourceStart =
+                dyn_cast<ConstantInt>(Source->getArgOperand(3));
+            if (CISourceStart && CISourceWidth) {
+              unsigned Start = CIStart->getZExtValue();
+              unsigned Width = CIWidth->getZExtValue();
+              unsigned End = Start + Width;
+              unsigned SourceStart = CISourceStart->getZExtValue();
+              unsigned SourceWidth = CISourceWidth->getZExtValue();
+              unsigned SourceEnd = SourceStart + SourceWidth;
+              unsigned NewStart, NewWidth;
+              bool ShouldReplace = false;
+              if (Start <= SourceStart && SourceStart <= End) {
+                NewStart = Start;
+                NewWidth = std::max(End, SourceEnd) - NewStart;
+                ShouldReplace = true;
+              } else if (SourceStart <= Start && Start <= SourceEnd) {
+                NewStart = SourceStart;
+                NewWidth = std::max(SourceEnd, End) - NewStart;
+                ShouldReplace = true;
+              }
+
+              if (ShouldReplace) {
+                Constant *ConstantWidth = ConstantInt::get(
+                    II->getArgOperand(2)->getType(), NewWidth, false);
+                Constant *ConstantStart = ConstantInt::get(
+                    II->getArgOperand(3)->getType(), NewStart, false);
+                Value *Args[4] = { Source->getArgOperand(0),
+                                   II->getArgOperand(1), ConstantWidth,
+                                   ConstantStart };
+                Module *M = CI.getParent()->getParent()->getParent();
+                Value *F =
+                    Intrinsic::getDeclaration(M, Intrinsic::x86_sse4a_insertqi);
+                return ReplaceInstUsesWith(CI, Builder->CreateCall(F, Args));
+              }
+            }
+          }
+        }
+      }
+    }
+    break;
+  }
+
+  case Intrinsic::x86_avx_vpermilvar_ps:
+  case Intrinsic::x86_avx_vpermilvar_ps_256:
+  case Intrinsic::x86_avx_vpermilvar_pd:
+  case Intrinsic::x86_avx_vpermilvar_pd_256: {
+    // Convert vpermil* to shufflevector if the mask is constant.
+    Value *V = II->getArgOperand(1);
+    if (auto C = dyn_cast<ConstantDataVector>(V)) {
+      auto V1 = II->getArgOperand(0);
+      auto V2 = UndefValue::get(V1->getType());
+      auto Shuffle = Builder->CreateShuffleVector(V1, V2, C);
+      return ReplaceInstUsesWith(CI, Shuffle);
     }
     break;
   }

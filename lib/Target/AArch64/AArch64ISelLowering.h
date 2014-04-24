@@ -355,6 +355,12 @@ public:
   /// expanded to fmul + fadd.
   virtual bool isFMAFasterThanFMulAndFAdd(EVT VT) const;
 
+  /// allowsUnalignedMemoryAccesses - Returns true if the target allows
+  /// unaligned memory accesses of the specified type. Returns whether it
+  /// is "fast" by reference in the second argument.
+  virtual bool allowsUnalignedMemoryAccesses(EVT VT, unsigned AddrSpace,
+                                             bool *Fast) const;
+
   ConstraintType getConstraintType(const std::string &Constraint) const;
 
   ConstraintWeight getSingleConstraintMatchWeight(AsmOperandInfo &Info,
@@ -369,6 +375,10 @@ public:
 
   virtual bool getTgtMemIntrinsic(IntrinsicInfo &Info, const CallInst &I,
                                   unsigned Intrinsic) const override;
+
+  /// getMaximalGlobalOffset - Returns the maximal possible offset which can
+  /// be used for loads / stores from the global.
+  unsigned getMaximalGlobalOffset() const override;
 
 protected:
   std::pair<const TargetRegisterClass*, uint8_t>

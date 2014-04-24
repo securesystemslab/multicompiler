@@ -98,7 +98,6 @@
 //         - Other ObjectWriters ignore them.
 //===----------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "arm64-collect-loh"
 #include "ARM64.h"
 #include "ARM64InstrInfo.h"
 #include "ARM64MachineFunctionInfo.h"
@@ -122,6 +121,8 @@
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/ADT/Statistic.h"
 using namespace llvm;
+
+#define DEBUG_TYPE "arm64-collect-loh"
 
 static cl::opt<bool>
 PreCollectRegister("arm64-collect-loh-pre-collect-register", cl::Hidden,
@@ -492,8 +493,9 @@ static void printReachingDef(const InstrToInstrs *ColorOpToReachedUses,
       DEBUG(dbgs() << "Def:\n");
       DEBUG(DefsIt.first->print(dbgs()));
       DEBUG(dbgs() << "Reachable uses:\n");
-      for (const MachineInstr *MI : DefsIt.second)
+      for (const MachineInstr *MI : DefsIt.second) {
         DEBUG(MI->print(dbgs()));
+      }
     }
   }
 }

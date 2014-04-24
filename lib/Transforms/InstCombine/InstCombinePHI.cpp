@@ -18,6 +18,8 @@
 #include "llvm/IR/DataLayout.h"
 using namespace llvm;
 
+#define DEBUG_TYPE "instcombine"
+
 /// FoldPHIArgBinOpIntoPHI - If we have something like phi [add (a,b), add(a,c)]
 /// and if a/b/c and the add's all have a single use, turn this into a phi
 /// and a single binop.

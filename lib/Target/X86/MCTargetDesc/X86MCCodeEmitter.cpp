@@ -11,7 +11,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "mccodeemitter"
 #include "MCTargetDesc/X86MCTargetDesc.h"
 #include "MCTargetDesc/X86BaseInfo.h"
 #include "MCTargetDesc/X86FixupKinds.h"
@@ -26,6 +25,8 @@
 #include "llvm/Support/raw_ostream.h"
 
 using namespace llvm;
+
+#define DEBUG_TYPE "mccodeemitter"
 
 namespace {
 class X86MCCodeEmitter : public MCCodeEmitter {
@@ -339,7 +340,13 @@ EmitImmediate(const MCOperand &DispOp, SMLoc Loc, unsigned Size,
     if (Kind != GOT_None) {
       assert(ImmOffset == 0);
 
-      FixupKind = MCFixupKind(X86::reloc_global_offset_table);
+      if (Size == 8) {
+        FixupKind = MCFixupKind(X86::reloc_global_offset_table8);
+      } else {
+        assert(Size == 4);
+        FixupKind = MCFixupKind(X86::reloc_global_offset_table);
+      }
+
       if (Kind == GOT_Normal)
         ImmOffset = CurByte;
     } else if (Expr->getKind() == MCExpr::SymbolRef) {

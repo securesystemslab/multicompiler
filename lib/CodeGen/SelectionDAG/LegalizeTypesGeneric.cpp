@@ -23,6 +23,8 @@
 #include "llvm/IR/DataLayout.h"
 using namespace llvm;
 
+#define DEBUG_TYPE "legalize-types"
+
 //===----------------------------------------------------------------------===//
 // Generic Result Expansion.
 //===----------------------------------------------------------------------===//

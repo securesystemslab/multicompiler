@@ -26,12 +26,15 @@
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/MathExtras.h"
 #include "llvm/Support/raw_ostream.h"
+
+using namespace llvm;
+
+#define DEBUG_TYPE "hexagon-instrinfo"
+
 #define GET_INSTRINFO_CTOR_DTOR
 #define GET_INSTRMAP_INFO
 #include "HexagonGenInstrInfo.inc"
 #include "HexagonGenDFAPacketizer.inc"
-
-using namespace llvm;
 
 ///
 /// Constants for Hexagon instructions.

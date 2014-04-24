@@ -19,6 +19,8 @@
 using namespace llvm;
 using namespace PatternMatch;
 
+#define DEBUG_TYPE "instcombine"
+
 
 /// simplifyValueKnownNonZero - The specific integer value is used in a context
 /// where it is known to be non-zero.  If this allows us to simplify the

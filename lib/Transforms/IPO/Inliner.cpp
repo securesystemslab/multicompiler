@@ -13,7 +13,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "inline"
 #include "llvm/Transforms/IPO/InlinerPass.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/Statistic.h"
@@ -32,6 +31,8 @@
 #include "llvm/Transforms/Utils/Cloning.h"
 #include "llvm/Transforms/Utils/Local.h"
 using namespace llvm;
+
+#define DEBUG_TYPE "inline"
 
 STATISTIC(NumInlined, "Number of functions inlined");
 STATISTIC(NumCallsDeleted, "Number of call sites deleted, not inlined");
@@ -518,6 +519,9 @@ bool Inliner::runOnSCC(CallGraphSCC &SCC) {
         if (!shouldInline(CS))
           continue;
 
+        // Get DebugLoc to report. CS will be invalid after Inliner.
+        DebugLoc DLoc = CS.getInstruction()->getDebugLoc();
+
         // Attempt to inline the function.
         if (!InlineCallIfPossible(CS, InlineInfo, InlinedArrayAllocas,
                                   InlineHistoryID, InsertLifetime, DL))
@@ -526,7 +530,7 @@ bool Inliner::runOnSCC(CallGraphSCC &SCC) {
 
         // Report the inline decision.
         Caller->getContext().emitOptimizationRemark(
-            DEBUG_TYPE, *Caller, CS.getInstruction()->getDebugLoc(),
+            DEBUG_TYPE, *Caller, DLoc,
             Twine(Callee->getName() + " inlined into " + Caller->getName()));
 
         // If inlining this function gave us any new call sites, throw them

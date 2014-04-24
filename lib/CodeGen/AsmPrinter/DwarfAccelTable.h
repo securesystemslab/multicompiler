@@ -18,6 +18,7 @@
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/StringMap.h"
 #include "llvm/MC/MCSymbol.h"
+#include "llvm/Support/Compiler.h"
 #include "llvm/Support/DataTypes.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/Dwarf.h"
@@ -125,7 +126,8 @@ public:
     uint16_t type; // enum AtomType
     uint16_t form; // DWARF DW_FORM_ defines
 
-    Atom(uint16_t type, uint16_t form) : type(type), form(form) {}
+    LLVM_CONSTEXPR Atom(uint16_t type, uint16_t form)
+        : type(type), form(form) {}
 #ifndef NDEBUG
     void print(raw_ostream &O) {
       O << "Type: " << dwarf::AtomTypeString(type) << "\n"
@@ -238,7 +240,6 @@ private:
   // Public Implementation
 public:
   DwarfAccelTable(ArrayRef<DwarfAccelTable::Atom>);
-  ~DwarfAccelTable();
   void AddName(StringRef, const DIE *, char = 0);
   void FinalizeTable(AsmPrinter *, StringRef);
   void Emit(AsmPrinter *, MCSymbol *, DwarfFile *);

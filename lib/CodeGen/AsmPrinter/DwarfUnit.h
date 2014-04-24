@@ -102,18 +102,6 @@ protected:
   /// GlobalTypes - A map of globally visible types for this unit.
   StringMap<const DIE *> GlobalTypes;
 
-  /// AccelNames - A map of names for the name accelerator table.
-  StringMap<std::vector<const DIE *> > AccelNames;
-
-  /// AccelObjC - A map of objc spec for the objc accelerator table.
-  StringMap<std::vector<const DIE *> > AccelObjC;
-
-  /// AccelNamespace - A map of names for the namespace accelerator table.
-  StringMap<std::vector<const DIE *> > AccelNamespace;
-
-  /// AccelTypes - A map of names for the type accelerator table.
-  StringMap<std::vector<std::pair<const DIE *, unsigned> > > AccelTypes;
-
   /// DIEBlocks - A list of all the DIEBlocks in use.
   std::vector<DIEBlock *> DIEBlocks;
   
@@ -163,7 +151,7 @@ public:
   virtual ~DwarfUnit();
 
   /// Set the skeleton unit associated with this unit.
-  void setSkeleton(DwarfUnit *Skel) { Skeleton = Skel; }
+  void setSkeleton(DwarfUnit &Skel) { Skeleton = &Skel; }
 
   /// Get the skeleton unit associated with this unit.
   DwarfUnit *getSkeleton() const { return Skeleton; }
@@ -231,20 +219,6 @@ public:
   const StringMap<const DIE *> &getGlobalNames() const { return GlobalNames; }
   const StringMap<const DIE *> &getGlobalTypes() const { return GlobalTypes; }
 
-  const StringMap<std::vector<const DIE *> > &getAccelNames() const {
-    return AccelNames;
-  }
-  const StringMap<std::vector<const DIE *> > &getAccelObjC() const {
-    return AccelObjC;
-  }
-  const StringMap<std::vector<const DIE *> > &getAccelNamespace() const {
-    return AccelNamespace;
-  }
-  const StringMap<std::vector<std::pair<const DIE *, unsigned> > > &
-  getAccelTypes() const {
-    return AccelTypes;
-  }
-
   unsigned getDebugInfoOffset() const { return DebugInfoOffset; }
   void setDebugInfoOffset(unsigned DbgInfoOff) { DebugInfoOffset = DbgInfoOff; }
 
@@ -275,17 +249,8 @@ public:
   ///
   void addGlobalName(StringRef Name, DIE *Die, DIScope Context);
 
-  /// addAccelName - Add a new name to the name accelerator table.
-  void addAccelName(StringRef Name, const DIE *Die);
-
-  /// addAccelObjC - Add a new name to the ObjC accelerator table.
-  void addAccelObjC(StringRef Name, const DIE *Die);
-
   /// addAccelNamespace - Add a new name to the namespace accelerator table.
   void addAccelNamespace(StringRef Name, const DIE *Die);
-
-  /// addAccelType - Add a new type to the type accelerator table.
-  void addAccelType(StringRef Name, std::pair<const DIE *, unsigned> Die);
 
   /// getDIE - Returns the debug information entry map slot for the
   /// specified debug variable. We delegate the request to DwarfDebug

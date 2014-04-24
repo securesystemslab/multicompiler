@@ -16,6 +16,7 @@
 #ifndef LLVM_CODEGEN_COMMANDFLAGS_H
 #define LLVM_CODEGEN_COMMANDFLAGS_H
 
+#include "llvm/MC/MCTargetOptionsCommandFlags.h"
 #include "llvm/Support/CodeGen.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Target/TargetMachine.h"
@@ -194,6 +195,11 @@ UseInitArray("use-init-array",
              cl::desc("Use .init_array instead of .ctors."),
              cl::init(false));
 
+cl::opt<bool>
+NOPInsertion("nop-insertion",
+             cl::desc("Randomly add NOPs."),
+             cl::init(false));
+
 cl::opt<std::string> StopAfter("stop-after",
                             cl::desc("Stop compilation after a specific pass"),
                             cl::value_desc("pass-name"),
@@ -202,12 +208,6 @@ cl::opt<std::string> StartAfter("start-after",
                           cl::desc("Resume compilation after a specific pass"),
                           cl::value_desc("pass-name"),
                           cl::init(""));
-
-cl::opt<bool>
-NOPInsertion("nop-insertion",
-             cl::desc("Randomly add NOPs."),
-             cl::init(false));
-
 
 // Common utility function tightly tied to the options listed here. Initializes
 // a TargetOptions object with CodeGen flags and returns it.
@@ -232,6 +232,9 @@ static inline TargetOptions InitTargetOptionsFromCodeGenFlags() {
   Options.PositionIndependentExecutable = EnablePIE;
   Options.UseInitArray = UseInitArray;
   Options.NOPInsertion = NOPInsertion;
+
+  Options.MCOptions = InitMCTargetOptionsFromFlags();
+
   return Options;
 }
 

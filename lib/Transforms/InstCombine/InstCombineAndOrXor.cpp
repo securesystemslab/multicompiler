@@ -20,6 +20,8 @@
 using namespace llvm;
 using namespace PatternMatch;
 
+#define DEBUG_TYPE "instcombine"
+
 /// isFreeToInvert - Return true if the specified value is free to invert (apply
 /// ~ to).  This happens in cases where the ~ can be eliminated.
 static inline bool isFreeToInvert(Value *V) {

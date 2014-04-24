@@ -11,7 +11,6 @@
 // selection DAG.
 //
 //===----------------------------------------------------------------------===//
-#define DEBUG_TYPE "mips-lower"
 #include "MipsISelLowering.h"
 #include "InstPrinter/MipsInstPrinter.h"
 #include "MCTargetDesc/MipsBaseInfo.h"
@@ -39,6 +38,8 @@
 
 using namespace llvm;
 
+#define DEBUG_TYPE "mips-lower"
+
 STATISTIC(NumTailCalls, "Number of tail calls");
 
 static cl::opt<bool>
@@ -49,6 +50,11 @@ static cl::opt<bool>
 NoZeroDivCheck("mno-check-zero-division", cl::Hidden,
                cl::desc("MIPS: Don't trap on integer division by zero."),
                cl::init(false));
+
+cl::opt<bool>
+EnableMipsFastISel("mips-fast-isel", cl::Hidden,
+  cl::desc("Allow mips-fast-isel to be used"),
+  cl::init(false));
 
 static const MCPhysReg O32IntRegs[4] = {
   Mips::A0, Mips::A1, Mips::A2, Mips::A3
@@ -394,6 +400,15 @@ const MipsTargetLowering *MipsTargetLowering::create(MipsTargetMachine &TM) {
     return llvm::createMips16TargetLowering(TM);
 
   return llvm::createMipsSETargetLowering(TM);
+}
+
+// Create a fast isel object.
+FastISel *
+MipsTargetLowering::createFastISel(FunctionLoweringInfo &funcInfo,
+                                  const TargetLibraryInfo *libInfo) const {
+  if (!EnableMipsFastISel)
+    return TargetLowering::createFastISel(funcInfo, libInfo);
+  return Mips::createFastISel(funcInfo, libInfo);
 }
 
 EVT MipsTargetLowering::getSetCCResultType(LLVMContext &, EVT VT) const {
@@ -3195,7 +3210,7 @@ static bool originalTypeIsF128(const Type *Ty, const SDNode *CallNode) {
 MipsTargetLowering::MipsCC::SpecialCallingConvType
   MipsTargetLowering::getSpecialCallingConv(SDValue Callee) const {
   MipsCC::SpecialCallingConvType SpecialCallingConv =
-    MipsCC::NoSpecialCallingConv;;
+    MipsCC::NoSpecialCallingConv;
   if (Subtarget->inMips16HardFloat()) {
     if (GlobalAddressSDNode *G = dyn_cast<GlobalAddressSDNode>(Callee)) {
       llvm::StringRef Sym = G->getGlobal()->getName();

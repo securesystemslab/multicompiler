@@ -10,8 +10,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "arm64-disassembler"
-
 #include "ARM64Disassembler.h"
 #include "ARM64ExternalSymbolizer.h"
 #include "ARM64Subtarget.h"
@@ -23,6 +21,10 @@
 #include "llvm/Support/MemoryObject.h"
 #include "llvm/Support/TargetRegistry.h"
 #include "llvm/Support/ErrorHandling.h"
+
+using namespace llvm;
+
+#define DEBUG_TYPE "arm64-disassembler"
 
 // Pull DecodeStatus and its enum values into the global namespace.
 typedef llvm::MCDisassembler::DecodeStatus DecodeStatus;
@@ -178,8 +180,6 @@ static DecodeStatus DecodeVecShiftL8Imm(llvm::MCInst &Inst, unsigned Imm,
 #include "ARM64GenDisassemblerTables.inc"
 #include "ARM64GenInstrInfo.inc"
 
-using namespace llvm;
-
 #define Success llvm::MCDisassembler::Success
 #define Fail llvm::MCDisassembler::Fail
 
@@ -229,9 +229,13 @@ createARM64ExternalSymbolizer(StringRef TT, LLVMOpInfoCallback GetOpInfo,
 }
 
 extern "C" void LLVMInitializeARM64Disassembler() {
-  TargetRegistry::RegisterMCDisassembler(TheARM64Target,
+  TargetRegistry::RegisterMCDisassembler(TheARM64leTarget,
                                          createARM64Disassembler);
-  TargetRegistry::RegisterMCSymbolizer(TheARM64Target,
+  TargetRegistry::RegisterMCDisassembler(TheARM64beTarget,
+                                         createARM64Disassembler);
+  TargetRegistry::RegisterMCSymbolizer(TheARM64leTarget,
+                                       createARM64ExternalSymbolizer);
+  TargetRegistry::RegisterMCSymbolizer(TheARM64beTarget,
                                        createARM64ExternalSymbolizer);
 }
 
@@ -1182,11 +1186,7 @@ static DecodeStatus DecodeRegOffsetLdStInstruction(llvm::MCInst &Inst,
   }
 
   DecodeGPR64spRegisterClass(Inst, Rn, Addr, Decoder);
-
-  if ((extendHi & 0x3) == 0x3)
-    DecodeGPR64RegisterClass(Inst, Rm, Addr, Decoder);
-  else
-    DecodeGPR32RegisterClass(Inst, Rm, Addr, Decoder);
+  DecodeGPR64RegisterClass(Inst, Rm, Addr, Decoder);
 
   Inst.addOperand(MCOperand::CreateImm(extend));
   return Success;

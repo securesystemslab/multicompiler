@@ -17,11 +17,11 @@
 #include "llvm/CodeGen/LiveVariables.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 
+using namespace llvm;
+
 #define GET_INSTRINFO_CTOR_DTOR
 #define GET_INSTRMAP_INFO
 #include "SystemZGenInstrInfo.inc"
-
-using namespace llvm;
 
 // Return a mask with Count low bits set.
 static uint64_t allOnes(unsigned int Count) {
@@ -542,7 +542,7 @@ PredicateInstruction(MachineInstr *MI,
       MI->setDesc(get(CondOpcode));
       MachineInstrBuilder(*MI->getParent()->getParent(), MI)
         .addImm(CCValid).addImm(CCMask)
-        .addReg(SystemZ::CC, RegState::Implicit);;
+        .addReg(SystemZ::CC, RegState::Implicit);
       return true;
     }
   }

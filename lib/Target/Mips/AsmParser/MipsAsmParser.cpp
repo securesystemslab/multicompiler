@@ -29,6 +29,8 @@
 
 using namespace llvm;
 
+#define DEBUG_TYPE "mips-asm-parser"
+
 namespace llvm {
 class MCInstrInfo;
 }
@@ -144,6 +146,7 @@ class MipsAsmParser : public MCTargetAsmParser {
   bool isEvaluated(const MCExpr *Expr);
   bool parseSetFeature(uint64_t Feature);
   bool parseDirectiveCPSetup();
+  bool parseDirectiveNaN();
   bool parseDirectiveSet();
   bool parseDirectiveOption();
 
@@ -212,21 +215,22 @@ class MipsAsmParser : public MCTargetAsmParser {
 
   void setFeatureBits(unsigned Feature, StringRef FeatureString) {
     if (!(STI.getFeatureBits() & Feature)) {
-      setAvailableFeatures(ComputeAvailableFeatures(
-                           STI.ToggleFeature(FeatureString)));
+      setAvailableFeatures(
+          ComputeAvailableFeatures(STI.ToggleFeature(FeatureString)));
     }
   }
 
   void clearFeatureBits(unsigned Feature, StringRef FeatureString) {
     if (STI.getFeatureBits() & Feature) {
-     setAvailableFeatures(ComputeAvailableFeatures(
-                           STI.ToggleFeature(FeatureString)));
+      setAvailableFeatures(
+          ComputeAvailableFeatures(STI.ToggleFeature(FeatureString)));
     }
   }
 
 public:
   MipsAsmParser(MCSubtargetInfo &sti, MCAsmParser &parser,
-                const MCInstrInfo &MII)
+                const MCInstrInfo &MII,
+                const MCTargetOptions &Options)
       : MCTargetAsmParser(), STI(sti), Parser(parser) {
     // Initialize the set of available features.
     setAvailableFeatures(ComputeAvailableFeatures(STI.getFeatureBits()));
@@ -1961,7 +1965,7 @@ MCSymbolRefExpr::VariantKind MipsAsmParser::getVariantKind(StringRef Symbol) {
           .Case("highest", MCSymbolRefExpr::VK_Mips_HIGHEST)
           .Default(MCSymbolRefExpr::VK_None);
 
-  assert (VK != MCSymbolRefExpr::VK_None);
+  assert(VK != MCSymbolRefExpr::VK_None);
 
   return VK;
 }
@@ -2238,29 +2242,30 @@ bool MipsAsmParser::parseSetFeature(uint64_t Feature) {
   if (getLexer().isNot(AsmToken::EndOfStatement))
     return reportParseError("unexpected token in .set directive");
 
-  switch(Feature) {
-    default: llvm_unreachable("Unimplemented feature");
-    case Mips::FeatureDSP:
-      setFeatureBits(Mips::FeatureDSP, "dsp");
-      getTargetStreamer().emitDirectiveSetDsp();
+  switch (Feature) {
+  default:
+    llvm_unreachable("Unimplemented feature");
+  case Mips::FeatureDSP:
+    setFeatureBits(Mips::FeatureDSP, "dsp");
+    getTargetStreamer().emitDirectiveSetDsp();
     break;
-    case Mips::FeatureMicroMips:
-      getTargetStreamer().emitDirectiveSetMicroMips();
+  case Mips::FeatureMicroMips:
+    getTargetStreamer().emitDirectiveSetMicroMips();
     break;
-    case Mips::FeatureMips16:
-      getTargetStreamer().emitDirectiveSetMips16();
+  case Mips::FeatureMips16:
+    getTargetStreamer().emitDirectiveSetMips16();
     break;
-    case Mips::FeatureMips32r2:
-      setFeatureBits(Mips::FeatureMips32r2, "mips32r2");
-      getTargetStreamer().emitDirectiveSetMips32R2();
+  case Mips::FeatureMips32r2:
+    setFeatureBits(Mips::FeatureMips32r2, "mips32r2");
+    getTargetStreamer().emitDirectiveSetMips32R2();
     break;
-    case Mips::FeatureMips64:
-      setFeatureBits(Mips::FeatureMips64, "mips64");
-      getTargetStreamer().emitDirectiveSetMips64();
+  case Mips::FeatureMips64:
+    setFeatureBits(Mips::FeatureMips64, "mips64");
+    getTargetStreamer().emitDirectiveSetMips64();
     break;
-    case Mips::FeatureMips64r2:
-      setFeatureBits(Mips::FeatureMips64r2, "mips64r2");
-      getTargetStreamer().emitDirectiveSetMips64R2();
+  case Mips::FeatureMips64r2:
+    setFeatureBits(Mips::FeatureMips64r2, "mips64r2");
+    getTargetStreamer().emitDirectiveSetMips64R2();
     break;
   }
   return false;
@@ -2292,7 +2297,7 @@ bool MipsAsmParser::eatComma(StringRef ErrorStr) {
     return Error(Loc, ErrorStr);
   }
 
-  Parser.Lex();  // Eat the comma.
+  Parser.Lex(); // Eat the comma.
   return true;
 }
 
@@ -2354,11 +2359,9 @@ bool MipsAsmParser::parseDirectiveCPSetup() {
   Inst.clear();
 
   const MCSymbolRefExpr *HiExpr = MCSymbolRefExpr::Create(
-      Sym->getName(), MCSymbolRefExpr::VK_Mips_GPOFF_HI,
-      getContext());
+      Sym->getName(), MCSymbolRefExpr::VK_Mips_GPOFF_HI, getContext());
   const MCSymbolRefExpr *LoExpr = MCSymbolRefExpr::Create(
-      Sym->getName(), MCSymbolRefExpr::VK_Mips_GPOFF_LO,
-      getContext());
+      Sym->getName(), MCSymbolRefExpr::VK_Mips_GPOFF_LO, getContext());
   // lui $gp, %hi(%neg(%gp_rel(funcSym)))
   Inst.setOpcode(Mips::LUi);
   Inst.addOperand(MCOperand::CreateReg(GPReg));
@@ -2380,6 +2383,26 @@ bool MipsAsmParser::parseDirectiveCPSetup() {
   Inst.addOperand(MCOperand::CreateReg(GPReg));
   Inst.addOperand(MCOperand::CreateReg(FuncReg));
   TS.EmitInstruction(Inst, STI);
+  return false;
+}
+
+bool MipsAsmParser::parseDirectiveNaN() {
+  if (getLexer().isNot(AsmToken::EndOfStatement)) {
+    const AsmToken &Tok = Parser.getTok();
+
+    if (Tok.getString() == "2008") {
+      Parser.Lex();
+      getTargetStreamer().emitDirectiveNaN2008();
+      return false;
+    } else if (Tok.getString() == "legacy") {
+      Parser.Lex();
+      getTargetStreamer().emitDirectiveNaNLegacy();
+      return false;
+    }
+  }
+  // If we don't recognize the option passed to the .nan
+  // directive (e.g. no option or unknown option), emit an error.
+  reportParseError("invalid option in .nan directive");
   return false;
 }
 
@@ -2409,15 +2432,15 @@ bool MipsAsmParser::parseDirectiveSet() {
     Parser.eatToEndOfStatement();
     return false;
   } else if (Tok.getString() == "micromips") {
-      return parseSetFeature(Mips::FeatureMicroMips);
+    return parseSetFeature(Mips::FeatureMicroMips);
   } else if (Tok.getString() == "mips32r2") {
-      return parseSetFeature(Mips::FeatureMips32r2);
+    return parseSetFeature(Mips::FeatureMips32r2);
   } else if (Tok.getString() == "mips64") {
-      return parseSetFeature(Mips::FeatureMips64);
+    return parseSetFeature(Mips::FeatureMips64);
   } else if (Tok.getString() == "mips64r2") {
-      return parseSetFeature(Mips::FeatureMips64r2);
+    return parseSetFeature(Mips::FeatureMips64r2);
   } else if (Tok.getString() == "dsp") {
-      return parseSetFeature(Mips::FeatureDSP);
+    return parseSetFeature(Mips::FeatureDSP);
   } else {
     // It is just an identifier, look for an assignment.
     parseSetAssignment();
@@ -2565,6 +2588,9 @@ bool MipsAsmParser::ParseDirective(AsmToken DirectiveID) {
     Parser.eatToEndOfStatement();
     return false;
   }
+
+  if (IDVal == ".nan")
+    return parseDirectiveNaN();
 
   if (IDVal == ".gpword") {
     parseDirectiveGpWord();

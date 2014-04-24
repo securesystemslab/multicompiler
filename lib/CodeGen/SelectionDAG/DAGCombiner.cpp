@@ -16,7 +16,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "dagcombine"
 #include "llvm/CodeGen/SelectionDAG.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/Statistic.h"
@@ -39,6 +38,8 @@
 #include "llvm/Target/TargetSubtargetInfo.h"
 #include <algorithm>
 using namespace llvm;
+
+#define DEBUG_TYPE "dagcombine"
 
 STATISTIC(NodesCombined   , "Number of dag nodes combined");
 STATISTIC(PreIndexedNodes , "Number of pre-indexed nodes created");
@@ -5478,7 +5479,10 @@ SDValue DAGCombiner::visitANY_EXTEND(SDNode *N) {
   }
 
   if (N0.getOpcode() == ISD::SETCC) {
-    // aext(setcc) -> sext_in_reg(vsetcc) for vectors.
+    // For vectors:
+    // aext(setcc) -> vsetcc
+    // aext(setcc) -> truncate(vsetcc)
+    // aext(setcc) -> aext(vsetcc)
     // Only do this before legalize for now.
     if (VT.isVector() && !LegalOperations) {
       EVT N0VT = N0.getOperand(0).getValueType();
@@ -5493,19 +5497,14 @@ SDValue DAGCombiner::visitANY_EXTEND(SDNode *N) {
                              cast<CondCodeSDNode>(N0.getOperand(2))->get());
       // If the desired elements are smaller or larger than the source
       // elements we can use a matching integer vector type and then
-      // truncate/sign extend
+      // truncate/any extend
       else {
-        EVT MatchingElementType =
-          EVT::getIntegerVT(*DAG.getContext(),
-                            N0VT.getScalarType().getSizeInBits());
-        EVT MatchingVectorType =
-          EVT::getVectorVT(*DAG.getContext(), MatchingElementType,
-                           N0VT.getVectorNumElements());
+        EVT MatchingVectorType = N0VT.changeVectorElementTypeToInteger();
         SDValue VsetCC =
           DAG.getSetCC(SDLoc(N), MatchingVectorType, N0.getOperand(0),
                         N0.getOperand(1),
                         cast<CondCodeSDNode>(N0.getOperand(2))->get());
-        return DAG.getSExtOrTrunc(VsetCC, SDLoc(N), VT);
+        return DAG.getAnyExtOrTrunc(VsetCC, SDLoc(N), VT);
       }
     }
 
@@ -10942,7 +10941,9 @@ SDValue DAGCombiner::SimplifySelectCC(SDLoc DL, SDValue N0, SDValue N1,
     if (ConstantFPSDNode *FV = dyn_cast<ConstantFPSDNode>(N3)) {
       if (TLI.isTypeLegal(N2.getValueType()) &&
           (TLI.getOperationAction(ISD::ConstantFP, N2.getValueType()) !=
-           TargetLowering::Legal) &&
+               TargetLowering::Legal &&
+           !TLI.isFPImmLegal(TV->getValueAPF(), TV->getValueType(0)) &&
+           !TLI.isFPImmLegal(FV->getValueAPF(), FV->getValueType(0))) &&
           // If both constants have multiple uses, then we won't need to do an
           // extra load, they are likely around in registers for other users.
           (TV->hasOneUse() || FV->hasOneUse())) {

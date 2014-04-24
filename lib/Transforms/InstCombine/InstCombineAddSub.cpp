@@ -20,6 +20,8 @@
 using namespace llvm;
 using namespace PatternMatch;
 
+#define DEBUG_TYPE "instcombine"
+
 namespace {
 
   /// Class representing coefficient of floating-point addend.

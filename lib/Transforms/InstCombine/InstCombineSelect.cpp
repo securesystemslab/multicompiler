@@ -18,6 +18,8 @@
 using namespace llvm;
 using namespace PatternMatch;
 
+#define DEBUG_TYPE "instcombine"
+
 /// MatchSelectPattern - Pattern match integer [SU]MIN, [SU]MAX, and ABS idioms,
 /// returning the kind and providing the out parameter results if we
 /// successfully match.

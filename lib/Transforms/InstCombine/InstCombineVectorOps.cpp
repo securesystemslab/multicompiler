@@ -17,6 +17,8 @@
 using namespace llvm;
 using namespace PatternMatch;
 
+#define DEBUG_TYPE "instcombine"
+
 /// CheapToScalarize - Return true if the value is cheaper to scalarize than it
 /// is to leave as a vector operation.  isConstant indicates whether we're
 /// extracting one known element.  If false we're extracting a variable index.

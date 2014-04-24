@@ -13,7 +13,6 @@
 #include "MCTargetDesc/ARMArchName.h"
 #include "MCTargetDesc/ARMBaseInfo.h"
 #include "MCTargetDesc/ARMMCExpr.h"
-#include "llvm/ADT/OwningPtr.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringExtras.h"
@@ -345,7 +344,8 @@ public:
   };
 
   ARMAsmParser(MCSubtargetInfo &_STI, MCAsmParser &_Parser,
-               const MCInstrInfo &MII)
+               const MCInstrInfo &MII,
+               const MCTargetOptions &Options)
       : MCTargetAsmParser(), STI(_STI), Parser(_Parser), MII(MII), UC(_Parser) {
     MCAsmParserExtension::Initialize(_Parser);
 
@@ -2917,7 +2917,7 @@ int ARMAsmParser::tryParseShiftRegister(
   // The source register for the shift has already been added to the
   // operand list, so we need to pop it off and combine it into the shifted
   // register operand instead.
-  OwningPtr<ARMOperand> PrevOp((ARMOperand*)Operands.pop_back_val());
+  std::unique_ptr<ARMOperand> PrevOp((ARMOperand*)Operands.pop_back_val());
   if (!PrevOp->isReg())
     return Error(PrevOp->getStartLoc(), "shift must be of a register");
   int SrcReg = PrevOp->getReg();
@@ -5863,6 +5863,30 @@ validateInstruction(MCInst &Inst,
       return Error(Operands[Op]->getStartLoc(), "branch target out of range");
     break;
   }
+  case ARM::MOVi16:
+  case ARM::t2MOVi16:
+  case ARM::t2MOVTi16:
+    {
+    // We want to avoid misleadingly allowing something like "mov r0, <symbol>"
+    // especially when we turn it into a movw and the expression <symbol> does
+    // not have a :lower16: or :upper16 as part of the expression.  We don't
+    // want the behavior of silently truncating, which can be unexpected and
+    // lead to bugs that are difficult to find since this is an easy mistake
+    // to make.
+    int i = (Operands[3]->isImm()) ? 3 : 4;
+    ARMOperand *Op = static_cast<ARMOperand*>(Operands[i]);
+    const MCConstantExpr *CE = dyn_cast<MCConstantExpr>(Op->getImm());
+    if (CE) break;
+    const MCExpr *E = dyn_cast<MCExpr>(Op->getImm());
+    if (!E) break;
+    const ARMMCExpr *ARM16Expr = dyn_cast<ARMMCExpr>(E);
+    if (!ARM16Expr || (ARM16Expr->getKind() != ARMMCExpr::VK_ARM_HI16 &&
+                       ARM16Expr->getKind() != ARMMCExpr::VK_ARM_LO16)) {
+      return Error(Op->getStartLoc(),
+	     "immediate expression for mov requires :lower16: or :upper16");
+      break;
+    }
+    }
   }
 
   return false;

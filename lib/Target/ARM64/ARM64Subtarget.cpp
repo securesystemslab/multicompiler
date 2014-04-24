@@ -18,18 +18,20 @@
 #include "llvm/IR/GlobalValue.h"
 #include "llvm/Support/TargetRegistry.h"
 
+using namespace llvm;
+
+#define DEBUG_TYPE "arm64-subtarget"
+
 #define GET_SUBTARGETINFO_CTOR
 #define GET_SUBTARGETINFO_TARGET_DESC
 #include "ARM64GenSubtargetInfo.inc"
 
-using namespace llvm;
-
 ARM64Subtarget::ARM64Subtarget(const std::string &TT, const std::string &CPU,
-                               const std::string &FS)
+                               const std::string &FS, bool LittleEndian)
     : ARM64GenSubtargetInfo(TT, CPU, FS), ARMProcFamily(Others),
       HasFPARMv8(false), HasNEON(false), HasCrypto(false),
       HasZeroCycleRegMove(false), HasZeroCycleZeroing(false),
-      CPUString(CPU), TargetTriple(TT) {
+      CPUString(CPU), TargetTriple(TT), IsLittleEndian(LittleEndian) {
   // Determine default and user-specified characteristics
 
   if (CPUString.empty())

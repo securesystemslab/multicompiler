@@ -17,9 +17,10 @@
 #include "llvm/Analysis/RegionIterator.h"
 #include "llvm/Support/Timer.h"
 
-#define DEBUG_TYPE "regionpassmgr"
 #include "llvm/Support/Debug.h"
 using namespace llvm;
+
+#define DEBUG_TYPE "regionpassmgr"
 
 //===----------------------------------------------------------------------===//
 // RGPassManager
@@ -185,7 +186,6 @@ private:
 
 public:
   static char ID;
-  PrintRegionPass() : RegionPass(ID), Out(dbgs()) {}
   PrintRegionPass(const std::string &B, raw_ostream &o)
       : RegionPass(ID), Banner(B), Out(o) {}
 

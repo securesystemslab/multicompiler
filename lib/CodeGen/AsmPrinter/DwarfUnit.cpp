@@ -11,8 +11,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "dwarfdebug"
-
 #include "DwarfUnit.h"
 #include "DwarfAccelTable.h"
 #include "DwarfDebug.h"
@@ -34,6 +32,8 @@
 #include "llvm/Target/TargetRegisterInfo.h"
 
 using namespace llvm;
+
+#define DEBUG_TYPE "dwarfdebug"
 
 static cl::opt<bool>
 GenerateDwarfTypeUnits("generate-type-units", cl::Hidden,
@@ -290,7 +290,7 @@ void DwarfCompileUnit::addLabelAddress(DIE *Die, dwarf::Attribute Attribute,
   if (Label)
     DD->addArangeLabel(SymbolCU(this, Label));
 
-  unsigned idx = DU->getAddrPoolIndex(Label);
+  unsigned idx = DD->getAddressPool().getIndex(Label);
   DIEValue *Value = new (DIEValueAllocator) DIEInteger(idx);
   Die->addValue(Attribute, dwarf::DW_FORM_GNU_addr_index, Value);
 }
@@ -335,7 +335,8 @@ void DwarfUnit::addOpAddress(DIELoc *Die, const MCSymbol *Sym) {
     addLabel(Die, dwarf::DW_FORM_udata, Sym);
   } else {
     addUInt(Die, dwarf::DW_FORM_data1, dwarf::DW_OP_GNU_addr_index);
-    addUInt(Die, dwarf::DW_FORM_GNU_addr_index, DU->getAddrPoolIndex(Sym));
+    addUInt(Die, dwarf::DW_FORM_GNU_addr_index,
+            DD->getAddressPool().getIndex(Sym));
   }
 }
 
@@ -1034,7 +1035,7 @@ void DwarfUnit::updateAcceleratorTables(DIScope Context, DIType Ty,
       IsImplementation = (CT.getRunTimeLang() == 0) || CT.isObjcClassComplete();
     }
     unsigned Flags = IsImplementation ? dwarf::DW_FLAG_type_implementation : 0;
-    addAccelType(Ty.getName(), std::make_pair(TyDIE, Flags));
+    DD->addAccelType(Ty.getName(), TyDIE, Flags);
 
     if ((!Context || Context.isCompileUnit() || Context.isFile() ||
          Context.isNameSpace()) &&
@@ -1062,43 +1063,6 @@ void DwarfUnit::addType(DIE *Entity, DIType Ty, dwarf::Attribute Attribute) {
   Entry = createDIEEntry(Buffer);
   insertDIEEntry(Ty, Entry);
   addDIEEntry(Entity, Attribute, Entry);
-}
-
-// Accelerator table mutators - add each name along with its companion
-// DIE to the proper table while ensuring that the name that we're going
-// to reference is in the string table. We do this since the names we
-// add may not only be identical to the names in the DIE.
-void DwarfUnit::addAccelName(StringRef Name, const DIE *Die) {
-  if (!DD->useDwarfAccelTables())
-    return;
-  DU->getStringPoolEntry(Name);
-  std::vector<const DIE *> &DIEs = AccelNames[Name];
-  DIEs.push_back(Die);
-}
-
-void DwarfUnit::addAccelObjC(StringRef Name, const DIE *Die) {
-  if (!DD->useDwarfAccelTables())
-    return;
-  DU->getStringPoolEntry(Name);
-  std::vector<const DIE *> &DIEs = AccelObjC[Name];
-  DIEs.push_back(Die);
-}
-
-void DwarfUnit::addAccelNamespace(StringRef Name, const DIE *Die) {
-  if (!DD->useDwarfAccelTables())
-    return;
-  DU->getStringPoolEntry(Name);
-  std::vector<const DIE *> &DIEs = AccelNamespace[Name];
-  DIEs.push_back(Die);
-}
-
-void DwarfUnit::addAccelType(StringRef Name,
-                             std::pair<const DIE *, unsigned> Die) {
-  if (!DD->useDwarfAccelTables())
-    return;
-  DU->getStringPoolEntry(Name);
-  std::vector<std::pair<const DIE *, unsigned> > &DIEs = AccelTypes[Name];
-  DIEs.push_back(Die);
 }
 
 /// addGlobalName - Add a new global name to the compile unit.
@@ -1434,10 +1398,10 @@ DIE *DwarfUnit::getOrCreateNameSpace(DINameSpace NS) {
 
   if (!NS.getName().empty()) {
     addString(NDie, dwarf::DW_AT_name, NS.getName());
-    addAccelNamespace(NS.getName(), NDie);
+    DD->addAccelNamespace(NS.getName(), NDie);
     addGlobalName(NS.getName(), NDie, NS.getContext());
   } else
-    addAccelNamespace("(anonymous namespace)", NDie);
+    DD->addAccelNamespace("(anonymous namespace)", NDie);
   addSourceLine(NDie, NS);
   return NDie;
 }
@@ -1668,7 +1632,7 @@ void DwarfCompileUnit::createGlobalVariableDIE(DIGlobalVariable GV) {
       } else {
         addUInt(Loc, dwarf::DW_FORM_data1, dwarf::DW_OP_GNU_const_index);
         addUInt(Loc, dwarf::DW_FORM_udata,
-                DU->getAddrPoolIndex(Sym, /* TLS */ true));
+                DD->getAddressPool().getIndex(Sym, /* TLS */ true));
       }
       // 3) followed by a custom OP to make the debugger do a TLS lookup.
       addUInt(Loc, dwarf::DW_FORM_data1, dwarf::DW_OP_GNU_push_tls_address);
@@ -1726,12 +1690,12 @@ void DwarfCompileUnit::createGlobalVariableDIE(DIGlobalVariable GV) {
 
   if (addToAccelTable) {
     DIE *AddrDIE = VariableSpecDIE ? VariableSpecDIE : VariableDIE;
-    addAccelName(GV.getName(), AddrDIE);
+    DD->addAccelName(GV.getName(), AddrDIE);
 
     // If the linkage name is different than the name, go ahead and output
     // that as well into the name table.
     if (GV.getLinkageName() != "" && GV.getName() != GV.getLinkageName())
-      addAccelName(GV.getLinkageName(), AddrDIE);
+      DD->addAccelName(GV.getLinkageName(), AddrDIE);
   }
 
   if (!GV.isLocalToUnit())

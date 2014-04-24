@@ -41,7 +41,7 @@ private:
   /// of the same bitwidth.
   SDValue MergeVectorStore(const SDValue &Op, SelectionDAG &DAG) const;
   /// \brief Split a vector store into multiple scalar stores.
-  /// \returns The resulting chain. 
+  /// \returns The resulting chain.
   SDValue LowerUDIVREM(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerUINT_TO_FP(SDValue Op, SelectionDAG &DAG) const;
 
@@ -98,10 +98,7 @@ public:
                               const SmallVectorImpl<SDValue> &OutVals,
                               SDLoc DL, SelectionDAG &DAG) const;
   virtual SDValue LowerCall(CallLoweringInfo &CLI,
-                            SmallVectorImpl<SDValue> &InVals) const {
-    CLI.Callee.dump();
-    llvm_unreachable("Undefined function");
-  }
+                            SmallVectorImpl<SDValue> &InVals) const;
 
   virtual SDValue LowerOperation(SDValue Op, SelectionDAG &DAG) const;
   virtual void ReplaceNodeResults(SDNode * N,

@@ -13,7 +13,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "globalopt"
 #include "llvm/Transforms/IPO.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/STLExtras.h"
@@ -43,6 +42,8 @@
 #include "llvm/Transforms/Utils/ModuleUtils.h"
 #include <algorithm>
 using namespace llvm;
+
+#define DEBUG_TYPE "globalopt"
 
 STATISTIC(NumMarked    , "Number of globals marked constant");
 STATISTIC(NumUnnamed   , "Number of globals marked unnamed_addr");
@@ -1169,10 +1170,13 @@ static Value *GetHeapSROAValue(Value *V, unsigned FieldNo,
   } else if (PHINode *PN = dyn_cast<PHINode>(V)) {
     // PN's type is pointer to struct.  Make a new PHI of pointer to struct
     // field.
-    StructType *ST = cast<StructType>(PN->getType()->getPointerElementType());
 
+    PointerType *PTy = cast<PointerType>(PN->getType());
+    StructType *ST = cast<StructType>(PTy->getElementType());
+
+    unsigned AS = PTy->getAddressSpace();
     PHINode *NewPN =
-     PHINode::Create(PointerType::getUnqual(ST->getElementType(FieldNo)),
+      PHINode::Create(PointerType::get(ST->getElementType(FieldNo), AS),
                      PN->getNumIncomingValues(),
                      PN->getName()+".f"+Twine(FieldNo), PN);
     Result = NewPN;
@@ -1284,9 +1288,10 @@ static GlobalVariable *PerformHeapAllocSRoA(GlobalVariable *GV, CallInst *CI,
   std::vector<Value*> FieldGlobals;
   std::vector<Value*> FieldMallocs;
 
+  unsigned AS = GV->getType()->getPointerAddressSpace();
   for (unsigned FieldNo = 0, e = STy->getNumElements(); FieldNo != e;++FieldNo){
     Type *FieldTy = STy->getElementType(FieldNo);
-    PointerType *PFieldTy = PointerType::getUnqual(FieldTy);
+    PointerType *PFieldTy = PointerType::get(FieldTy, AS);
 
     GlobalVariable *NGV =
       new GlobalVariable(*GV->getParent(),
@@ -2271,22 +2276,16 @@ class Evaluator {
 public:
   Evaluator(const DataLayout *DL, const TargetLibraryInfo *TLI)
     : DL(DL), TLI(TLI) {
-    ValueStack.push_back(new DenseMap<Value*, Constant*>);
+    ValueStack.push_back(make_unique<DenseMap<Value*, Constant*>>());
   }
 
   ~Evaluator() {
-    DeleteContainerPointers(ValueStack);
-    while (!AllocaTmps.empty()) {
-      GlobalVariable *Tmp = AllocaTmps.back();
-      AllocaTmps.pop_back();
-
+    for (auto &Tmp : AllocaTmps)
       // If there are still users of the alloca, the program is doing something
       // silly, e.g. storing the address of the alloca somewhere and using it
       // later.  Since this is undefined, we'll just make it be null.
       if (!Tmp->use_empty())
         Tmp->replaceAllUsesWith(Constant::getNullValue(Tmp->getType()));
-      delete Tmp;
-    }
   }
 
   /// EvaluateFunction - Evaluate a call to function F, returning true if
@@ -2308,7 +2307,7 @@ public:
   }
 
   void setVal(Value *V, Constant *C) {
-    ValueStack.back()->operator[](V) = C;
+    (*ValueStack.back())[V] = C;
   }
 
   const DenseMap<Constant*, Constant*> &getMutatedMemory() const {
@@ -2325,7 +2324,7 @@ private:
   /// ValueStack - As we compute SSA register values, we store their contents
   /// here. The back of the vector contains the current function and the stack
   /// contains the values in the calling frames.
-  SmallVector<DenseMap<Value*, Constant*>*, 4> ValueStack;
+  SmallVector<std::unique_ptr<DenseMap<Value*, Constant*>>, 4> ValueStack;
 
   /// CallStack - This is used to detect recursion.  In pathological situations
   /// we could hit exponential behavior, but at least there is nothing
@@ -2340,7 +2339,7 @@ private:
   /// AllocaTmps - To 'execute' an alloca, we create a temporary global variable
   /// to represent its body.  This vector is needed so we can delete the
   /// temporary globals when we are done.
-  SmallVector<GlobalVariable*, 32> AllocaTmps;
+  SmallVector<std::unique_ptr<GlobalVariable>, 32> AllocaTmps;
 
   /// Invariants - These global variables have been marked invariant by the
   /// static constructor.
@@ -2530,11 +2529,10 @@ bool Evaluator::EvaluateBlock(BasicBlock::iterator CurInst,
         return false;  // Cannot handle array allocs.
       }
       Type *Ty = AI->getType()->getElementType();
-      AllocaTmps.push_back(new GlobalVariable(Ty, false,
-                                              GlobalValue::InternalLinkage,
-                                              UndefValue::get(Ty),
-                                              AI->getName()));
-      InstResult = AllocaTmps.back();
+      AllocaTmps.push_back(
+          make_unique<GlobalVariable>(Ty, false, GlobalValue::InternalLinkage,
+                                      UndefValue::get(Ty), AI->getName()));
+      InstResult = AllocaTmps.back().get();
       DEBUG(dbgs() << "Found an alloca. Result: " << *InstResult << "\n");
     } else if (isa<CallInst>(CurInst) || isa<InvokeInst>(CurInst)) {
       CallSite CS(CurInst);
@@ -2638,12 +2636,12 @@ bool Evaluator::EvaluateBlock(BasicBlock::iterator CurInst,
 
         Constant *RetVal = 0;
         // Execute the call, if successful, use the return value.
-        ValueStack.push_back(new DenseMap<Value*, Constant*>);
+        ValueStack.push_back(make_unique<DenseMap<Value *, Constant *>>());
         if (!EvaluateFunction(Callee, RetVal, Formals)) {
           DEBUG(dbgs() << "Failed to evaluate function.\n");
           return false;
         }
-        delete ValueStack.pop_back_val();
+        ValueStack.pop_back();
         InstResult = RetVal;
 
         if (InstResult != NULL) {

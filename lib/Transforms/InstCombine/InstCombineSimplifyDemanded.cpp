@@ -12,7 +12,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-
 #include "InstCombine.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/IntrinsicInst.h"
@@ -20,6 +19,8 @@
 
 using namespace llvm;
 using namespace llvm::PatternMatch;
+
+#define DEBUG_TYPE "instcombine"
 
 /// ShrinkDemandedConstant - Check to see if the specified operand of the
 /// specified instruction is a constant integer.  If so, check to see if there

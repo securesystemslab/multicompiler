@@ -31,6 +31,7 @@
 #include "llvm/IR/CallSite.h"
 #include "llvm/IR/CallingConv.h"
 #include "llvm/IR/InlineAsm.h"
+#include "llvm/IR/IRBuilder.h"
 #include "llvm/MC/MCRegisterInfo.h"
 #include "llvm/Target/TargetCallingConv.h"
 #include "llvm/Target/TargetMachine.h"
@@ -181,6 +182,9 @@ public:
     return HasMultipleConditionRegisters;
   }
 
+  /// Return true if the target has BitExtract instructions.
+  bool hasExtractBitsInsn() const { return HasExtractBitsInsn; }
+
   /// Return true if a vector of the given type should be split
   /// (TypeSplitVector) instead of promoted (TypePromoteInteger) during type
   /// legalization.
@@ -216,6 +220,10 @@ public:
 
   /// Return true if pow2 div is cheaper than a chain of srl/add/sra.
   bool isPow2DivCheap() const { return Pow2DivIsCheap; }
+
+  /// Return true if Div never traps, returns 0 when div by 0 and return TMin,
+  /// when sdiv TMin by -1.
+  bool isDivWellDefined() const { return DivIsWellDefined; }
 
   /// Return true if Flow Control is an expensive operation that should be
   /// avoided.
@@ -897,6 +905,35 @@ public:
   /// @}
 
   //===--------------------------------------------------------------------===//
+  /// \name Helpers for load-linked/store-conditional atomic expansion.
+  /// @{
+
+  /// Perform a load-linked operation on Addr, returning a "Value *" with the
+  /// corresponding pointee type. This may entail some non-trivial operations to
+  /// truncate or reconstruct types that will be illegal in the backend. See
+  /// ARMISelLowering for an example implementation.
+  virtual Value *emitLoadLinked(IRBuilder<> &Builder, Value *Addr,
+                                AtomicOrdering Ord) const {
+    llvm_unreachable("Load linked unimplemented on this target");
+  }
+
+  /// Perform a store-conditional operation to Addr. Return the status of the
+  /// store. This should be 0 if the store succeeded, non-zero otherwise.
+  virtual Value *emitStoreConditional(IRBuilder<> &Builder, Value *Val,
+                                      Value *Addr, AtomicOrdering Ord) const {
+    llvm_unreachable("Store conditional unimplemented on this target");
+  }
+
+  /// Return true if the given (atomic) instruction should be expanded by the
+  /// IR-level AtomicExpandLoadLinked pass into a loop involving
+  /// load-linked/store-conditional pairs. Atomic stores will be expanded in the
+  /// same way as "atomic xchg" operations which ignore their output if needed.
+  virtual bool shouldExpandAtomicInIR(Instruction *Inst) const {
+    return false;
+  }
+
+
+  //===--------------------------------------------------------------------===//
   // TargetLowering Configuration Methods - These methods should be invoked by
   // the derived class constructor to configure this object for the target.
   //
@@ -976,6 +1013,14 @@ protected:
     HasMultipleConditionRegisters = hasManyRegs;
   }
 
+  /// Tells the code generator that the target has BitExtract instructions.
+  /// The code generator will aggressively sink "shift"s into the blocks of
+  /// their users if the users will generate "and" instructions which can be
+  /// combined with "shift" to BitExtract instructions.
+  void setHasExtractBitsInsn(bool hasExtractInsn = true) {
+    HasExtractBitsInsn = hasExtractInsn;
+  }
+
   /// Tells the code generator not to expand sequence of operations into a
   /// separate sequences that increases the amount of flow control.
   void setJumpIsExpensive(bool isExpensive = true) {
@@ -995,6 +1040,13 @@ protected:
   /// Tells the code generator that it shouldn't generate srl/add/sra for a
   /// signed divide by power of two, and let the target handle it.
   void setPow2DivIsCheap(bool isCheap = true) { Pow2DivIsCheap = isCheap; }
+
+  /// Tells the code-generator that it is safe to execute sdiv/udiv/srem/urem
+  /// even when RHS is 0. It is also safe to execute sdiv/srem when LHS is
+  /// SignedMinValue and RHS is -1.
+  void setDivIsWellDefined (bool isWellDefined = true) {
+    DivIsWellDefined = isWellDefined;
+  }
 
   /// Add the specified register class as an available regclass for the
   /// specified value type. This indicates the selector can handle values of
@@ -1395,6 +1447,12 @@ private:
   /// the blocks of their users.
   bool HasMultipleConditionRegisters;
 
+  /// Tells the code generator that the target has BitExtract instructions.
+  /// The code generator will aggressively sink "shift"s into the blocks of
+  /// their users if the users will generate "and" instructions which can be
+  /// combined with "shift" to BitExtract instructions.
+  bool HasExtractBitsInsn;
+
   /// Tells the code generator not to expand integer divides by constants into a
   /// sequence of muls, adds, and shifts.  This is a hack until a real cost
   /// model is in place.  If we ever optimize for size, this will be set to true
@@ -1410,6 +1468,11 @@ private:
   /// Tells the code generator that it shouldn't generate srl/add/sra for a
   /// signed divide by power of two, and let the target handle it.
   bool Pow2DivIsCheap;
+
+  /// Tells the code-generator that it is safe to execute sdiv/udiv/srem/urem
+  /// even when RHS is 0. It is also safe to execute sdiv/srem when LHS is
+  /// SignedMinValue and RHS is -1.
+  bool DivIsWellDefined;
 
   /// Tells the code generator that it shouldn't generate extra flow control
   /// instructions and should attempt to combine flow control instructions via

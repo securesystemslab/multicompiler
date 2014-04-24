@@ -26,6 +26,8 @@
 #include "llvm/Support/raw_ostream.h"
 using namespace llvm;
 
+#define DEBUG_TYPE "legalize-types"
+
 //===----------------------------------------------------------------------===//
 //  Result Vector Scalarization: <1 x ty> -> ty.
 //===----------------------------------------------------------------------===//

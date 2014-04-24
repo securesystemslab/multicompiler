@@ -49,7 +49,8 @@ EnableDeadRegisterElimination("arm64-dead-def-elimination", cl::Hidden,
 
 extern "C" void LLVMInitializeARM64Target() {
   // Register the target.
-  RegisterTargetMachine<ARM64TargetMachine> X(TheARM64Target);
+  RegisterTargetMachine<ARM64leTargetMachine> X(TheARM64leTarget);
+  RegisterTargetMachine<ARM64beTargetMachine> Y(TheARM64beTarget);
 }
 
 /// TargetMachine ctor - Create an ARM64 architecture model.
@@ -58,15 +59,39 @@ ARM64TargetMachine::ARM64TargetMachine(const Target &T, StringRef TT,
                                        StringRef CPU, StringRef FS,
                                        const TargetOptions &Options,
                                        Reloc::Model RM, CodeModel::Model CM,
-                                       CodeGenOpt::Level OL)
+                                       CodeGenOpt::Level OL,
+                                       bool LittleEndian)
     : LLVMTargetMachine(T, TT, CPU, FS, Options, RM, CM, OL),
-      Subtarget(TT, CPU, FS),
-      DL(Subtarget.isTargetMachO() ? "e-m:o-i64:64-i128:128-n32:64-S128"
-                                   : "e-m:e-i64:64-i128:128-n32:64-S128"),
+      Subtarget(TT, CPU, FS, LittleEndian),
+      // This nested ternary is horrible, but DL needs to be properly initialized
+      // before TLInfo is constructed.
+      DL(Subtarget.isTargetMachO() ?
+         "e-m:o-i64:64-i128:128-n32:64-S128" :
+         (LittleEndian ?
+          "e-m:e-i64:64-i128:128-n32:64-S128" :
+          "E-m:e-i64:64-i128:128-n32:64-S128")),
       InstrInfo(Subtarget), TLInfo(*this), FrameLowering(*this, Subtarget),
       TSInfo(*this) {
   initAsmInfo();
 }
+
+void ARM64leTargetMachine::anchor() { }
+
+ARM64leTargetMachine::
+ARM64leTargetMachine(const Target &T, StringRef TT,
+                       StringRef CPU, StringRef FS, const TargetOptions &Options,
+                       Reloc::Model RM, CodeModel::Model CM,
+                       CodeGenOpt::Level OL)
+  : ARM64TargetMachine(T, TT, CPU, FS, Options, RM, CM, OL, true) {}
+
+void ARM64beTargetMachine::anchor() { }
+
+ARM64beTargetMachine::
+ARM64beTargetMachine(const Target &T, StringRef TT,
+                       StringRef CPU, StringRef FS, const TargetOptions &Options,
+                       Reloc::Model RM, CodeModel::Model CM,
+                       CodeGenOpt::Level OL)
+  : ARM64TargetMachine(T, TT, CPU, FS, Options, RM, CM, OL, false) {}
 
 namespace {
 /// ARM64 Code Generator Pass Configuration Options.
@@ -111,6 +136,11 @@ bool ARM64PassConfig::addPreISel() {
     addPass(createGlobalMergePass(TM));
   if (TM->getOptLevel() != CodeGenOpt::None)
     addPass(createARM64AddressTypePromotionPass());
+
+  // Always expand atomic operations, we don't deal with atomicrmw or cmpxchg
+  // ourselves.
+  addPass(createAtomicExpandLoadLinkedPass(TM));
+
   return false;
 }
 
@@ -160,7 +190,8 @@ bool ARM64PassConfig::addPreEmitPass() {
   // Relax conditional branch instructions if they're otherwise out of
   // range of their destination.
   addPass(createARM64BranchRelaxation());
-  if (TM->getOptLevel() != CodeGenOpt::None && EnableCollectLOH)
+  if (TM->getOptLevel() != CodeGenOpt::None && EnableCollectLOH &&
+      TM->getSubtarget<ARM64Subtarget>().isTargetMachO())
     addPass(createARM64CollectLOHPass());
   return true;
 }

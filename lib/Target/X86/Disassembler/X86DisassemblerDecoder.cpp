@@ -1,17 +1,17 @@
-/*===-- X86DisassemblerDecoder.c - Disassembler decoder ------------*- C -*-===*
- *
- *                     The LLVM Compiler Infrastructure
- *
- * This file is distributed under the University of Illinois Open Source
- * License. See LICENSE.TXT for details.
- *
- *===----------------------------------------------------------------------===*
- *
- * This file is part of the X86 Disassembler.
- * It contains the implementation of the instruction decoder.
- * Documentation for the disassembler can be found in X86Disassembler.h.
- *
- *===----------------------------------------------------------------------===*/
+//===-- X86DisassemblerDecoder.c - Disassembler decoder -------------------===//
+//
+//                     The LLVM Compiler Infrastructure
+//
+// This file is distributed under the University of Illinois Open Source
+// License. See LICENSE.TXT for details.
+//
+//===----------------------------------------------------------------------===//
+//
+// This file is part of the X86 Disassembler.
+// It contains the implementation of the instruction decoder.
+// Documentation for the disassembler can be found in X86Disassembler.h.
+//
+//===----------------------------------------------------------------------===//
 
 #include <stdarg.h>   /* for va_*()       */
 #include <stdio.h>    /* for vsnprintf()  */
@@ -20,13 +20,35 @@
 
 #include "X86DisassemblerDecoder.h"
 
+using namespace llvm::X86Disassembler;
+
+/// Specifies whether a ModR/M byte is needed and (if so) which
+/// instruction each possible value of the ModR/M byte corresponds to.  Once
+/// this information is known, we have narrowed down to a single instruction.
+struct ModRMDecision {
+  uint8_t modrm_type;
+  uint16_t instructionIDs;
+};
+
+/// Specifies which set of ModR/M->instruction tables to look at
+/// given a particular opcode.
+struct OpcodeDecision {
+  ModRMDecision modRMDecisions[256];
+};
+
+/// Specifies which opcode->instruction tables to look at given
+/// a particular context (set of attributes).  Since there are many possible
+/// contexts, the decoder first uses CONTEXTS_SYM to determine which context
+/// applies given a specific set of attributes.  Hence there are only IC_max
+/// entries in this table, rather than 2^(ATTR_max).
+struct ContextDecision {
+  OpcodeDecision opcodeDecisions[IC_max];
+};
+
 #include "X86GenDisassemblerTables.inc"
 
-#define TRUE  1
-#define FALSE 0
-
 #ifndef NDEBUG
-#define debug(s) do { x86DisassemblerDebug(__FILE__, __LINE__, s); } while (0)
+#define debug(s) do { Debug(__FILE__, __LINE__, s); } while (0)
 #else
 #define debug(s) do { } while (0)
 #endif
@@ -41,7 +63,7 @@
  *                    an instruction with these attributes.
  */
 static InstructionContext contextForAttrs(uint16_t attrMask) {
-  return CONTEXTS_SYM[attrMask];
+  return static_cast<InstructionContext>(CONTEXTS_SYM[attrMask]);
 }
 
 /*
@@ -53,7 +75,7 @@ static InstructionContext contextForAttrs(uint16_t attrMask) {
  *                      contextForAttrs.
  * @param opcode      - The last byte of the instruction's opcode, not counting
  *                      ModR/M extensions and escapes.
- * @return            - TRUE if the ModR/M byte is required, FALSE otherwise.
+ * @return            - true if the ModR/M byte is required, false otherwise.
  */
 static int modRMRequired(OpcodeType type,
                          InstructionContext insnContext,
@@ -284,15 +306,15 @@ static void setPrefixPresent(struct InternalInstruction* insn,
  * @param location  - The location to query.
  * @return          - Whether the prefix is at that location.
  */
-static BOOL isPrefixAtLocation(struct InternalInstruction* insn,
+static bool isPrefixAtLocation(struct InternalInstruction* insn,
                                uint8_t prefix,
                                uint64_t location)
 {
   if (insn->prefixPresent[prefix] == 1 &&
      insn->prefixLocations[prefix] == location)
-    return TRUE;
+    return true;
   else
-    return FALSE;
+    return false;
 }
 
 /*
@@ -305,14 +327,14 @@ static BOOL isPrefixAtLocation(struct InternalInstruction* insn,
  *                bytes, and no prefixes conflicted; nonzero otherwise.
  */
 static int readPrefixes(struct InternalInstruction* insn) {
-  BOOL isPrefix = TRUE;
-  BOOL prefixGroups[4] = { FALSE };
+  bool isPrefix = true;
+  bool prefixGroups[4] = { false };
   uint64_t prefixLocation;
   uint8_t byte = 0;
   uint8_t nextByte;
 
-  BOOL hasAdSize = FALSE;
-  BOOL hasOpSize = FALSE;
+  bool hasAdSize = false;
+  bool hasOpSize = false;
 
   dbgprintf(insn, "readPrefixes()");
 
@@ -344,7 +366,7 @@ static int readPrefixes(struct InternalInstruction* insn) {
       if ((byte == 0xf2 || byte == 0xf3) &&
           ((nextByte == 0xf0) |
           ((nextByte & 0xfe) == 0x86 || (nextByte & 0xf8) == 0x90)))
-        insn->xAcquireRelease = TRUE;
+        insn->xAcquireRelease = true;
       /*
        * Also if the byte is 0xf3, and the following condition is met:
        * - it is followed by a "mov mem, reg" (opcode 0x88/0x89) or
@@ -354,7 +376,7 @@ static int readPrefixes(struct InternalInstruction* insn) {
       if (byte == 0xf3 &&
           (nextByte == 0x88 || nextByte == 0x89 ||
            nextByte == 0xc6 || nextByte == 0xc7))
-        insn->xAcquireRelease = TRUE;
+        insn->xAcquireRelease = true;
       if (insn->mode == MODE_64BIT && (nextByte & 0xf0) == 0x40) {
         if (consumeByte(insn, &nextByte))
           return -1;
@@ -372,7 +394,7 @@ static int readPrefixes(struct InternalInstruction* insn) {
     case 0xf3:  /* REP or REPE/REPZ */
       if (prefixGroups[0])
         dbgprintf(insn, "Redundant Group 1 prefix");
-      prefixGroups[0] = TRUE;
+      prefixGroups[0] = true;
       setPrefixPresent(insn, byte, prefixLocation);
       break;
     case 0x2e:  /* CS segment override -OR- Branch not taken */
@@ -406,25 +428,25 @@ static int readPrefixes(struct InternalInstruction* insn) {
       }
       if (prefixGroups[1])
         dbgprintf(insn, "Redundant Group 2 prefix");
-      prefixGroups[1] = TRUE;
+      prefixGroups[1] = true;
       setPrefixPresent(insn, byte, prefixLocation);
       break;
     case 0x66:  /* Operand-size override */
       if (prefixGroups[2])
         dbgprintf(insn, "Redundant Group 3 prefix");
-      prefixGroups[2] = TRUE;
-      hasOpSize = TRUE;
+      prefixGroups[2] = true;
+      hasOpSize = true;
       setPrefixPresent(insn, byte, prefixLocation);
       break;
     case 0x67:  /* Address-size override */
       if (prefixGroups[3])
         dbgprintf(insn, "Redundant Group 4 prefix");
-      prefixGroups[3] = TRUE;
-      hasAdSize = TRUE;
+      prefixGroups[3] = true;
+      hasAdSize = true;
       setPrefixPresent(insn, byte, prefixLocation);
       break;
     default:    /* Not a prefix byte */
-      isPrefix = FALSE;
+      isPrefix = false;
       break;
     }
 
@@ -549,7 +571,7 @@ static int readPrefixes(struct InternalInstruction* insn) {
       default:
         break;
       case VEX_PREFIX_66:
-        hasOpSize = TRUE;
+        hasOpSize = true;
         break;
       }
 
@@ -595,7 +617,7 @@ static int readPrefixes(struct InternalInstruction* insn) {
       default:
         break;
       case VEX_PREFIX_66:
-        hasOpSize = TRUE;
+        hasOpSize = true;
         break;
       }
 
@@ -790,11 +812,9 @@ static int readModRM(struct InternalInstruction* insn);
 static int getIDWithAttrMask(uint16_t* instructionID,
                              struct InternalInstruction* insn,
                              uint16_t attrMask) {
-  BOOL hasModRMExtension;
+  bool hasModRMExtension;
 
-  uint16_t instructionClass;
-
-  instructionClass = contextForAttrs(attrMask);
+  InstructionContext instructionClass = contextForAttrs(attrMask);
 
   hasModRMExtension = modRMRequired(insn->opcodeType,
                                     instructionClass,
@@ -825,14 +845,14 @@ static int getIDWithAttrMask(uint16_t* instructionID,
  * @param orig  - The instruction that is not 16-bit
  * @param equiv - The instruction that is 16-bit
  */
-static BOOL is16BitEquivalent(const char* orig, const char* equiv) {
+static bool is16BitEquivalent(const char* orig, const char* equiv) {
   off_t i;
 
   for (i = 0;; i++) {
     if (orig[i] == '\0' && equiv[i] == '\0')
-      return TRUE;
+      return true;
     if (orig[i] == '\0' || equiv[i] == '\0')
-      return FALSE;
+      return false;
     if (orig[i] != equiv[i]) {
       if ((orig[i] == 'Q' || orig[i] == 'L') && equiv[i] == 'W')
         continue;
@@ -840,7 +860,7 @@ static BOOL is16BitEquivalent(const char* orig, const char* equiv) {
         continue;
       if ((orig[i] == '4' || orig[i] == '2') && equiv[i] == '6')
         continue;
-      return FALSE;
+      return false;
     }
   }
 }
@@ -1011,9 +1031,8 @@ static int getID(struct InternalInstruction* insn, const void *miiArg) {
       return 0;
     }
 
-    specName = x86DisassemblerGetInstrName(instructionID, miiArg);
-    specWithOpSizeName =
-      x86DisassemblerGetInstrName(instructionIDWithOpsize, miiArg);
+    specName = GetInstrName(instructionID, miiArg);
+    specWithOpSizeName = GetInstrName(instructionIDWithOpsize, miiArg);
 
     if (is16BitEquivalent(specName, specWithOpSizeName) &&
         (insn->mode == MODE_16BIT) ^ insn->prefixPresent[0x66]) {
@@ -1077,8 +1096,8 @@ static int getID(struct InternalInstruction* insn, const void *miiArg) {
  * @return      - 0 if the SIB byte was successfully read; nonzero otherwise.
  */
 static int readSIB(struct InternalInstruction* insn) {
-  SIBIndex sibIndexBase = 0;
-  SIBBase sibBaseBase = 0;
+  SIBIndex sibIndexBase = SIB_INDEX_NONE;
+  SIBBase sibBaseBase = SIB_BASE_NONE;
   uint8_t index, base;
 
   dbgprintf(insn, "readSIB()");
@@ -1086,7 +1105,7 @@ static int readSIB(struct InternalInstruction* insn) {
   if (insn->consumedSIB)
     return 0;
 
-  insn->consumedSIB = TRUE;
+  insn->consumedSIB = true;
 
   switch (insn->addressSize) {
   case 2:
@@ -1184,12 +1203,12 @@ static int readDisplacement(struct InternalInstruction* insn) {
   if (insn->consumedDisplacement)
     return 0;
 
-  insn->consumedDisplacement = TRUE;
+  insn->consumedDisplacement = true;
   insn->displacementOffset = insn->readerCursor - insn->startLocation;
 
   switch (insn->eaDisplacement) {
   case EA_DISP_NONE:
-    insn->consumedDisplacement = FALSE;
+    insn->consumedDisplacement = false;
     break;
   case EA_DISP_8:
     if (consumeInt8(insn, &d8))
@@ -1208,7 +1227,7 @@ static int readDisplacement(struct InternalInstruction* insn) {
     break;
   }
 
-  insn->consumedDisplacement = TRUE;
+  insn->consumedDisplacement = true;
   return 0;
 }
 
@@ -1229,7 +1248,7 @@ static int readModRM(struct InternalInstruction* insn) {
 
   if (consumeByte(insn, &insn->modRM))
     return -1;
-  insn->consumedModRM = TRUE;
+  insn->consumedModRM = true;
 
   mod     = modFromModRM(insn->modRM);
   rm      = rmFromModRM(insn->modRM);
@@ -1599,20 +1618,22 @@ static int readImmediate(struct InternalInstruction* insn, uint8_t size) {
 static int readVVVV(struct InternalInstruction* insn) {
   dbgprintf(insn, "readVVVV()");
 
+  int vvvv;
   if (insn->vectorExtensionType == TYPE_EVEX)
-    insn->vvvv = vvvvFromEVEX3of4(insn->vectorExtensionPrefix[2]);
+    vvvv = vvvvFromEVEX3of4(insn->vectorExtensionPrefix[2]);
   else if (insn->vectorExtensionType == TYPE_VEX_3B)
-    insn->vvvv = vvvvFromVEX3of3(insn->vectorExtensionPrefix[2]);
+    vvvv = vvvvFromVEX3of3(insn->vectorExtensionPrefix[2]);
   else if (insn->vectorExtensionType == TYPE_VEX_2B)
-    insn->vvvv = vvvvFromVEX2of2(insn->vectorExtensionPrefix[1]);
+    vvvv = vvvvFromVEX2of2(insn->vectorExtensionPrefix[1]);
   else if (insn->vectorExtensionType == TYPE_XOP)
-    insn->vvvv = vvvvFromXOP3of3(insn->vectorExtensionPrefix[2]);
+    vvvv = vvvvFromXOP3of3(insn->vectorExtensionPrefix[2]);
   else
     return -1;
 
   if (insn->mode != MODE_64BIT)
-    insn->vvvv &= 0x7;
+    vvvv &= 0x7;
 
+  insn->vvvv = static_cast<Reg>(vvvv);
   return 0;
 }
 
@@ -1629,7 +1650,8 @@ static int readMaskRegister(struct InternalInstruction* insn) {
   if (insn->vectorExtensionType != TYPE_EVEX)
     return -1;
 
-  insn->writemask = aaaFromEVEX4of4(insn->vectorExtensionPrefix[3]);
+  insn->writemask =
+      static_cast<Reg>(aaaFromEVEX4of4(insn->vectorExtensionPrefix[3]));
   return 0;
 }
 
@@ -1781,14 +1803,10 @@ static int readOperands(struct InternalInstruction* insn) {
  * @return          - 0 if the instruction's memory could be read; nonzero if
  *                    not.
  */
-int decodeInstruction(struct InternalInstruction* insn,
-                      byteReader_t reader,
-                      const void* readerArg,
-                      dlog_t logger,
-                      void* loggerArg,
-                      const void* miiArg,
-                      uint64_t startLoc,
-                      DisassemblerMode mode) {
+int llvm::X86Disassembler::decodeInstruction(
+    struct InternalInstruction *insn, byteReader_t reader,
+    const void *readerArg, dlog_t logger, void *loggerArg, const void *miiArg,
+    uint64_t startLoc, DisassemblerMode mode) {
   memset(insn, 0, sizeof(struct InternalInstruction));
 
   insn->reader = reader;

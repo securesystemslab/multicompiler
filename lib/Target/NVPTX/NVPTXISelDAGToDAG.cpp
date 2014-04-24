@@ -20,10 +20,9 @@
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Target/TargetIntrinsicInfo.h"
 
-#undef DEBUG_TYPE
-#define DEBUG_TYPE "nvptx-isel"
-
 using namespace llvm;
+
+#define DEBUG_TYPE "nvptx-isel"
 
 static cl::opt<int>
 FMAContractLevel("nvptx-fma-level", cl::ZeroOrMore, cl::Hidden,
@@ -2187,7 +2186,7 @@ SDNode *NVPTXDAGToDAGISel::SelectLoadParam(SDNode *Node) {
     VTs = CurDAG->getVTList(EltVT, EltVT, MVT::Other, MVT::Glue);
   } else {
     EVT EVTs[] = { EltVT, EltVT, EltVT, EltVT, MVT::Other, MVT::Glue };
-    VTs = CurDAG->getVTList(&EVTs[0], array_lengthof(EVTs));
+    VTs = CurDAG->getVTList(EVTs);
   }
 
   unsigned OffsetVal = cast<ConstantSDNode>(Offset)->getZExtValue();

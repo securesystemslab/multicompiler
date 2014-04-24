@@ -11,8 +11,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "WinCOFFObjectWriter"
-
 #include "llvm/MC/MCWinCOFFObjectWriter.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/StringMap.h"
@@ -35,6 +33,8 @@
 #include <cstdio>
 
 using namespace llvm;
+
+#define DEBUG_TYPE "WinCOFFObjectWriter"
 
 namespace {
 typedef SmallString<COFF::NameSize> name;
@@ -633,16 +633,41 @@ void WinCOFFObjectWriter::ExecutePostLayoutBinding(MCAssembler &Asm,
   // "Define" each section & symbol. This creates section & symbol
   // entries in the staging area.
 
+  static_assert(sizeof(((COFF::AuxiliaryFile *)0)->FileName) == COFF::SymbolSize,
+                "size mismatch for COFF::AuxiliaryFile::FileName");
+  for (auto FI = Asm.file_names_begin(), FE = Asm.file_names_end();
+       FI != FE; ++FI) {
+    // round up to calculate the number of auxiliary symbols required
+    unsigned Count = (FI->size() + COFF::SymbolSize - 1) / COFF::SymbolSize;
+
+    COFFSymbol *file = createSymbol(".file");
+    file->Data.StorageClass = COFF::IMAGE_SYM_CLASS_FILE;
+    file->Aux.resize(Count);
+
+    unsigned Offset = 0;
+    unsigned Length = FI->size();
+    for (auto & Aux : file->Aux) {
+      Aux.AuxType = ATFile;
+
+      if (Length > COFF::SymbolSize) {
+        memcpy(Aux.Aux.File.FileName, FI->c_str() + Offset, COFF::SymbolSize);
+        Length = Length - COFF::SymbolSize;
+      } else {
+        memcpy(Aux.Aux.File.FileName, FI->c_str() + Offset, Length);
+        memset(&Aux.Aux.File.FileName[Length], 0, COFF::SymbolSize - Length);
+        Length = 0;
+      }
+
+      Offset = Offset + COFF::SymbolSize;
+    }
+  }
+
   for (MCAssembler::const_iterator i = Asm.begin(), e = Asm.end(); i != e; i++)
     DefineSection(*i);
 
-  for (MCAssembler::const_symbol_iterator i = Asm.symbol_begin(),
-                                          e = Asm.symbol_end();
-       i != e; i++) {
-    if (ExportSymbol(*i, Asm)) {
-      DefineSymbol(*i, Asm, Layout);
-    }
-  }
+  for (MCSymbolData &SD : Asm.symbols())
+    if (ExportSymbol(SD, Asm))
+      DefineSymbol(SD, Asm, Layout);
 }
 
 void WinCOFFObjectWriter::RecordRelocation(const MCAssembler &Asm,
