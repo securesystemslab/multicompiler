@@ -621,6 +621,22 @@ defm VPERMT2PS : avx512_perm_3src<0x7F, "vpermt2ps",  VR512, memopv16f32, i512me
                                X86VPermv3, v16f32>, EVEX_V512, EVEX_CD8<32, CD8VF>;
 defm VPERMT2PD : avx512_perm_3src<0x7F, "vpermt2pd",  VR512, memopv8f64, i512mem, 
                                X86VPermv3, v8f64>, EVEX_V512, VEX_W, EVEX_CD8<64, CD8VF>;
+
+def : Pat<(v16f32 (int_x86_avx512_mask_vpermt_ps_512 (v16i32 VR512:$idx),
+                   (v16f32 VR512:$src1), (v16f32 VR512:$src2), (i16 -1))),
+          (VPERMT2PSrr VR512:$src1, VR512:$idx, VR512:$src2)>;
+
+def : Pat<(v16i32 (int_x86_avx512_mask_vpermt_d_512 (v16i32 VR512:$idx),
+                   (v16i32 VR512:$src1), (v16i32 VR512:$src2), (i16 -1))),
+          (VPERMT2Drr VR512:$src1, VR512:$idx, VR512:$src2)>;
+
+def : Pat<(v8f64 (int_x86_avx512_mask_vpermt_pd_512 (v8i64 VR512:$idx),
+                   (v8f64 VR512:$src1), (v8f64 VR512:$src2), (i8 -1))),
+          (VPERMT2PDrr VR512:$src1, VR512:$idx, VR512:$src2)>;
+
+def : Pat<(v8i64 (int_x86_avx512_mask_vpermt_q_512 (v8i64 VR512:$idx),
+                   (v8i64 VR512:$src1), (v8i64 VR512:$src2), (i8 -1))),
+          (VPERMT2Qrr VR512:$src1, VR512:$idx, VR512:$src2)>;
 //===----------------------------------------------------------------------===//
 // AVX-512 - BLEND using mask
 //
@@ -1367,6 +1383,15 @@ def: Pat<(v16i32 (int_x86_avx512_mask_loadu_d_512 addr:$ptr,
 def: Pat<(v8i64 (int_x86_avx512_mask_loadu_q_512 addr:$ptr,
                  (bc_v8i64 (v16i32 immAllZerosV)), GR8:$mask)),
        (VMOVDQU64rmkz (v8i1 (COPY_TO_REGCLASS GR8:$mask, VK8WM)), addr:$ptr)>;
+
+def: Pat<(int_x86_avx512_mask_storeu_d_512 addr:$ptr, (v16i32 VR512:$src),
+          GR16:$mask),
+         (VMOVDQU32mrk addr:$ptr, (v16i1 (COPY_TO_REGCLASS GR16:$mask, VK16WM)),
+            VR512:$src)>;
+def: Pat<(int_x86_avx512_mask_storeu_q_512 addr:$ptr, (v8i64 VR512:$src),
+          GR8:$mask),
+         (VMOVDQU64mrk addr:$ptr, (v8i1 (COPY_TO_REGCLASS GR8:$mask, VK8WM)),
+            VR512:$src)>;
 
 let AddedComplexity = 20 in {
 def : Pat<(v8i64 (vselect VK8WM:$mask, (v8i64 VR512:$src),
@@ -3738,7 +3763,7 @@ defm VRNDSCALEPSZ : avx512_rndscale<0x08, "vrndscaleps", f512mem, VR512,
                                 EVEX_CD8<32, CD8VF>;
 
 def : Pat<(v16f32 (int_x86_avx512_mask_rndscale_ps_512 (v16f32 VR512:$src1),
-                   imm:$src2, (bc_v16f32 (v16i32 immAllZerosV)), (i16 -1),
+                   imm:$src2, (v16f32 VR512:$src1), (i16 -1),
                    FROUND_CURRENT)),
                    (VRNDSCALEPSZr VR512:$src1, imm:$src2)>;
 
@@ -3748,7 +3773,7 @@ defm VRNDSCALEPDZ : avx512_rndscale<0x09, "vrndscalepd", f512mem, VR512,
                                 VEX_W, EVEX_CD8<64, CD8VF>;
 
 def : Pat<(v8f64 (int_x86_avx512_mask_rndscale_pd_512 (v8f64 VR512:$src1),
-                  imm:$src2, (bc_v8f64 (v16i32 immAllZerosV)), (i8 -1),
+                  imm:$src2, (v8f64 VR512:$src1), (i8 -1),
                   FROUND_CURRENT)),
                    (VRNDSCALEPDZr VR512:$src1, imm:$src2)>;
 
@@ -4045,6 +4070,62 @@ defm VPSCATTERQQZ : avx512_scatter<0xA1, "vpscatterqq", VK8WM, VR512, vz64mem>,
 defm VPSCATTERQDZ : avx512_scatter<0xA1, "vpscatterqd", VK8WM, VR256X, vz64mem>,
                                   EVEX_V512, EVEX_CD8<32, CD8VT1>;
 
+// prefetch
+multiclass avx512_gather_scatter_prefetch<bits<8> opc, Format F, string OpcodeStr,
+                       RegisterClass KRC, X86MemOperand memop> {
+  let Predicates = [HasPFI], hasSideEffects = 1 in
+  def m  : AVX5128I<opc, F, (outs), (ins KRC:$mask, memop:$src),
+            !strconcat(OpcodeStr, " \t{$src {${mask}}|{${mask}}, $src}"),
+            []>, EVEX, EVEX_K;
+}
+
+defm VGATHERPF0DPS: avx512_gather_scatter_prefetch<0xC6, MRM1m, "vgatherpf0dps",
+                     VK16WM, vz32mem>, EVEX_V512, EVEX_CD8<32, CD8VT1>;
+
+defm VGATHERPF0QPS: avx512_gather_scatter_prefetch<0xC7, MRM1m, "vgatherpf0qps",
+                     VK8WM, vz64mem>, EVEX_V512, EVEX_CD8<64, CD8VT1>;
+
+defm VGATHERPF0DPD: avx512_gather_scatter_prefetch<0xC6, MRM1m, "vgatherpf0dpd",
+                     VK8WM, vy32mem>, EVEX_V512, VEX_W, EVEX_CD8<32, CD8VT1>;
+
+defm VGATHERPF0QPD: avx512_gather_scatter_prefetch<0xC7, MRM1m, "vgatherpf0qpd",
+                     VK8WM, vz64mem>, EVEX_V512, VEX_W, EVEX_CD8<64, CD8VT1>;
+                     
+defm VGATHERPF1DPS: avx512_gather_scatter_prefetch<0xC6, MRM2m, "vgatherpf1dps",
+                     VK16WM, vz32mem>, EVEX_V512, EVEX_CD8<32, CD8VT1>;
+
+defm VGATHERPF1QPS: avx512_gather_scatter_prefetch<0xC7, MRM2m, "vgatherpf1qps",
+                     VK8WM, vz64mem>, EVEX_V512, EVEX_CD8<64, CD8VT1>;
+
+defm VGATHERPF1DPD: avx512_gather_scatter_prefetch<0xC6, MRM2m, "vgatherpf1dpd",
+                     VK8WM, vy32mem>, EVEX_V512, VEX_W, EVEX_CD8<32, CD8VT1>;
+
+defm VGATHERPF1QPD: avx512_gather_scatter_prefetch<0xC7, MRM2m, "vgatherpf1qpd",
+                     VK8WM, vz64mem>, EVEX_V512, VEX_W, EVEX_CD8<64, CD8VT1>;
+
+defm VSCATTERPF0DPS: avx512_gather_scatter_prefetch<0xC6, MRM5m, "vscatterpf0dps",
+                     VK16WM, vz32mem>, EVEX_V512, EVEX_CD8<32, CD8VT1>;
+
+defm VSCATTERPF0QPS: avx512_gather_scatter_prefetch<0xC7, MRM5m, "vscatterpf0qps",
+                     VK8WM, vz64mem>, EVEX_V512, EVEX_CD8<64, CD8VT1>;
+
+defm VSCATTERPF0DPD: avx512_gather_scatter_prefetch<0xC6, MRM5m, "vscatterpf0dpd",
+                     VK8WM, vy32mem>, EVEX_V512, VEX_W, EVEX_CD8<32, CD8VT1>;
+
+defm VSCATTERPF0QPD: avx512_gather_scatter_prefetch<0xC7, MRM5m, "vscatterpf0qpd",
+                     VK8WM, vz64mem>, EVEX_V512, VEX_W, EVEX_CD8<64, CD8VT1>;
+
+defm VSCATTERPF1DPS: avx512_gather_scatter_prefetch<0xC6, MRM6m, "vscatterpf1dps",
+                     VK16WM, vz32mem>, EVEX_V512, EVEX_CD8<32, CD8VT1>;
+
+defm VSCATTERPF1QPS: avx512_gather_scatter_prefetch<0xC7, MRM6m, "vscatterpf1qps",
+                     VK8WM, vz64mem>, EVEX_V512, EVEX_CD8<64, CD8VT1>;
+
+defm VSCATTERPF1DPD: avx512_gather_scatter_prefetch<0xC6, MRM6m, "vscatterpf1dpd",
+                     VK8WM, vy32mem>, EVEX_V512, VEX_W, EVEX_CD8<32, CD8VT1>;
+
+defm VSCATTERPF1QPD: avx512_gather_scatter_prefetch<0xC7, MRM6m, "vscatterpf1qpd",
+                     VK8WM, vz64mem>, EVEX_V512, VEX_W, EVEX_CD8<64, CD8VT1>;
 //===----------------------------------------------------------------------===//
 // VSHUFPS - VSHUFPD Operations
 

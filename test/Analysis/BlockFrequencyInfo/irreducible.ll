@@ -1,37 +1,29 @@
 ; RUN: opt < %s -analyze -block-freq | FileCheck %s
 
-; A loop with multiple exits should be handled correctly.
+; A loop with multiple exits isn't irreducible.  It should be handled
+; correctly.
 ;
 ; CHECK-LABEL: Printing analysis {{.*}} for function 'multiexit':
 ; CHECK-NEXT: block-frequency-info: multiexit
-define void @multiexit(i32 %a) {
+define void @multiexit(i1 %x) {
 ; CHECK-NEXT: entry: float = 1.0, int = [[ENTRY:[0-9]+]]
 entry:
   br label %loop.1
 
-; CHECK-NEXT: loop.1: float = 1.333{{3*}},
+; CHECK-NEXT: loop.1: float = 2.0,
 loop.1:
-  %i = phi i32 [ 0, %entry ], [ %inc.2, %loop.2 ]
-  call void @f(i32 %i)
-  %inc.1 = add i32 %i, 1
-  %cmp.1 = icmp ugt i32 %inc.1, %a
-  br i1 %cmp.1, label %exit.1, label %loop.2, !prof !0
+  br i1 %x, label %exit.1, label %loop.2, !prof !0
 
-; CHECK-NEXT: loop.2: float = 0.666{{6*7}},
+; CHECK-NEXT: loop.2: float = 1.75,
 loop.2:
-  call void @g(i32 %inc.1)
-  %inc.2 = add i32 %inc.1, 1
-  %cmp.2 = icmp ugt i32 %inc.2, %a
-  br i1 %cmp.2, label %exit.2, label %loop.1, !prof !1
+  br i1 %x, label %exit.2, label %loop.1, !prof !1
 
-; CHECK-NEXT: exit.1: float = 0.666{{6*7}},
+; CHECK-NEXT: exit.1: float = 0.25,
 exit.1:
-  call void @h(i32 %inc.1)
   br label %return
 
-; CHECK-NEXT: exit.2: float = 0.333{{3*}},
+; CHECK-NEXT: exit.2: float = 0.75,
 exit.2:
-  call void @i(i32 %inc.2)
   br label %return
 
 ; CHECK-NEXT: return: float = 1.0, int = [[ENTRY]]
@@ -39,24 +31,31 @@ return:
   ret void
 }
 
-declare void @f(i32 %x)
-declare void @g(i32 %x)
-declare void @h(i32 %x)
-declare void @i(i32 %x)
+!0 = metadata !{metadata !"branch_weights", i32 1, i32 7}
+!1 = metadata !{metadata !"branch_weights", i32 3, i32 4}
 
-!0 = metadata !{metadata !"branch_weights", i32 3, i32 3}
-!1 = metadata !{metadata !"branch_weights", i32 5, i32 5}
-
-; The current BlockFrequencyInfo algorithm doesn't handle multiple entrances
-; into a loop very well.  The frequencies assigned to blocks in the loop are
-; predictable (and not absurd), but also not correct and therefore not worth
-; testing.
+; Irreducible control flow
+; ========================
 ;
-; There are two testcases below.
+; LoopInfo defines a loop as a non-trivial SCC dominated by a single block,
+; called the header.  A given loop, L, can have sub-loops, which are loops
+; within the subgraph of L that excludes the header.
 ;
-; For each testcase, I use a CHECK-NEXT/NOT combo like an XFAIL with the
-; granularity of a single check.  If/when this behaviour is fixed, we'll know
-; about it, and the test should be updated.
+; In addition to loops, -block-freq has limited support for irreducible SCCs,
+; which are SCCs with multiple entry blocks.  Irreducible SCCs are discovered
+; on they fly, and modelled as loops with multiple headers.
+;
+; The headers of irreducible sub-SCCs consist of its entry blocks and all nodes
+; that are targets of a backedge within it (excluding backedges within true
+; sub-loops).
+;
+; -block-freq is currently designed to act like a block is inserted that
+; intercepts all the edges to the headers.  All backedges and entries point to
+; this block.  Its successors are the headers, which split the frequency
+; evenly.
+;
+; There are a number of testcases below.  Only the first two have detailed
+; explanations.
 ;
 ; Testcase #1
 ; ===========
@@ -90,45 +89,30 @@ declare void @i(i32 %x)
 ; loop as a whole is 1/4, so the loop scale should be 4.  Summing c1 and c2
 ; gives 28/7, or 4.0, which is nice confirmation of the math above.
 ;
-; However, assuming c1 precedes c2 in reverse post-order, the current algorithm
-; returns 3/4 and 13/16, respectively.  LoopInfo ignores edges between loops
-; (and doesn't see any loops here at all), and -block-freq ignores the
-; irreducible edge from c2 to c1.
-;
+; -block-freq currently treats the two nodes as equals.
+define void @multientry(i1 %x) {
 ; CHECK-LABEL: Printing analysis {{.*}} for function 'multientry':
 ; CHECK-NEXT: block-frequency-info: multientry
-define void @multientry(i32 %a) {
-; CHECK-NEXT: entry: float = 1.0, int = [[ENTRY:[0-9]+]]
 entry:
-  %choose = call i32 @choose(i32 %a)
-  %compare = icmp ugt i32 %choose, %a
-  br i1 %compare, label %c1, label %c2, !prof !2
+; CHECK-NEXT: entry: float = 1.0, int = [[ENTRY:[0-9]+]]
+  br i1 %x, label %c1, label %c2, !prof !2
 
-; This is like a single-line XFAIL (see above).
-; CHECK-NEXT: c1:
-; CHECK-NOT: float = 2.142857{{[0-9]*}},
 c1:
-  %i1 = phi i32 [ %a, %entry ], [ %i2.inc, %c2 ]
-  %i1.inc = add i32 %i1, 1
-  %choose1 = call i32 @choose(i32 %i1)
-  %compare1 = icmp ugt i32 %choose1, %a
-  br i1 %compare1, label %c2, label %exit, !prof !2
+; CHECK-NEXT: c1: float = 2.0,
+; The "correct" answer is: float = 2.142857{{[0-9]*}},
+  br i1 %x, label %c2, label %exit, !prof !2
 
-; This is like a single-line XFAIL (see above).
-; CHECK-NEXT: c2:
-; CHECK-NOT: float = 1.857142{{[0-9]*}},
 c2:
-  %i2 = phi i32 [ %a, %entry ], [ %i1.inc, %c1 ]
-  %i2.inc = add i32 %i2, 1
-  %choose2 = call i32 @choose(i32 %i2)
-  %compare2 = icmp ugt i32 %choose2, %a
-  br i1 %compare2, label %c1, label %exit, !prof !2
+; CHECK-NEXT: c2: float = 2.0,
+; The "correct" answer is: float = 1.857142{{[0-9]*}},
+  br i1 %x, label %c1, label %exit, !prof !2
 
-; We still shouldn't lose any frequency.
-; CHECK-NEXT: exit: float = 1.0, int = [[ENTRY]]
 exit:
+; CHECK-NEXT: exit: float = 1.0, int = [[ENTRY]]
   ret void
 }
+
+!2 = metadata !{metadata !"branch_weights", i32 3, i32 1}
 
 ; Testcase #2
 ; ===========
@@ -147,82 +131,291 @@ exit:
 ; step, c1 and c2 each get 1/3 of what's left in c1 and c2 combined.  This
 ; infinite series sums to 1.
 ;
-; However, assuming c1 precedes c2 in reverse post-order, the current algorithm
-; returns 1/2 and 3/4, respectively.  LoopInfo ignores edges between loops (and
-; treats c1 and c2 as self-loops only), and -block-freq ignores the irreducible
-; edge from c2 to c1.
-;
-; Below I use a CHECK-NEXT/NOT combo like an XFAIL with the granularity of a
-; single check.  If/when this behaviour is fixed, we'll know about it, and the
-; test should be updated.
-;
+; Since the currently algorithm *always* assumes entry blocks are equal,
+; -block-freq gets the right answers here.
+define void @crossloops(i2 %x) {
 ; CHECK-LABEL: Printing analysis {{.*}} for function 'crossloops':
 ; CHECK-NEXT: block-frequency-info: crossloops
-define void @crossloops(i32 %a) {
-; CHECK-NEXT: entry: float = 1.0, int = [[ENTRY:[0-9]+]]
 entry:
-  %choose = call i32 @choose(i32 %a)
-  switch i32 %choose, label %exit [ i32 1, label %c1
-                                    i32 2, label %c2 ], !prof !3
+; CHECK-NEXT: entry: float = 1.0, int = [[ENTRY:[0-9]+]]
+  switch i2 %x, label %exit [ i2 1, label %c1
+                              i2 2, label %c2 ], !prof !3
 
-; This is like a single-line XFAIL (see above).
-; CHECK-NEXT: c1:
-; CHECK-NOT: float = 1.0,
 c1:
-  %i1 = phi i32 [ %a, %entry ], [ %i1.inc, %c1 ], [ %i2.inc, %c2 ]
-  %i1.inc = add i32 %i1, 1
-  %choose1 = call i32 @choose(i32 %i1)
-  switch i32 %choose1, label %exit [ i32 1, label %c1
-                                     i32 2, label %c2 ], !prof !3
+; CHECK-NEXT: c1: float = 1.0,
+  switch i2 %x, label %exit [ i2 1, label %c1
+                              i2 2, label %c2 ], !prof !3
 
-; This is like a single-line XFAIL (see above).
-; CHECK-NEXT: c2:
-; CHECK-NOT: float = 1.0,
 c2:
-  %i2 = phi i32 [ %a, %entry ], [ %i1.inc, %c1 ], [ %i2.inc, %c2 ]
-  %i2.inc = add i32 %i2, 1
-  %choose2 = call i32 @choose(i32 %i2)
-  switch i32 %choose2, label %exit [ i32 1, label %c1
-                                     i32 2, label %c2 ], !prof !3
+; CHECK-NEXT: c2: float = 1.0,
+  switch i2 %x, label %exit [ i2 1, label %c1
+                              i2 2, label %c2 ], !prof !3
 
-; We still shouldn't lose any frequency.
-; CHECK-NEXT: exit: float = 1.0, int = [[ENTRY]]
 exit:
+; CHECK-NEXT: exit: float = 1.0, int = [[ENTRY]]
   ret void
 }
 
-declare i32 @choose(i32)
-
-!2 = metadata !{metadata !"branch_weights", i32 3, i32 1}
 !3 = metadata !{metadata !"branch_weights", i32 2, i32 2, i32 2}
 
-; A reducible loop with irreducible control flow inside should still have
-; correct exit frequency.
-;
+; A true loop with irreducible control flow inside.
+define void @loop_around_irreducible(i1 %x) {
 ; CHECK-LABEL: Printing analysis {{.*}} for function 'loop_around_irreducible':
 ; CHECK-NEXT: block-frequency-info: loop_around_irreducible
-define void @loop_around_irreducible(i1 %x) {
-; CHECK-NEXT: entry: float = 1.0, int = [[ENTRY:[0-9]+]]
 entry:
+; CHECK-NEXT: entry: float = 1.0, int = [[ENTRY:[0-9]+]]
   br label %loop
 
-; CHECK-NEXT: loop: float = [[HEAD:[0-9.]+]], int = [[HEADINT:[0-9]+]]
 loop:
-  br i1 %x, label %left, label %right
+; CHECK-NEXT: loop: float = 4.0, int = [[HEAD:[0-9]+]]
+  br i1 %x, label %left, label %right, !prof !4
 
-; CHECK-NEXT: left:
 left:
-  br i1 %x, label %right, label %loop.end
+; CHECK-NEXT: left: float = 8.0,
+  br i1 %x, label %right, label %loop.end, !prof !5
 
-; CHECK-NEXT: right:
 right:
-  br i1 %x, label %left, label %loop.end
+; CHECK-NEXT: right: float = 8.0,
+  br i1 %x, label %left, label %loop.end, !prof !5
 
-; CHECK-NEXT: loop.end: float = [[HEAD]], int = [[HEADINT]]
 loop.end:
-  br i1 %x, label %loop, label %exit
+; CHECK-NEXT: loop.end: float = 4.0, int = [[HEAD]]
+  br i1 %x, label %loop, label %exit, !prof !5
 
-; CHECK-NEXT: float = 1.0, int = [[ENTRY]]
 exit:
+; CHECK-NEXT: exit: float = 1.0, int = [[ENTRY]]
   ret void
 }
+!4 = metadata !{metadata !"branch_weights", i32 1, i32 1}
+!5 = metadata !{metadata !"branch_weights", i32 3, i32 1}
+
+; Two unrelated irreducible SCCs.
+define void @two_sccs(i1 %x) {
+; CHECK-LABEL: Printing analysis {{.*}} for function 'two_sccs':
+; CHECK-NEXT: block-frequency-info: two_sccs
+entry:
+; CHECK-NEXT: entry: float = 1.0, int = [[ENTRY:[0-9]+]]
+  br i1 %x, label %a, label %b, !prof !6
+
+a:
+; CHECK-NEXT: a: float = 0.75,
+  br i1 %x, label %a.left, label %a.right, !prof !7
+
+a.left:
+; CHECK-NEXT: a.left: float = 1.5,
+  br i1 %x, label %a.right, label %exit, !prof !6
+
+a.right:
+; CHECK-NEXT: a.right: float = 1.5,
+  br i1 %x, label %a.left, label %exit, !prof !6
+
+b:
+; CHECK-NEXT: b: float = 0.25,
+  br i1 %x, label %b.left, label %b.right, !prof !7
+
+b.left:
+; CHECK-NEXT: b.left: float = 0.625,
+  br i1 %x, label %b.right, label %exit, !prof !8
+
+b.right:
+; CHECK-NEXT: b.right: float = 0.625,
+  br i1 %x, label %b.left, label %exit, !prof !8
+
+exit:
+; CHECK-NEXT: exit: float = 1.0, int = [[ENTRY]]
+  ret void
+}
+!6 = metadata !{metadata !"branch_weights", i32 3, i32 1}
+!7 = metadata !{metadata !"branch_weights", i32 1, i32 1}
+!8 = metadata !{metadata !"branch_weights", i32 4, i32 1}
+
+; A true loop inside irreducible control flow.
+define void @loop_inside_irreducible(i1 %x) {
+; CHECK-LABEL: Printing analysis {{.*}} for function 'loop_inside_irreducible':
+; CHECK-NEXT: block-frequency-info: loop_inside_irreducible
+entry:
+; CHECK-NEXT: entry: float = 1.0, int = [[ENTRY:[0-9]+]]
+  br i1 %x, label %left, label %right, !prof !9
+
+left:
+; CHECK-NEXT: left: float = 2.0,
+  br i1 %x, label %right, label %exit, !prof !10
+
+right:
+; CHECK-NEXT: right: float = 2.0, int = [[RIGHT:[0-9]+]]
+  br label %loop
+
+loop:
+; CHECK-NEXT: loop: float = 6.0,
+  br i1 %x, label %loop, label %right.end, !prof !11
+
+right.end:
+; CHECK-NEXT: right.end: float = 2.0, int = [[RIGHT]]
+  br i1 %x, label %left, label %exit, !prof !10
+
+exit:
+; CHECK-NEXT: exit: float = 1.0, int = [[ENTRY]]
+  ret void
+}
+!9 = metadata !{metadata !"branch_weights", i32 1, i32 1}
+!10 = metadata !{metadata !"branch_weights", i32 3, i32 1}
+!11 = metadata !{metadata !"branch_weights", i32 2, i32 1}
+
+; Irreducible control flow in a branch that's in a true loop.
+define void @loop_around_branch_with_irreducible(i1 %x) {
+; CHECK-LABEL: Printing analysis {{.*}} for function 'loop_around_branch_with_irreducible':
+; CHECK-NEXT: block-frequency-info: loop_around_branch_with_irreducible
+entry:
+; CHECK-NEXT: entry: float = 1.0, int = [[ENTRY:[0-9]+]]
+  br label %loop
+
+loop:
+; CHECK-NEXT: loop: float = 2.0, int = [[LOOP:[0-9]+]]
+  br i1 %x, label %normal, label %irreducible.entry, !prof !12
+
+normal:
+; CHECK-NEXT: normal: float = 1.5,
+  br label %loop.end
+
+irreducible.entry:
+; CHECK-NEXT: irreducible.entry: float = 0.5, int = [[IRREDUCIBLE:[0-9]+]]
+  br i1 %x, label %left, label %right, !prof !13
+
+left:
+; CHECK-NEXT: left: float = 1.0,
+  br i1 %x, label %right, label %irreducible.exit, !prof !12
+
+right:
+; CHECK-NEXT: right: float = 1.0,
+  br i1 %x, label %left, label %irreducible.exit, !prof !12
+
+irreducible.exit:
+; CHECK-NEXT: irreducible.exit: float = 0.5, int = [[IRREDUCIBLE]]
+  br label %loop.end
+
+loop.end:
+; CHECK-NEXT: loop.end: float = 2.0, int = [[LOOP]]
+  br i1 %x, label %loop, label %exit, !prof !13
+
+exit:
+; CHECK-NEXT: exit: float = 1.0, int = [[ENTRY]]
+  ret void
+}
+!12 = metadata !{metadata !"branch_weights", i32 3, i32 1}
+!13 = metadata !{metadata !"branch_weights", i32 1, i32 1}
+
+; Irreducible control flow between two true loops.
+define void @loop_around_branch_with_irreducible_around_loop(i1 %x) {
+; CHECK-LABEL: Printing analysis {{.*}} for function 'loop_around_branch_with_irreducible_around_loop':
+; CHECK-NEXT: block-frequency-info: loop_around_branch_with_irreducible_around_loop
+entry:
+; CHECK-NEXT: entry: float = 1.0, int = [[ENTRY:[0-9]+]]
+  br label %loop
+
+loop:
+; CHECK-NEXT: loop: float = 3.0, int = [[LOOP:[0-9]+]]
+  br i1 %x, label %normal, label %irreducible, !prof !14
+
+normal:
+; CHECK-NEXT: normal: float = 2.0,
+  br label %loop.end
+
+irreducible:
+; CHECK-NEXT: irreducible: float = 1.0,
+  br i1 %x, label %left, label %right, !prof !15
+
+left:
+; CHECK-NEXT: left: float = 2.0,
+  br i1 %x, label %right, label %loop.end, !prof !16
+
+right:
+; CHECK-NEXT: right: float = 2.0, int = [[RIGHT:[0-9]+]]
+  br label %right.loop
+
+right.loop:
+; CHECK-NEXT: right.loop: float = 10.0,
+  br i1 %x, label %right.loop, label %right.end, !prof !17
+
+right.end:
+; CHECK-NEXT: right.end: float = 2.0, int = [[RIGHT]]
+  br i1 %x, label %left, label %loop.end, !prof !16
+
+loop.end:
+; CHECK-NEXT: loop.end: float = 3.0, int = [[LOOP]]
+  br i1 %x, label %loop, label %exit, !prof !14
+
+exit:
+; CHECK-NEXT: exit: float = 1.0, int = [[ENTRY]]
+  ret void
+}
+!14 = metadata !{metadata !"branch_weights", i32 2, i32 1}
+!15 = metadata !{metadata !"branch_weights", i32 1, i32 1}
+!16 = metadata !{metadata !"branch_weights", i32 3, i32 1}
+!17 = metadata !{metadata !"branch_weights", i32 4, i32 1}
+
+; An irreducible SCC with a non-header.
+define void @nonheader(i1 %x) {
+; CHECK-LABEL: Printing analysis {{.*}} for function 'nonheader':
+; CHECK-NEXT: block-frequency-info: nonheader
+entry:
+; CHECK-NEXT: entry: float = 1.0, int = [[ENTRY:[0-9]+]]
+  br i1 %x, label %left, label %right, !prof !18
+
+left:
+; CHECK-NEXT: left: float = 1.0,
+  br i1 %x, label %bottom, label %exit, !prof !19
+
+right:
+; CHECK-NEXT: right: float = 1.0,
+  br i1 %x, label %bottom, label %exit, !prof !20
+
+bottom:
+; CHECK-NEXT: bottom: float = 1.0,
+  br i1 %x, label %left, label %right, !prof !18
+
+exit:
+; CHECK-NEXT: exit: float = 1.0, int = [[ENTRY]]
+  ret void
+}
+!18 = metadata !{metadata !"branch_weights", i32 1, i32 1}
+!19 = metadata !{metadata !"branch_weights", i32 1, i32 3}
+!20 = metadata !{metadata !"branch_weights", i32 3, i32 1}
+
+; An irreducible SCC with an irreducible sub-SCC.  In the current version of
+; -block-freq, this means an extra header.
+;
+; This testcases uses non-trivial branch weights.  The CHECK statements here
+; will start to fail if we change -block-freq to be more accurate.  Currently,
+; we expect left, right and top to be treated as equal headers.
+define void @nonentry_header(i1 %x, i2 %y) {
+; CHECK-LABEL: Printing analysis {{.*}} for function 'nonentry_header':
+; CHECK-NEXT: block-frequency-info: nonentry_header
+entry:
+; CHECK-NEXT: entry: float = 1.0, int = [[ENTRY:[0-9]+]]
+  br i1 %x, label %left, label %right, !prof !21
+
+left:
+; CHECK-NEXT: left: float = 3.0,
+  br i1 %x, label %top, label %bottom, !prof !22
+
+right:
+; CHECK-NEXT: right: float = 3.0,
+  br i1 %x, label %top, label %bottom, !prof !22
+
+top:
+; CHECK-NEXT: top: float = 3.0,
+  switch i2 %y, label %exit [ i2 0, label %left
+                              i2 1, label %right
+                              i2 2, label %bottom ], !prof !23
+
+bottom:
+; CHECK-NEXT: bottom: float = 4.5,
+  br label %top
+
+exit:
+; CHECK-NEXT: exit: float = 1.0, int = [[ENTRY]]
+  ret void
+}
+!21 = metadata !{metadata !"branch_weights", i32 2, i32 1}
+!22 = metadata !{metadata !"branch_weights", i32 1, i32 1}
+!23 = metadata !{metadata !"branch_weights", i32 8, i32 1, i32 3, i32 12}

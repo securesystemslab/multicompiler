@@ -12,6 +12,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/Object/ELFYAML.h"
+#include "llvm/Support/Casting.h"
 
 namespace llvm {
 
@@ -242,43 +243,52 @@ void ScalarEnumerationTraits<ELFYAML::ELF_ELFOSABI>::enumeration(
 
 void ScalarBitSetTraits<ELFYAML::ELF_EF>::bitset(IO &IO,
                                                  ELFYAML::ELF_EF &Value) {
+  const auto *Object = static_cast<ELFYAML::Object *>(IO.getContext());
+  assert(Object && "The IO context is not initialized");
 #define BCase(X) IO.bitSetCase(Value, #X, ELF::X);
-  BCase(EF_ARM_SOFT_FLOAT)
-  BCase(EF_ARM_VFP_FLOAT)
-  BCase(EF_ARM_EABI_UNKNOWN)
-  BCase(EF_ARM_EABI_VER1)
-  BCase(EF_ARM_EABI_VER2)
-  BCase(EF_ARM_EABI_VER3)
-  BCase(EF_ARM_EABI_VER4)
-  BCase(EF_ARM_EABI_VER5)
-  BCase(EF_ARM_EABIMASK)
-  BCase(EF_MIPS_NOREORDER)
-  BCase(EF_MIPS_PIC)
-  BCase(EF_MIPS_CPIC)
-  BCase(EF_MIPS_ABI2)
-  BCase(EF_MIPS_32BITMODE)
-  BCase(EF_MIPS_ABI_O32)
-  BCase(EF_MIPS_MICROMIPS)
-  BCase(EF_MIPS_ARCH_ASE_M16)
-  BCase(EF_MIPS_ARCH_1)
-  BCase(EF_MIPS_ARCH_2)
-  BCase(EF_MIPS_ARCH_3)
-  BCase(EF_MIPS_ARCH_4)
-  BCase(EF_MIPS_ARCH_5)
-  BCase(EF_MIPS_ARCH_32)
-  BCase(EF_MIPS_ARCH_64)
-  BCase(EF_MIPS_ARCH_32R2)
-  BCase(EF_MIPS_ARCH_64R2)
-  BCase(EF_MIPS_ARCH)
-  BCase(EF_HEXAGON_MACH_V2)
-  BCase(EF_HEXAGON_MACH_V3)
-  BCase(EF_HEXAGON_MACH_V4)
-  BCase(EF_HEXAGON_MACH_V5)
-  BCase(EF_HEXAGON_ISA_MACH)
-  BCase(EF_HEXAGON_ISA_V2)
-  BCase(EF_HEXAGON_ISA_V3)
-  BCase(EF_HEXAGON_ISA_V4)
-  BCase(EF_HEXAGON_ISA_V5)
+  switch (Object->Header.Machine) {
+  case ELF::EM_ARM:
+    BCase(EF_ARM_SOFT_FLOAT)
+    BCase(EF_ARM_VFP_FLOAT)
+    BCase(EF_ARM_EABI_UNKNOWN)
+    BCase(EF_ARM_EABI_VER1)
+    BCase(EF_ARM_EABI_VER2)
+    BCase(EF_ARM_EABI_VER3)
+    BCase(EF_ARM_EABI_VER4)
+    BCase(EF_ARM_EABI_VER5)
+    break;
+  case ELF::EM_MIPS:
+    BCase(EF_MIPS_NOREORDER)
+    BCase(EF_MIPS_PIC)
+    BCase(EF_MIPS_CPIC)
+    BCase(EF_MIPS_ABI2)
+    BCase(EF_MIPS_32BITMODE)
+    BCase(EF_MIPS_ABI_O32)
+    BCase(EF_MIPS_MICROMIPS)
+    BCase(EF_MIPS_ARCH_ASE_M16)
+    BCase(EF_MIPS_ARCH_1)
+    BCase(EF_MIPS_ARCH_2)
+    BCase(EF_MIPS_ARCH_3)
+    BCase(EF_MIPS_ARCH_4)
+    BCase(EF_MIPS_ARCH_5)
+    BCase(EF_MIPS_ARCH_32)
+    BCase(EF_MIPS_ARCH_64)
+    BCase(EF_MIPS_ARCH_32R2)
+    BCase(EF_MIPS_ARCH_64R2)
+    break;
+  case ELF::EM_HEXAGON:
+    BCase(EF_HEXAGON_MACH_V2)
+    BCase(EF_HEXAGON_MACH_V3)
+    BCase(EF_HEXAGON_MACH_V4)
+    BCase(EF_HEXAGON_MACH_V5)
+    BCase(EF_HEXAGON_ISA_V2)
+    BCase(EF_HEXAGON_ISA_V3)
+    BCase(EF_HEXAGON_ISA_V4)
+    BCase(EF_HEXAGON_ISA_V5)
+    break;
+  default:
+    llvm_unreachable("Unsupported architecture");
+  }
 #undef BCase
 }
 
@@ -303,6 +313,23 @@ void ScalarEnumerationTraits<ELFYAML::ELF_SHT>::enumeration(
   ECase(SHT_PREINIT_ARRAY)
   ECase(SHT_GROUP)
   ECase(SHT_SYMTAB_SHNDX)
+  ECase(SHT_LOOS)
+  ECase(SHT_GNU_ATTRIBUTES)
+  ECase(SHT_GNU_HASH)
+  ECase(SHT_GNU_verdef)
+  ECase(SHT_GNU_verneed)
+  ECase(SHT_GNU_versym)
+  ECase(SHT_HIOS)
+  ECase(SHT_LOPROC)
+  ECase(SHT_ARM_EXIDX)
+  ECase(SHT_ARM_PREEMPTMAP)
+  ECase(SHT_ARM_ATTRIBUTES)
+  ECase(SHT_ARM_DEBUGOVERLAY)
+  ECase(SHT_ARM_OVERLAYSECTION)
+  ECase(SHT_HEX_ORDERED)
+  ECase(SHT_X86_64_UNWIND)
+  ECase(SHT_MIPS_REGINFO)
+  ECase(SHT_MIPS_OPTIONS)
 #undef ECase
 }
 
@@ -543,6 +570,49 @@ void ScalarEnumerationTraits<ELFYAML::ELF_REL>::enumeration(
     ECase(R_HEX_TPREL_16_X)
     ECase(R_HEX_TPREL_11_X)
     break;
+  case ELF::EM_386:
+    ECase(R_386_NONE)
+    ECase(R_386_32)
+    ECase(R_386_PC32)
+    ECase(R_386_GOT32)
+    ECase(R_386_PLT32)
+    ECase(R_386_COPY)
+    ECase(R_386_GLOB_DAT)
+    ECase(R_386_JUMP_SLOT)
+    ECase(R_386_RELATIVE)
+    ECase(R_386_GOTOFF)
+    ECase(R_386_GOTPC)
+    ECase(R_386_32PLT)
+    ECase(R_386_TLS_TPOFF)
+    ECase(R_386_TLS_IE)
+    ECase(R_386_TLS_GOTIE)
+    ECase(R_386_TLS_LE)
+    ECase(R_386_TLS_GD)
+    ECase(R_386_TLS_LDM)
+    ECase(R_386_16)
+    ECase(R_386_PC16)
+    ECase(R_386_8)
+    ECase(R_386_PC8)
+    ECase(R_386_TLS_GD_32)
+    ECase(R_386_TLS_GD_PUSH)
+    ECase(R_386_TLS_GD_CALL)
+    ECase(R_386_TLS_GD_POP)
+    ECase(R_386_TLS_LDM_32)
+    ECase(R_386_TLS_LDM_PUSH)
+    ECase(R_386_TLS_LDM_CALL)
+    ECase(R_386_TLS_LDM_POP)
+    ECase(R_386_TLS_LDO_32)
+    ECase(R_386_TLS_IE_32)
+    ECase(R_386_TLS_LE_32)
+    ECase(R_386_TLS_DTPMOD32)
+    ECase(R_386_TLS_DTPOFF32)
+    ECase(R_386_TLS_TPOFF32)
+    ECase(R_386_TLS_GOTDESC)
+    ECase(R_386_TLS_DESC_CALL)
+    ECase(R_386_TLS_DESC)
+    ECase(R_386_IRELATIVE)
+    ECase(R_386_NUM)
+    break;
   default:
     llvm_unreachable("Unsupported architecture");
   }
@@ -600,7 +670,8 @@ void MappingTraits<std::unique_ptr<ELFYAML::Section>>::mapping(
   ELFYAML::ELF_SHT sectionType;
   if (IO.outputting())
     sectionType = Section->Type;
-  IO.mapRequired("Type", sectionType);
+  else
+    IO.mapRequired("Type", sectionType);
 
   switch (sectionType) {
   case ELF::SHT_REL:

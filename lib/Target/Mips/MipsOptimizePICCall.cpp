@@ -61,11 +61,11 @@ class OptimizePICCall : public MachineFunctionPass {
 public:
   OptimizePICCall(TargetMachine &tm) : MachineFunctionPass(ID) {}
 
-  virtual const char *getPassName() const { return "Mips OptimizePICCall"; }
+  const char *getPassName() const override { return "Mips OptimizePICCall"; }
 
-  bool runOnMachineFunction(MachineFunction &F);
+  bool runOnMachineFunction(MachineFunction &F) override;
 
-  void getAnalysisUsage(AnalysisUsage &AU) const {
+  void getAnalysisUsage(AnalysisUsage &AU) const override {
     AU.addRequired<MachineDominatorTree>();
     MachineFunctionPass::getAnalysisUsage(AU);
   }
@@ -103,13 +103,13 @@ char OptimizePICCall::ID = 0;
 /// Return the first MachineOperand of MI if it is a used virtual register.
 static MachineOperand *getCallTargetRegOpnd(MachineInstr &MI) {
   if (MI.getNumOperands() == 0)
-    return 0;
+    return nullptr;
 
   MachineOperand &MO = MI.getOperand(0);
 
   if (!MO.isReg() || !MO.isUse() ||
       !TargetRegisterInfo::isVirtualRegister(MO.getReg()))
-    return 0;
+    return nullptr;
 
   return &MO;
 }
@@ -155,10 +155,10 @@ static void eraseGPOpnd(MachineInstr &MI) {
     }
   }
 
-  llvm_unreachable(0);
+  llvm_unreachable(nullptr);
 }
 
-MBBInfo::MBBInfo(MachineDomTreeNode *N) : Node(N), HTScope(0) {}
+MBBInfo::MBBInfo(MachineDomTreeNode *N) : Node(N), HTScope(nullptr) {}
 
 const MachineDomTreeNode *MBBInfo::getNode() const { return Node; }
 
@@ -256,7 +256,7 @@ bool OptimizePICCall::isCallViaRegister(MachineInstr &MI, unsigned &Reg,
 
   // Get the instruction that loads the function address from the GOT.
   Reg = MO->getReg();
-  Val = (Value*)0;
+  Val = (Value*)nullptr;
   MachineRegisterInfo &MRI = MI.getParent()->getParent()->getRegInfo();
   MachineInstr *DefMI = MRI.getVRegDef(Reg);
 

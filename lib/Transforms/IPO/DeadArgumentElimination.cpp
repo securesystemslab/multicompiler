@@ -37,6 +37,7 @@
 #include "llvm/Support/raw_ostream.h"
 #include <map>
 #include <set>
+#include <tuple>
 using namespace llvm;
 
 #define DEBUG_TYPE "deadargelim"
@@ -765,7 +766,7 @@ bool DAE::RemoveDeadStuffFromFunction(Function *F) {
 
   // Find out the new return value.
   Type *RetTy = FTy->getReturnType();
-  Type *NRetTy = NULL;
+  Type *NRetTy = nullptr;
   unsigned RetCount = NumRetVals(F);
 
   // -1 means unused, other numbers are the new index
@@ -1051,7 +1052,7 @@ bool DAE::RemoveDeadStuffFromFunction(Function *F) {
         Value *RetVal;
 
         if (NFTy->getReturnType()->isVoidTy()) {
-          RetVal = 0;
+          RetVal = nullptr;
         } else {
           assert (RetTy->isStructTy());
           // The original return value was a struct, insert

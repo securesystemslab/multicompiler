@@ -52,7 +52,7 @@ Instruction *InstCombiner::commonShiftTransforms(BinaryOperator &I) {
     return &I;
   }
 
-  return 0;
+  return nullptr;
 }
 
 /// CanEvaluateShifted - See if we can compute the specified value, but shifted
@@ -80,7 +80,7 @@ static bool CanEvaluateShifted(Value *V, unsigned NumBits, bool isLeftShift,
   // if the needed bits are already zero in the input.  This allows us to reuse
   // the value which means that we don't care if the shift has multiple uses.
   //  TODO:  Handle opposite shift by exact value.
-  ConstantInt *CI = 0;
+  ConstantInt *CI = nullptr;
   if ((isLeftShift && match(I, m_LShr(m_Value(), m_ConstantInt(CI)))) ||
       (!isLeftShift && match(I, m_Shl(m_Value(), m_ConstantInt(CI))))) {
     if (CI->getZExtValue() == NumBits) {
@@ -117,7 +117,7 @@ static bool CanEvaluateShifted(Value *V, unsigned NumBits, bool isLeftShift,
   case Instruction::Shl: {
     // We can often fold the shift into shifts-by-a-constant.
     CI = dyn_cast<ConstantInt>(I->getOperand(1));
-    if (CI == 0) return false;
+    if (!CI) return false;
 
     // We can always fold shl(c1)+shl(c2) -> shl(c1+c2).
     if (isLeftShift) return true;
@@ -141,7 +141,7 @@ static bool CanEvaluateShifted(Value *V, unsigned NumBits, bool isLeftShift,
   case Instruction::LShr: {
     // We can often fold the shift into shifts-by-a-constant.
     CI = dyn_cast<ConstantInt>(I->getOperand(1));
-    if (CI == 0) return false;
+    if (!CI) return false;
 
     // We can always fold lshr(c1)+lshr(c2) -> lshr(c1+c2).
     if (!isLeftShift) return true;
@@ -534,7 +534,7 @@ Instruction *InstCombiner::FoldShiftByConstant(Value *Op0, Constant *Op1,
   // Find out if this is a shift of a shift by a constant.
   BinaryOperator *ShiftOp = dyn_cast<BinaryOperator>(Op0);
   if (ShiftOp && !ShiftOp->isShift())
-    ShiftOp = 0;
+    ShiftOp = nullptr;
 
   if (ShiftOp && isa<ConstantInt>(ShiftOp->getOperand(1))) {
 
@@ -554,7 +554,7 @@ Instruction *InstCombiner::FoldShiftByConstant(Value *Op0, Constant *Op1,
     uint32_t ShiftAmt1 = ShiftAmt1C->getLimitedValue(TypeBits);
     uint32_t ShiftAmt2 = COp1->getLimitedValue(TypeBits);
     assert(ShiftAmt2 != 0 && "Should have been simplified earlier");
-    if (ShiftAmt1 == 0) return 0;  // Will be simplified in the future.
+    if (ShiftAmt1 == 0) return nullptr;  // Will be simplified in the future.
     Value *X = ShiftOp->getOperand(0);
 
     IntegerType *Ty = cast<IntegerType>(I.getType());
@@ -682,10 +682,13 @@ Instruction *InstCombiner::FoldShiftByConstant(Value *Op0, Constant *Op1,
       }
     }
   }
-  return 0;
+  return nullptr;
 }
 
 Instruction *InstCombiner::visitShl(BinaryOperator &I) {
+  if (Value *V = SimplifyVectorOp(I))
+    return ReplaceInstUsesWith(I, V);
+
   if (Value *V = SimplifyShlInst(I.getOperand(0), I.getOperand(1),
                                  I.hasNoSignedWrap(), I.hasNoUnsignedWrap(),
                                  DL))
@@ -720,10 +723,13 @@ Instruction *InstCombiner::visitShl(BinaryOperator &I) {
       match(I.getOperand(1), m_Constant(C2)))
     return BinaryOperator::CreateShl(ConstantExpr::getShl(C1, C2), A);
 
-  return 0;
+  return nullptr;
 }
 
 Instruction *InstCombiner::visitLShr(BinaryOperator &I) {
+  if (Value *V = SimplifyVectorOp(I))
+    return ReplaceInstUsesWith(I, V);
+
   if (Value *V = SimplifyLShrInst(I.getOperand(0), I.getOperand(1),
                                   I.isExact(), DL))
     return ReplaceInstUsesWith(I, V);
@@ -760,10 +766,13 @@ Instruction *InstCombiner::visitLShr(BinaryOperator &I) {
     }
   }
 
-  return 0;
+  return nullptr;
 }
 
 Instruction *InstCombiner::visitAShr(BinaryOperator &I) {
+  if (Value *V = SimplifyVectorOp(I))
+    return ReplaceInstUsesWith(I, V);
+
   if (Value *V = SimplifyAShrInst(I.getOperand(0), I.getOperand(1),
                                   I.isExact(), DL))
     return ReplaceInstUsesWith(I, V);
@@ -816,5 +825,5 @@ Instruction *InstCombiner::visitAShr(BinaryOperator &I) {
   if (NumSignBits == Op0->getType()->getScalarSizeInBits())
     return ReplaceInstUsesWith(I, Op0);
 
-  return 0;
+  return nullptr;
 }

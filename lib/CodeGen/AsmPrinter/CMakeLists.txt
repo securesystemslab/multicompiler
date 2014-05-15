@@ -4,6 +4,7 @@ add_llvm_library(LLVMAsmPrinter
   AsmPrinter.cpp
   AsmPrinterDwarf.cpp
   AsmPrinterInlineAsm.cpp
+  DbgValueHistoryCalculator.cpp
   DIE.cpp
   DIEHash.cpp
   DwarfAccelTable.cpp
@@ -11,6 +12,7 @@ add_llvm_library(LLVMAsmPrinter
   DwarfDebug.cpp
   DwarfException.cpp
   DwarfFile.cpp
+  DwarfStringPool.cpp
   DwarfUnit.cpp
   ErlangGCPrinter.cpp
   OcamlGCPrinter.cpp

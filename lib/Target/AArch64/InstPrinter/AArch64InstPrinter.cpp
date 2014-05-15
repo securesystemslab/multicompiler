@@ -210,6 +210,15 @@ AArch64InstPrinter::printCondCodeOperand(const MCInst *MI, unsigned OpNum,
   O << A64CondCodeToString(static_cast<A64CC::CondCodes>(MO.getImm()));
 }
 
+void
+AArch64InstPrinter::printInverseCondCodeOperand(const MCInst *MI,
+                                                unsigned OpNum,
+                                                raw_ostream &O) {
+  A64CC::CondCodes CC =
+      static_cast<A64CC::CondCodes>(MI->getOperand(OpNum).getImm());
+  O << A64CondCodeToString(A64InvertCondCode(CC));
+}
+
 template <unsigned field_width, unsigned scale> void
 AArch64InstPrinter::printLabelOperand(const MCInst *MI, unsigned OpNum,
                                             raw_ostream &O) {
@@ -520,7 +529,7 @@ void AArch64InstPrinter::printVectorList(const MCInst *MI, unsigned OpNum,
 
   unsigned Reg = MI->getOperand(OpNum).getReg();
   std::string LayoutStr = A64VectorLayoutToString(Layout);
-  O << "{";
+  O << "{ ";
   if (Count > 1) { // Print sub registers separately
     bool IsVec64 = (Layout < A64Layout::VL_16B);
     unsigned SubRegIdx = IsVec64 ? AArch64::dsub_0 : AArch64::qsub_0;
@@ -536,5 +545,5 @@ void AArch64InstPrinter::printVectorList(const MCInst *MI, unsigned OpNum,
     Name[0] = 'v';
     O << Name << LayoutStr;
   }
-  O << "}";
+  O << " }";
 }

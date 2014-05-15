@@ -206,6 +206,8 @@ def X86rep_movs: SDNode<"X86ISD::REP_MOVS", SDTX86RepStr,
 
 def X86rdtsc   : SDNode<"X86ISD::RDTSC_DAG", SDTX86Void,
                         [SDNPHasChain, SDNPOutGlue, SDNPSideEffect]>;
+def X86rdtscp  : SDNode<"X86ISD::RDTSCP_DAG", SDTX86Void,
+                        [SDNPHasChain, SDNPOutGlue, SDNPSideEffect]>;
 
 def X86Wrapper    : SDNode<"X86ISD::Wrapper",     SDTX86Wrapper>;
 def X86WrapperRIP : SDNode<"X86ISD::WrapperRIP",  SDTX86Wrapper>;
@@ -2636,21 +2638,21 @@ def : InstAlias<"fnstsw"     , (FNSTSW16r)>;
 
 // lcall and ljmp aliases.  This seems to be an odd mapping in 64-bit mode, but
 // this is compatible with what GAS does.
-def : InstAlias<"lcall $seg, $off", (FARCALL32i i32imm:$off, i16imm:$seg)>, Requires<[Not16BitMode]>;
-def : InstAlias<"ljmp $seg, $off",  (FARJMP32i  i32imm:$off, i16imm:$seg)>, Requires<[Not16BitMode]>;
-def : InstAlias<"lcall *$dst",      (FARCALL32m opaque48mem:$dst)>, Requires<[Not16BitMode]>;
-def : InstAlias<"ljmp *$dst",       (FARJMP32m  opaque48mem:$dst)>, Requires<[Not16BitMode]>;
-def : InstAlias<"lcall $seg, $off", (FARCALL16i i16imm:$off, i16imm:$seg)>, Requires<[In16BitMode]>;
-def : InstAlias<"ljmp $seg, $off",  (FARJMP16i  i16imm:$off, i16imm:$seg)>, Requires<[In16BitMode]>;
-def : InstAlias<"lcall *$dst",      (FARCALL16m opaque32mem:$dst)>, Requires<[In16BitMode]>;
-def : InstAlias<"ljmp *$dst",       (FARJMP16m  opaque32mem:$dst)>, Requires<[In16BitMode]>;
+def : InstAlias<"lcall $seg, $off", (FARCALL32i i32imm:$off, i16imm:$seg), 0>, Requires<[Not16BitMode]>;
+def : InstAlias<"ljmp $seg, $off",  (FARJMP32i  i32imm:$off, i16imm:$seg), 0>, Requires<[Not16BitMode]>;
+def : InstAlias<"lcall *$dst",      (FARCALL32m opaque48mem:$dst), 0>, Requires<[Not16BitMode]>;
+def : InstAlias<"ljmp *$dst",       (FARJMP32m  opaque48mem:$dst), 0>, Requires<[Not16BitMode]>;
+def : InstAlias<"lcall $seg, $off", (FARCALL16i i16imm:$off, i16imm:$seg), 0>, Requires<[In16BitMode]>;
+def : InstAlias<"ljmp $seg, $off",  (FARJMP16i  i16imm:$off, i16imm:$seg), 0>, Requires<[In16BitMode]>;
+def : InstAlias<"lcall *$dst",      (FARCALL16m opaque32mem:$dst), 0>, Requires<[In16BitMode]>;
+def : InstAlias<"ljmp *$dst",       (FARJMP16m  opaque32mem:$dst), 0>, Requires<[In16BitMode]>;
 
-def : InstAlias<"call *$dst",       (CALL64m i16mem:$dst)>, Requires<[In64BitMode]>;
-def : InstAlias<"jmp *$dst",        (JMP64m  i16mem:$dst)>, Requires<[In64BitMode]>;
-def : InstAlias<"call *$dst",       (CALL32m i16mem:$dst)>, Requires<[In32BitMode]>;
-def : InstAlias<"jmp *$dst",        (JMP32m  i16mem:$dst)>, Requires<[In32BitMode]>;
-def : InstAlias<"call *$dst",       (CALL16m i16mem:$dst)>, Requires<[In16BitMode]>;
-def : InstAlias<"jmp *$dst",        (JMP16m  i16mem:$dst)>, Requires<[In16BitMode]>;
+def : InstAlias<"call *$dst",       (CALL64m i16mem:$dst), 0>, Requires<[In64BitMode]>;
+def : InstAlias<"jmp *$dst",        (JMP64m  i16mem:$dst), 0>, Requires<[In64BitMode]>;
+def : InstAlias<"call *$dst",       (CALL32m i16mem:$dst), 0>, Requires<[In32BitMode]>;
+def : InstAlias<"jmp *$dst",        (JMP32m  i16mem:$dst), 0>, Requires<[In32BitMode]>;
+def : InstAlias<"call *$dst",       (CALL16m i16mem:$dst), 0>, Requires<[In16BitMode]>;
+def : InstAlias<"jmp *$dst",        (JMP16m  i16mem:$dst), 0>, Requires<[In16BitMode]>;
 
 
 // "imul <imm>, B" is an alias for "imul <imm>, B, B".
@@ -2724,7 +2726,7 @@ def : InstAlias<"outl\t$port", (OUT32ir i8imm:$port), 0>;
 // 'sldt <mem>' can be encoded with either sldtw or sldtq with the same
 // effect (both store to a 16-bit mem).  Force to sldtw to avoid ambiguity
 // errors, since its encoding is the most compact.
-def : InstAlias<"sldt $mem", (SLDT16m i16mem:$mem)>;
+def : InstAlias<"sldt $mem", (SLDT16m i16mem:$mem), 0>;
 
 // shld/shrd op,op -> shld op, op, CL
 def : InstAlias<"shld{w}\t{$r2, $r1|$r1, $r2}", (SHLD16rrCL GR16:$r1, GR16:$r2), 0>;
@@ -2770,19 +2772,29 @@ defm : ShiftRotateByOneAlias<"ror", "ROR">;
 FIXME */
 
 // test: We accept "testX <reg>, <mem>" and "testX <mem>, <reg>" as synonyms.
-def : InstAlias<"test{b}\t{$val, $mem|$mem, $val}", (TEST8rm  GR8 :$val, i8mem :$mem)>;
-def : InstAlias<"test{w}\t{$val, $mem|$mem, $val}", (TEST16rm GR16:$val, i16mem:$mem)>;
-def : InstAlias<"test{l}\t{$val, $mem|$mem, $val}", (TEST32rm GR32:$val, i32mem:$mem)>;
-def : InstAlias<"test{q}\t{$val, $mem|$mem, $val}", (TEST64rm GR64:$val, i64mem:$mem)>;
+def : InstAlias<"test{b}\t{$val, $mem|$mem, $val}",
+                (TEST8rm  GR8 :$val, i8mem :$mem), 0>;
+def : InstAlias<"test{w}\t{$val, $mem|$mem, $val}",
+                (TEST16rm GR16:$val, i16mem:$mem), 0>;
+def : InstAlias<"test{l}\t{$val, $mem|$mem, $val}",
+                (TEST32rm GR32:$val, i32mem:$mem), 0>;
+def : InstAlias<"test{q}\t{$val, $mem|$mem, $val}",
+                (TEST64rm GR64:$val, i64mem:$mem), 0>;
 
 // xchg: We accept "xchgX <reg>, <mem>" and "xchgX <mem>, <reg>" as synonyms.
-def : InstAlias<"xchg{b}\t{$mem, $val|$val, $mem}", (XCHG8rm  GR8 :$val, i8mem :$mem)>;
-def : InstAlias<"xchg{w}\t{$mem, $val|$val, $mem}", (XCHG16rm GR16:$val, i16mem:$mem)>;
-def : InstAlias<"xchg{l}\t{$mem, $val|$val, $mem}", (XCHG32rm GR32:$val, i32mem:$mem)>;
-def : InstAlias<"xchg{q}\t{$mem, $val|$val, $mem}", (XCHG64rm GR64:$val, i64mem:$mem)>;
+def : InstAlias<"xchg{b}\t{$mem, $val|$val, $mem}",
+                (XCHG8rm  GR8 :$val, i8mem :$mem), 0>;
+def : InstAlias<"xchg{w}\t{$mem, $val|$val, $mem}",
+                (XCHG16rm GR16:$val, i16mem:$mem), 0>;
+def : InstAlias<"xchg{l}\t{$mem, $val|$val, $mem}",
+                (XCHG32rm GR32:$val, i32mem:$mem), 0>;
+def : InstAlias<"xchg{q}\t{$mem, $val|$val, $mem}",
+                (XCHG64rm GR64:$val, i64mem:$mem), 0>;
 
 // xchg: We accept "xchgX <reg>, %eax" and "xchgX %eax, <reg>" as synonyms.
-def : InstAlias<"xchg{w}\t{%ax, $src|$src, ax}", (XCHG16ar GR16:$src)>;
-def : InstAlias<"xchg{l}\t{%eax, $src|$src, eax}", (XCHG32ar GR32:$src)>, Requires<[Not64BitMode]>;
-def : InstAlias<"xchg{l}\t{%eax, $src|$src, eax}", (XCHG32ar64 GR32_NOAX:$src)>, Requires<[In64BitMode]>;
-def : InstAlias<"xchg{q}\t{%rax, $src|$src, rax}", (XCHG64ar GR64:$src)>;
+def : InstAlias<"xchg{w}\t{%ax, $src|$src, ax}", (XCHG16ar GR16:$src), 0>;
+def : InstAlias<"xchg{l}\t{%eax, $src|$src, eax}",
+                (XCHG32ar GR32:$src), 0>, Requires<[Not64BitMode]>;
+def : InstAlias<"xchg{l}\t{%eax, $src|$src, eax}",
+                (XCHG32ar64 GR32_NOAX:$src), 0>, Requires<[In64BitMode]>;
+def : InstAlias<"xchg{q}\t{%rax, $src|$src, rax}", (XCHG64ar GR64:$src), 0>;

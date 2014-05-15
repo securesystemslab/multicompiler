@@ -1,3 +1,11 @@
+//===-- llvm/CodeGen/AddressPool.cpp - Dwarf Debug Framework ---*- C++ -*--===//
+//
+//                     The LLVM Compiler Infrastructure
+//
+// This file is distributed under the University of Illinois Open Source
+// License. See LICENSE.TXT for details.
+//
+//===----------------------------------------------------------------------===//
 
 #include "AddressPool.h"
 #include "llvm/CodeGen/AsmPrinter.h"
@@ -9,6 +17,7 @@ using namespace llvm;
 class MCExpr;
 
 unsigned AddressPool::getIndex(const MCSymbol *Sym, bool TLS) {
+  HasBeenUsed = true;
   auto IterBool =
       Pool.insert(std::make_pair(Sym, AddressPoolEntry(Pool.size(), TLS)));
   return IterBool.first->second.Number;

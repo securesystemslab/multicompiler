@@ -469,13 +469,13 @@ private:
 
 public:
   R600ControlFlowFinalizer(TargetMachine &tm) : MachineFunctionPass(ID),
-    TII (0), TRI(0),
+    TII (nullptr), TRI(nullptr),
     ST(tm.getSubtarget<AMDGPUSubtarget>()) {
       const AMDGPUSubtarget &ST = tm.getSubtarget<AMDGPUSubtarget>();
       MaxFetchInst = ST.getTexVTXClauseSize();
   }
 
-  virtual bool runOnMachineFunction(MachineFunction &MF) {
+  bool runOnMachineFunction(MachineFunction &MF) override {
     TII=static_cast<const R600InstrInfo *>(MF.getTarget().getInstrInfo());
     TRI=static_cast<const R600RegisterInfo *>(MF.getTarget().getRegisterInfo());
     R600MachineFunctionInfo *MFI = MF.getInfo<R600MachineFunctionInfo>();
@@ -502,13 +502,13 @@ public:
           DEBUG(dbgs() << CfCount << ":"; I->dump(););
           FetchClauses.push_back(MakeFetchClause(MBB, I));
           CfCount++;
-          LastAlu.back() = 0;
+          LastAlu.back() = nullptr;
           continue;
         }
 
         MachineBasicBlock::iterator MI = I;
         if (MI->getOpcode() != AMDGPU::ENDIF)
-          LastAlu.back() = 0;
+          LastAlu.back() = nullptr;
         if (MI->getOpcode() == AMDGPU::CF_ALU)
           LastAlu.back() = MI;
         I++;
@@ -559,7 +559,7 @@ public:
           break;
         }
         case AMDGPU::IF_PREDICATE_SET: {
-          LastAlu.push_back(0);
+          LastAlu.push_back(nullptr);
           MachineInstr *MIb = BuildMI(MBB, MI, MBB.findDebugLoc(MI),
               getHWInstrDesc(CF_JUMP))
               .addImm(0)
@@ -666,7 +666,7 @@ public:
     return false;
   }
 
-  const char *getPassName() const {
+  const char *getPassName() const override {
     return "R600 Control Flow Finalizer Pass";
   }
 };

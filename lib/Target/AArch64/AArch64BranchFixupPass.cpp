@@ -136,9 +136,9 @@ namespace {
     static char ID;
     AArch64BranchFixup() : MachineFunctionPass(ID) {}
 
-    virtual bool runOnMachineFunction(MachineFunction &MF);
+    bool runOnMachineFunction(MachineFunction &MF) override;
 
-    virtual const char *getPassName() const {
+    const char *getPassName() const override {
       return "AArch64 branch fixup pass";
     }
 
@@ -450,7 +450,7 @@ bool AArch64BranchFixup::isBBInRange(MachineInstr *MI,
 /// displacement field.
 bool AArch64BranchFixup::fixupImmediateBr(ImmBranch &Br) {
   MachineInstr *MI = Br.MI;
-  MachineBasicBlock *DestBB = 0;
+  MachineBasicBlock *DestBB = nullptr;
   for (unsigned i = 0, e = MI->getNumOperands(); i != e; ++i) {
     if (MI->getOperand(i).isMBB()) {
       DestBB = MI->getOperand(i).getMBB();

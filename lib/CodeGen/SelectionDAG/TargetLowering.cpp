@@ -386,7 +386,7 @@ bool TargetLowering::SimplifyDemandedBits(SDValue Op,
     if (Depth != 0) {
       // If not at the root, Just compute the KnownZero/KnownOne bits to
       // simplify things downstream.
-      TLO.DAG.ComputeMaskedBits(Op, KnownZero, KnownOne, Depth);
+      TLO.DAG.computeKnownBits(Op, KnownZero, KnownOne, Depth);
       return false;
     }
     // If this is the root being simplified, allow it to have multiple uses,
@@ -416,7 +416,7 @@ bool TargetLowering::SimplifyDemandedBits(SDValue Op,
     if (ConstantSDNode *RHSC = dyn_cast<ConstantSDNode>(Op.getOperand(1))) {
       APInt LHSZero, LHSOne;
       // Do not increment Depth here; that can cause an infinite loop.
-      TLO.DAG.ComputeMaskedBits(Op.getOperand(0), LHSZero, LHSOne, Depth);
+      TLO.DAG.computeKnownBits(Op.getOperand(0), LHSZero, LHSOne, Depth);
       // If the LHS already has zeros where RHSC does, this and is dead.
       if ((LHSZero & NewMask) == (~RHSC->getAPIntValue() & NewMask))
         return TLO.CombineTo(Op, Op.getOperand(0));
@@ -848,6 +848,31 @@ bool TargetLowering::SimplifyDemandedBits(SDValue Op,
     }
     break;
   }
+  case ISD::BUILD_PAIR: {
+    EVT HalfVT = Op.getOperand(0).getValueType();
+    unsigned HalfBitWidth = HalfVT.getScalarSizeInBits();
+
+    APInt MaskLo = NewMask.getLoBits(HalfBitWidth).trunc(HalfBitWidth);
+    APInt MaskHi = NewMask.getHiBits(HalfBitWidth).trunc(HalfBitWidth);
+
+    APInt KnownZeroLo, KnownOneLo;
+    APInt KnownZeroHi, KnownOneHi;
+
+    if (SimplifyDemandedBits(Op.getOperand(0), MaskLo, KnownZeroLo,
+                             KnownOneLo, TLO, Depth + 1))
+      return true;
+
+    if (SimplifyDemandedBits(Op.getOperand(1), MaskHi, KnownZeroHi,
+                             KnownOneHi, TLO, Depth + 1))
+      return true;
+
+    KnownZero = KnownZeroLo.zext(BitWidth) |
+                KnownZeroHi.zext(BitWidth).shl(HalfBitWidth);
+
+    KnownOne = KnownOneLo.zext(BitWidth) |
+               KnownOneHi.zext(BitWidth).shl(HalfBitWidth);
+    break;
+  }
   case ISD::ZERO_EXTEND: {
     unsigned OperandBitWidth =
       Op.getOperand(0).getValueType().getScalarType().getSizeInBits();
@@ -1040,8 +1065,8 @@ bool TargetLowering::SimplifyDemandedBits(SDValue Op,
   }
   // FALL THROUGH
   default:
-    // Just use ComputeMaskedBits to compute output bits.
-    TLO.DAG.ComputeMaskedBits(Op, KnownZero, KnownOne, Depth);
+    // Just use computeKnownBits to compute output bits.
+    TLO.DAG.computeKnownBits(Op, KnownZero, KnownOne, Depth);
     break;
   }
 
@@ -1053,14 +1078,14 @@ bool TargetLowering::SimplifyDemandedBits(SDValue Op,
   return false;
 }
 
-/// computeMaskedBitsForTargetNode - Determine which of the bits specified
+/// computeKnownBitsForTargetNode - Determine which of the bits specified
 /// in Mask are known to be either zero or one and return them in the
 /// KnownZero/KnownOne bitsets.
-void TargetLowering::computeMaskedBitsForTargetNode(const SDValue Op,
-                                                    APInt &KnownZero,
-                                                    APInt &KnownOne,
-                                                    const SelectionDAG &DAG,
-                                                    unsigned Depth) const {
+void TargetLowering::computeKnownBitsForTargetNode(const SDValue Op,
+                                                   APInt &KnownZero,
+                                                   APInt &KnownOne,
+                                                   const SelectionDAG &DAG,
+                                                   unsigned Depth) const {
   assert((Op.getOpcode() >= ISD::BUILTIN_OP_END ||
           Op.getOpcode() == ISD::INTRINSIC_WO_CHAIN ||
           Op.getOpcode() == ISD::INTRINSIC_W_CHAIN ||
@@ -1086,7 +1111,7 @@ unsigned TargetLowering::ComputeNumSignBitsForTargetNode(SDValue Op,
 }
 
 /// ValueHasExactlyOneBitSet - Test if the given value is known to have exactly
-/// one bit set. This differs from ComputeMaskedBits in that it doesn't need to
+/// one bit set. This differs from computeKnownBits in that it doesn't need to
 /// determine which bit is set.
 ///
 static bool ValueHasExactlyOneBitSet(SDValue Val, const SelectionDAG &DAG) {
@@ -1109,11 +1134,11 @@ static bool ValueHasExactlyOneBitSet(SDValue Val, const SelectionDAG &DAG) {
   // More could be done here, though the above checks are enough
   // to handle some common cases.
 
-  // Fall back to ComputeMaskedBits to catch other known cases.
+  // Fall back to computeKnownBits to catch other known cases.
   EVT OpVT = Val.getValueType();
   unsigned BitWidth = OpVT.getScalarType().getSizeInBits();
   APInt KnownZero, KnownOne;
-  DAG.ComputeMaskedBits(Val, KnownZero, KnownOne);
+  DAG.computeKnownBits(Val, KnownZero, KnownOne);
   return (KnownZero.countPopulation() == BitWidth - 1) &&
          (KnownOne.countPopulation() == 1);
 }
@@ -1382,10 +1407,14 @@ TargetLowering::SimplifySetCC(EVT VT, SDValue N0, SDValue N1,
         EVT newVT = N0.getOperand(0).getValueType();
         if (DCI.isBeforeLegalizeOps() ||
             (isOperationLegal(ISD::SETCC, newVT) &&
-             getCondCodeAction(Cond, newVT.getSimpleVT())==Legal))
-          return DAG.getSetCC(dl, VT, N0.getOperand(0),
-                              DAG.getConstant(C1.trunc(InSize), newVT),
-                              Cond);
+             getCondCodeAction(Cond, newVT.getSimpleVT()) == Legal)) {
+          EVT NewSetCCVT = getSetCCResultType(*DAG.getContext(), newVT);
+          SDValue NewConst = DAG.getConstant(C1.trunc(InSize), newVT);
+
+          SDValue NewSetCC = DAG.getSetCC(dl, NewSetCCVT, N0.getOperand(0),
+                                          NewConst, Cond);
+          return DAG.getBoolExtOrTrunc(NewSetCC, dl, VT);
+        }
         break;
       }
       default:
@@ -2602,9 +2631,9 @@ SDValue TargetLowering::BuildExactSDIV(SDValue Op1, SDValue Op2, SDLoc dl,
 /// return a DAG expression to select that will generate the same value by
 /// multiplying by a magic number.  See:
 /// <http://the.wall.riscom.net/books/proc/ppc/cwg/code2.html>
-SDValue TargetLowering::
-BuildSDIV(SDNode *N, SelectionDAG &DAG, bool IsAfterLegalization,
-          std::vector<SDNode*> *Created) const {
+SDValue TargetLowering::BuildSDIV(SDNode *N, const APInt &Divisor,
+                                  SelectionDAG &DAG, bool IsAfterLegalization,
+                                  std::vector<SDNode *> *Created) const {
   EVT VT = N->getValueType(0);
   SDLoc dl(N);
 
@@ -2613,8 +2642,7 @@ BuildSDIV(SDNode *N, SelectionDAG &DAG, bool IsAfterLegalization,
   if (!isTypeLegal(VT))
     return SDValue();
 
-  APInt d = cast<ConstantSDNode>(N->getOperand(1))->getAPIntValue();
-  APInt::ms magics = d.magic();
+  APInt::ms magics = Divisor.magic();
 
   // Multiply the numerator (operand 0) by the magic value
   // FIXME: We should support doing a MUL in a wider type
@@ -2631,13 +2659,13 @@ BuildSDIV(SDNode *N, SelectionDAG &DAG, bool IsAfterLegalization,
   else
     return SDValue();       // No mulhs or equvialent
   // If d > 0 and m < 0, add the numerator
-  if (d.isStrictlyPositive() && magics.m.isNegative()) {
+  if (Divisor.isStrictlyPositive() && magics.m.isNegative()) {
     Q = DAG.getNode(ISD::ADD, dl, VT, Q, N->getOperand(0));
     if (Created)
       Created->push_back(Q.getNode());
   }
   // If d < 0 and m > 0, subtract the numerator.
-  if (d.isNegative() && magics.m.isStrictlyPositive()) {
+  if (Divisor.isNegative() && magics.m.isStrictlyPositive()) {
     Q = DAG.getNode(ISD::SUB, dl, VT, Q, N->getOperand(0));
     if (Created)
       Created->push_back(Q.getNode());
@@ -2650,9 +2678,9 @@ BuildSDIV(SDNode *N, SelectionDAG &DAG, bool IsAfterLegalization,
       Created->push_back(Q.getNode());
   }
   // Extract the sign bit and add it to the quotient
-  SDValue T =
-    DAG.getNode(ISD::SRL, dl, VT, Q, DAG.getConstant(VT.getSizeInBits()-1,
-                                           getShiftAmountTy(Q.getValueType())));
+  SDValue T = DAG.getNode(ISD::SRL, dl, VT, Q,
+                          DAG.getConstant(VT.getScalarSizeInBits() - 1,
+                                          getShiftAmountTy(Q.getValueType())));
   if (Created)
     Created->push_back(T.getNode());
   return DAG.getNode(ISD::ADD, dl, VT, Q, T);
@@ -2662,9 +2690,9 @@ BuildSDIV(SDNode *N, SelectionDAG &DAG, bool IsAfterLegalization,
 /// return a DAG expression to select that will generate the same value by
 /// multiplying by a magic number.  See:
 /// <http://the.wall.riscom.net/books/proc/ppc/cwg/code2.html>
-SDValue TargetLowering::
-BuildUDIV(SDNode *N, SelectionDAG &DAG, bool IsAfterLegalization,
-          std::vector<SDNode*> *Created) const {
+SDValue TargetLowering::BuildUDIV(SDNode *N, const APInt &Divisor,
+                                  SelectionDAG &DAG, bool IsAfterLegalization,
+                                  std::vector<SDNode *> *Created) const {
   EVT VT = N->getValueType(0);
   SDLoc dl(N);
 
@@ -2675,22 +2703,21 @@ BuildUDIV(SDNode *N, SelectionDAG &DAG, bool IsAfterLegalization,
 
   // FIXME: We should use a narrower constant when the upper
   // bits are known to be zero.
-  const APInt &N1C = cast<ConstantSDNode>(N->getOperand(1))->getAPIntValue();
-  APInt::mu magics = N1C.magicu();
+  APInt::mu magics = Divisor.magicu();
 
   SDValue Q = N->getOperand(0);
 
   // If the divisor is even, we can avoid using the expensive fixup by shifting
   // the divided value upfront.
-  if (magics.a != 0 && !N1C[0]) {
-    unsigned Shift = N1C.countTrailingZeros();
+  if (magics.a != 0 && !Divisor[0]) {
+    unsigned Shift = Divisor.countTrailingZeros();
     Q = DAG.getNode(ISD::SRL, dl, VT, Q,
                     DAG.getConstant(Shift, getShiftAmountTy(Q.getValueType())));
     if (Created)
       Created->push_back(Q.getNode());
 
     // Get magic number for the shifted divisor.
-    magics = N1C.lshr(Shift).magicu(Shift);
+    magics = Divisor.lshr(Shift).magicu(Shift);
     assert(magics.a == 0 && "Should use cheap fixup now");
   }
 
@@ -2709,7 +2736,7 @@ BuildUDIV(SDNode *N, SelectionDAG &DAG, bool IsAfterLegalization,
     Created->push_back(Q.getNode());
 
   if (magics.a == 0) {
-    assert(magics.s < N1C.getBitWidth() &&
+    assert(magics.s < Divisor.getBitWidth() &&
            "We shouldn't generate an undefined shift!");
     return DAG.getNode(ISD::SRL, dl, VT, Q,
                  DAG.getConstant(magics.s, getShiftAmountTy(Q.getValueType())));

@@ -221,10 +221,6 @@ public:
   /// Return true if pow2 div is cheaper than a chain of srl/add/sra.
   bool isPow2DivCheap() const { return Pow2DivIsCheap; }
 
-  /// Return true if Div never traps, returns 0 when div by 0 and return TMin,
-  /// when sdiv TMin by -1.
-  bool isDivWellDefined() const { return DivIsWellDefined; }
-
   /// Return true if Flow Control is an expensive operation that should be
   /// avoided.
   bool isJumpExpensive() const { return JumpIsExpensive; }
@@ -1041,13 +1037,6 @@ protected:
   /// signed divide by power of two, and let the target handle it.
   void setPow2DivIsCheap(bool isCheap = true) { Pow2DivIsCheap = isCheap; }
 
-  /// Tells the code-generator that it is safe to execute sdiv/udiv/srem/urem
-  /// even when RHS is 0. It is also safe to execute sdiv/srem when LHS is
-  /// SignedMinValue and RHS is -1.
-  void setDivIsWellDefined (bool isWellDefined = true) {
-    DivIsWellDefined = isWellDefined;
-  }
-
   /// Add the specified register class as an available regclass for the
   /// specified value type. This indicates the selector can handle values of
   /// that class natively.
@@ -1468,11 +1457,6 @@ private:
   /// Tells the code generator that it shouldn't generate srl/add/sra for a
   /// signed divide by power of two, and let the target handle it.
   bool Pow2DivIsCheap;
-
-  /// Tells the code-generator that it is safe to execute sdiv/udiv/srem/urem
-  /// even when RHS is 0. It is also safe to execute sdiv/srem when LHS is
-  /// SignedMinValue and RHS is -1.
-  bool DivIsWellDefined;
 
   /// Tells the code generator that it shouldn't generate extra flow control
   /// instructions and should attempt to combine flow control instructions via
@@ -1959,11 +1943,11 @@ public:
 
   /// Determine which of the bits specified in Mask are known to be either zero
   /// or one and return them in the KnownZero/KnownOne bitsets.
-  virtual void computeMaskedBitsForTargetNode(const SDValue Op,
-                                              APInt &KnownZero,
-                                              APInt &KnownOne,
-                                              const SelectionDAG &DAG,
-                                              unsigned Depth = 0) const;
+  virtual void computeKnownBitsForTargetNode(const SDValue Op,
+                                             APInt &KnownZero,
+                                             APInt &KnownOne,
+                                             const SelectionDAG &DAG,
+                                             unsigned Depth = 0) const;
 
   /// This method can be implemented by targets that want to expose additional
   /// information about sign bits to the DAG Combiner.
@@ -2032,6 +2016,15 @@ public:
   /// more complex transformations.
   ///
   virtual SDValue PerformDAGCombine(SDNode *N, DAGCombinerInfo &DCI) const;
+
+  /// Return true if it is profitable to move a following shift through this
+  //  node, adjusting any immediate operands as necessary to preserve semantics.
+  //  This transformation may not be desirable if it disrupts a particularly
+  //  auspicious target-specific tree (e.g. bitfield extraction in AArch64).
+  //  By default, it returns true.
+  virtual bool isDesirableToCommuteWithShift(const SDNode *N /*Op*/) const {
+    return true;
+  }
 
   /// Return true if the target has native support for the specified value type
   /// and it is 'desirable' to use the type for the given node type. e.g. On x86
@@ -2221,6 +2214,13 @@ public:
     return "__clear_cache";
   }
 
+  /// Return the register ID of the name passed in. Used by named register
+  /// global variables extension. There is no target-independent behaviour
+  /// so the default action is to bail.
+  virtual unsigned getRegisterByName(const char* RegName, EVT VT) const {
+    report_fatal_error("Named registers not implemented for this target");
+  }
+
   /// Return the type that should be used to zero or sign extend a
   /// zeroext/signext integer argument or return value.  FIXME: Most C calling
   /// convention requires the return type to be promoted, but this is not true
@@ -2231,6 +2231,15 @@ public:
                                        ISD::NodeType /*ExtendKind*/) const {
     MVT MinVT = getRegisterType(MVT::i32);
     return VT.bitsLT(MinVT) ? MinVT : VT;
+  }
+
+  /// For some targets, an LLVM struct type must be broken down into multiple
+  /// simple types, but the calling convention specifies that the entire struct
+  /// must be passed in a block of consecutive registers.
+  virtual bool
+  functionArgumentNeedsConsecutiveRegisters(Type *Ty, CallingConv::ID CallConv,
+                                            bool isVarArg) const {
+    return false;
   }
 
   /// Returns a 0 terminated array of registers that can be safely used as
@@ -2433,10 +2442,12 @@ public:
   //
   SDValue BuildExactSDIV(SDValue Op1, SDValue Op2, SDLoc dl,
                          SelectionDAG &DAG) const;
-  SDValue BuildSDIV(SDNode *N, SelectionDAG &DAG, bool IsAfterLegalization,
-                      std::vector<SDNode*> *Created) const;
-  SDValue BuildUDIV(SDNode *N, SelectionDAG &DAG, bool IsAfterLegalization,
-                      std::vector<SDNode*> *Created) const;
+  SDValue BuildSDIV(SDNode *N, const APInt &Divisor, SelectionDAG &DAG,
+                    bool IsAfterLegalization,
+                    std::vector<SDNode *> *Created) const;
+  SDValue BuildUDIV(SDNode *N, const APInt &Divisor, SelectionDAG &DAG,
+                    bool IsAfterLegalization,
+                    std::vector<SDNode *> *Created) const;
 
   //===--------------------------------------------------------------------===//
   // Legalization utility functions
@@ -2453,8 +2464,8 @@ public:
   /// \returns true if the node has been expanded. false if it has not
   bool expandMUL(SDNode *N, SDValue &Lo, SDValue &Hi, EVT HiLoVT,
                  SelectionDAG &DAG, SDValue LL = SDValue(),
-		 SDValue LH = SDValue(), SDValue RL = SDValue(),
-		 SDValue RH = SDValue()) const;
+                 SDValue LH = SDValue(), SDValue RL = SDValue(),
+                 SDValue RH = SDValue()) const;
 
   //===--------------------------------------------------------------------===//
   // Instruction Emitting Hooks

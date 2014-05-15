@@ -35,6 +35,7 @@ protected:
   bool HasFPARMv8;
   bool HasNEON;
   bool HasCrypto;
+  bool HasCRC;
 
   // HasZeroCycleRegMove - Has zero-cycle register mov instructions.
   bool HasZeroCycleRegMove;
@@ -66,6 +67,7 @@ public:
   bool hasFPARMv8() const { return HasFPARMv8; }
   bool hasNEON() const { return HasNEON; }
   bool hasCrypto() const { return HasCrypto; }
+  bool hasCRC() const { return HasCRC; }
 
   bool isLittleEndian() const { return IsLittleEndian; }
 
@@ -98,7 +100,8 @@ public:
   const char *getBZeroEntry() const;
 
   void overrideSchedPolicy(MachineSchedPolicy &Policy, MachineInstr *begin,
-                           MachineInstr *end, unsigned NumRegionInstrs) const;
+                           MachineInstr *end,
+                           unsigned NumRegionInstrs) const override;
 };
 } // End llvm namespace
 

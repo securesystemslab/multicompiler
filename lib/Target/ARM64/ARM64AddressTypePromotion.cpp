@@ -71,17 +71,17 @@ class ARM64AddressTypePromotion : public FunctionPass {
 public:
   static char ID;
   ARM64AddressTypePromotion()
-      : FunctionPass(ID), Func(NULL), ConsideredSExtType(NULL) {
+      : FunctionPass(ID), Func(nullptr), ConsideredSExtType(nullptr) {
     initializeARM64AddressTypePromotionPass(*PassRegistry::getPassRegistry());
   }
 
-  virtual const char *getPassName() const {
+  const char *getPassName() const override {
     return "ARM64 Address Type Promotion";
   }
 
   /// Iterate over the functions and promote the computation of interesting
   // sext instructions.
-  bool runOnFunction(Function &F);
+  bool runOnFunction(Function &F) override;
 
 private:
   /// The current function.
@@ -91,7 +91,7 @@ private:
   Type *ConsideredSExtType;
 
   // This transformation requires dominator info.
-  virtual void getAnalysisUsage(AnalysisUsage &AU) const {
+  void getAnalysisUsage(AnalysisUsage &AU) const override {
     AU.setPreservesCFG();
     AU.addRequired<DominatorTreeWrapperPass>();
     AU.addPreserved<DominatorTreeWrapperPass>();
@@ -344,7 +344,7 @@ ARM64AddressTypePromotion::propagateSignExtension(Instructions &SExtInsts) {
         SExtForOpnd->moveBefore(Inst);
         Inst->setOperand(OpIdx, SExtForOpnd);
         // If more sext are required, new instructions will have to be created.
-        SExtForOpnd = NULL;
+        SExtForOpnd = nullptr;
       }
       if (SExtForOpnd == SExt) {
         DEBUG(dbgs() << "Sign extension is useless now\n");
@@ -466,10 +466,10 @@ void ARM64AddressTypePromotion::analyzeSExtension(Instructions &SExtInsts) {
       if (insert || AlreadySeen != SeenChains.end()) {
         DEBUG(dbgs() << "Insert\n");
         SExtInsts.push_back(SExt);
-        if (AlreadySeen != SeenChains.end() && AlreadySeen->second != NULL) {
+        if (AlreadySeen != SeenChains.end() && AlreadySeen->second != nullptr) {
           DEBUG(dbgs() << "Insert chain member\n");
           SExtInsts.push_back(AlreadySeen->second);
-          SeenChains[Last] = NULL;
+          SeenChains[Last] = nullptr;
         }
       } else {
         DEBUG(dbgs() << "Record its chain membership\n");

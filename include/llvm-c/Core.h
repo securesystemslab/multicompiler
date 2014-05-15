@@ -112,11 +112,22 @@ typedef struct LLVMOpaqueBuilder *LLVMBuilderRef;
  */
 typedef struct LLVMOpaqueModuleProvider *LLVMModuleProviderRef;
 
+/** @see llvm::Pass */
+typedef struct LLVMOpaquePass *LLVMPassRef;
+
 /** @see llvm::PassManagerBase */
 typedef struct LLVMOpaquePassManager *LLVMPassManagerRef;
 
 /** @see llvm::PassRegistry */
 typedef struct LLVMOpaquePassRegistry *LLVMPassRegistryRef;
+
+/** @see llvm::PassRunListener */
+typedef struct LLVMOpaquePassRunListener *LLVMPassRunListenerRef;
+
+/** @see llvm::LLVMPassRunListener */
+typedef void (*LLVMPassRunListenerHandlerTy)(LLVMContextRef, LLVMPassRef,
+                                             LLVMModuleRef, LLVMValueRef,
+                                             LLVMBasicBlockRef);
 
 /**
  * Used to get the users and usees of a Value.
@@ -514,6 +525,10 @@ LLVMDiagnosticSeverity LLVMGetDiagInfoSeverity(LLVMDiagnosticInfoRef DI);
 unsigned LLVMGetMDKindIDInContext(LLVMContextRef C, const char* Name,
                                   unsigned SLen);
 unsigned LLVMGetMDKindID(const char* Name, unsigned SLen);
+
+LLVMPassRunListenerRef LLVMAddPassRunListener(LLVMContextRef,
+                                              LLVMPassRunListenerHandlerTy);
+void LLVMRemovePassRunListener(LLVMContextRef, LLVMPassRunListenerRef);
 
 /**
  * @}
@@ -1158,9 +1173,10 @@ LLVMTypeRef LLVMX86MMXType(void);
       macro(ConstantStruct)                 \
       macro(ConstantVector)                 \
       macro(GlobalValue)                    \
-        macro(Function)                     \
         macro(GlobalAlias)                  \
-        macro(GlobalVariable)               \
+        macro(GlobalObject)                 \
+          macro(Function)                   \
+          macro(GlobalVariable)             \
       macro(UndefValue)                     \
     macro(Instruction)                      \
       macro(BinaryOperator)                 \
@@ -2758,6 +2774,18 @@ LLVMMemoryBufferRef LLVMCreateMemoryBufferWithMemoryRangeCopy(const char *InputD
 const char *LLVMGetBufferStart(LLVMMemoryBufferRef MemBuf);
 size_t LLVMGetBufferSize(LLVMMemoryBufferRef MemBuf);
 void LLVMDisposeMemoryBuffer(LLVMMemoryBufferRef MemBuf);
+
+/**
+ * @}
+ */
+
+/**
+ * @defgroup LLVMCCorePass Pass
+ *
+ * @{
+ */
+
+const char *LLVMGetPassName(LLVMPassRef);
 
 /**
  * @}

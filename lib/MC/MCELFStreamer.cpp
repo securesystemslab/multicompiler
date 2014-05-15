@@ -538,7 +538,7 @@ void MCELFStreamer::Flush() {
 }
 
 void MCELFStreamer::FinishImpl() {
-  EmitFrames(nullptr, true);
+  EmitFrames(nullptr);
 
   Flush();
 
@@ -558,10 +558,6 @@ MCStreamer *llvm::createELFStreamer(MCContext &Context, MCAsmBackend &MAB,
 
 void MCELFStreamer::EmitThumbFunc(MCSymbol *Func) {
   llvm_unreachable("Generic ELF doesn't support this directive");
-}
-
-MCSymbolData &MCELFStreamer::getOrCreateSymbolData(const MCSymbol *Symbol) {
-  return getAssembler().getOrCreateSymbolData(*Symbol);
 }
 
 void MCELFStreamer::EmitSymbolDesc(MCSymbol *Symbol, unsigned DescValue) {

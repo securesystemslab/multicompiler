@@ -79,7 +79,7 @@ static MCAsmInfo *createMipsMCAsmInfo(const MCRegisterInfo &MRI, StringRef TT) {
   MCAsmInfo *MAI = new MipsMCAsmInfo(TT);
 
   unsigned SP = MRI.getDwarfRegNum(Mips::SP, true);
-  MCCFIInstruction Inst = MCCFIInstruction::createDefCfa(0, SP, 0);
+  MCCFIInstruction Inst = MCCFIInstruction::createDefCfa(nullptr, SP, 0);
   MAI->addInitialFrameState(Inst);
 
   return MAI;
@@ -124,12 +124,11 @@ static MCStreamer *createMCStreamer(const Target &T, StringRef TT,
 
 static MCStreamer *
 createMCAsmStreamer(MCContext &Ctx, formatted_raw_ostream &OS,
-                    bool isVerboseAsm, bool useCFI, bool useDwarfDirectory,
+                    bool isVerboseAsm, bool useDwarfDirectory,
                     MCInstPrinter *InstPrint, MCCodeEmitter *CE,
                     MCAsmBackend *TAB, bool ShowInst) {
-  MCStreamer *S =
-      llvm::createAsmStreamer(Ctx, OS, isVerboseAsm, useCFI, useDwarfDirectory,
-                              InstPrint, CE, TAB, ShowInst);
+  MCStreamer *S = llvm::createAsmStreamer(
+      Ctx, OS, isVerboseAsm, useDwarfDirectory, InstPrint, CE, TAB, ShowInst);
   new MipsTargetAsmStreamer(*S, OS);
   return S;
 }

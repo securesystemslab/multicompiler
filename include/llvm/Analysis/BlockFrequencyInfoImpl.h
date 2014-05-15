@@ -8,6 +8,7 @@
 //===----------------------------------------------------------------------===//
 //
 // Shared implementation of BlockFrequency for IR and Machine Instructions.
+// See the documentation below for BlockFrequencyInfoImpl for details.
 //
 //===----------------------------------------------------------------------===//
 
@@ -16,11 +17,14 @@
 
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/PostOrderIterator.h"
+#include "llvm/ADT/iterator_range.h"
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/Support/BlockFrequency.h"
 #include "llvm/Support/BranchProbability.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
+#include <deque>
+#include <list>
 #include <string>
 #include <vector>
 
@@ -754,85 +758,10 @@ public:
     return *this;
   }
 
-  /// \brief Scale by another mass.
-  ///
-  /// The current implementation is a little imprecise, but it's relatively
-  /// fast, never overflows, and maintains the property that 1.0*1.0==1.0
-  /// (where isFull represents the number 1.0).  It's an approximation of
-  /// 128-bit multiply that gets right-shifted by 64-bits.
-  ///
-  /// For a given digit size, multiplying two-digit numbers looks like:
-  ///
-  ///                  U1 .    L1
-  ///                * U2 .    L2
-  ///                ============
-  ///           0 .       . L1*L2
-  ///     +     0 . U1*L2 .     0 // (shift left once by a digit-size)
-  ///     +     0 . U2*L1 .     0 // (shift left once by a digit-size)
-  ///     + U1*L2 .     0 .     0 // (shift left twice by a digit-size)
-  ///
-  /// BlockMass has 64-bit numbers.  Split each into two 32-bit digits, stored
-  /// 64-bit.  Add 1 to the lower digits, to model isFull as 1.0; this won't
-  /// overflow, since we have 64-bit storage for each digit.
-  ///
-  /// To do this accurately, (a) multiply into two 64-bit digits, incrementing
-  /// the upper digit on overflows of the lower digit (carry), (b) subtract 1
-  /// from the lower digit, decrementing the upper digit on underflow (carry),
-  /// and (c) truncate the lower digit.  For the 1.0*1.0 case, the upper digit
-  /// will be 0 at the end of step (a), and then will underflow back to isFull
-  /// (1.0) in step (b).
-  ///
-  /// Instead, the implementation does something a little faster with a small
-  /// loss of accuracy: ignore the lower 64-bit digit entirely.  The loss of
-  /// accuracy is small, since the sum of the unmodelled carries is 0 or 1
-  /// (i.e., step (a) will overflow at most once, and step (b) will underflow
-  /// only if step (a) overflows).
-  ///
-  /// This is the formula we're calculating:
-  ///
-  ///     U1.L1 * U2.L2 == U1 * U2 + (U1 * (L2+1))>>32 + (U2 * (L1+1))>>32
-  ///
-  /// As a demonstration of 1.0*1.0, consider two 4-bit numbers that are both
-  /// full (1111).
-  ///
-  ///     U1.L1 * U2.L2 == U1 * U2 + (U1 * (L2+1))>>2 + (U2 * (L1+1))>>2
-  ///     11.11 * 11.11 == 11 * 11 + (11 * (11+1))/4 + (11 * (11+1))/4
-  ///                   == 1001 + (11 * 100)/4 + (11 * 100)/4
-  ///                   == 1001 + 1100/4 + 1100/4
-  ///                   == 1001 + 0011 + 0011
-  ///                   == 1111
-  BlockMass &operator*=(const BlockMass &X) {
-    uint64_t U1 = Mass >> 32, L1 = Mass & UINT32_MAX, U2 = X.Mass >> 32,
-             L2 = X.Mass & UINT32_MAX;
-    Mass = U1 * U2 + (U1 * (L2 + 1) >> 32) + ((L1 + 1) * U2 >> 32);
+  BlockMass &operator*=(const BranchProbability &P) {
+    Mass = P.scale(Mass);
     return *this;
   }
-
-  /// \brief Multiply by a branch probability.
-  ///
-  /// Multiply by P.  Guarantees full precision.
-  ///
-  /// This could be naively implemented by multiplying by the numerator and
-  /// dividing by the denominator, but in what order?  Multiplying first can
-  /// overflow, while dividing first will lose precision (potentially, changing
-  /// a non-zero mass to zero).
-  ///
-  /// The implementation mixes the two methods.  Since \a BranchProbability
-  /// uses 32-bits and \a BlockMass 64-bits, shift the mass as far to the left
-  /// as there is room, then divide by the denominator to get a quotient.
-  /// Multiplying by the numerator and right shifting gives a first
-  /// approximation.
-  ///
-  /// Calculate the error in this first approximation by calculating the
-  /// opposite mass (multiply by the opposite numerator and shift) and
-  /// subtracting both from teh original mass.
-  ///
-  /// Add to the first approximation the correct fraction of this error value.
-  /// This time, multiply first and then divide, since there is no danger of
-  /// overflow.
-  ///
-  /// \pre P represents a fraction between 0.0 and 1.0.
-  BlockMass &operator*=(const BranchProbability &P);
 
   bool operator==(const BlockMass &X) const { return Mass == X.Mass; }
   bool operator!=(const BlockMass &X) const { return Mass != X.Mass; }
@@ -856,9 +785,6 @@ inline BlockMass operator+(const BlockMass &L, const BlockMass &R) {
 }
 inline BlockMass operator-(const BlockMass &L, const BlockMass &R) {
   return BlockMass(L) -= R;
-}
-inline BlockMass operator*(const BlockMass &L, const BlockMass &R) {
-  return BlockMass(L) *= R;
 }
 inline BlockMass operator*(const BlockMass &L, const BranchProbability &R) {
   return BlockMass(L) *= R;
@@ -893,6 +819,13 @@ class MachineBranchProbabilityInfo;
 class MachineFunction;
 class MachineLoop;
 class MachineLoopInfo;
+
+namespace bfi_detail {
+struct IrreducibleGraph;
+
+// This is part of a workaround for a GCC 4.7 crash on lambdas.
+template <class BT> struct BlockEdgesAdder;
+}
 
 /// \brief Base class for BlockFrequencyInfoImpl
 ///
@@ -943,41 +876,112 @@ public:
   /// pseudo-node once it's packaged.
   struct LoopData {
     typedef SmallVector<std::pair<BlockNode, BlockMass>, 4> ExitMap;
-    typedef SmallVector<BlockNode, 4> MemberList;
-    BlockNode Header;       ///< Header.
+    typedef SmallVector<BlockNode, 4> NodeList;
+    LoopData *Parent;       ///< The parent loop.
     bool IsPackaged;        ///< Whether this has been packaged.
+    uint32_t NumHeaders;    ///< Number of headers.
     ExitMap Exits;          ///< Successor edges (and weights).
-    MemberList Members;     ///< Members of the loop.
+    NodeList Nodes;         ///< Header and the members of the loop.
     BlockMass BackedgeMass; ///< Mass returned to loop header.
     BlockMass Mass;
     Float Scale;
 
-    LoopData(const BlockNode &Header) : Header(Header), IsPackaged(false) {}
+    LoopData(LoopData *Parent, const BlockNode &Header)
+        : Parent(Parent), IsPackaged(false), NumHeaders(1), Nodes(1, Header) {}
+    template <class It1, class It2>
+    LoopData(LoopData *Parent, It1 FirstHeader, It1 LastHeader, It2 FirstOther,
+             It2 LastOther)
+        : Parent(Parent), IsPackaged(false), Nodes(FirstHeader, LastHeader) {
+      NumHeaders = Nodes.size();
+      Nodes.insert(Nodes.end(), FirstOther, LastOther);
+    }
+    bool isHeader(const BlockNode &Node) const {
+      if (isIrreducible())
+        return std::binary_search(Nodes.begin(), Nodes.begin() + NumHeaders,
+                                  Node);
+      return Node == Nodes[0];
+    }
+    BlockNode getHeader() const { return Nodes[0]; }
+    bool isIrreducible() const { return NumHeaders > 1; }
+
+    NodeList::const_iterator members_begin() const {
+      return Nodes.begin() + NumHeaders;
+    }
+    NodeList::const_iterator members_end() const { return Nodes.end(); }
+    iterator_range<NodeList::const_iterator> members() const {
+      return make_range(members_begin(), members_end());
+    }
   };
 
   /// \brief Index of loop information.
   struct WorkingData {
-    LoopData *Loop;           ///< The loop this block is the header of.
-    LoopData *ContainingLoop; ///< The block whose loop this block is inside.
-    BlockMass Mass;           ///< Mass distribution from the entry block.
+    BlockNode Node; ///< This node.
+    LoopData *Loop; ///< The loop this block is inside.
+    BlockMass Mass; ///< Mass distribution from the entry block.
 
-    WorkingData() : Loop(nullptr), ContainingLoop(nullptr) {}
+    WorkingData(const BlockNode &Node) : Node(Node), Loop(nullptr) {}
 
-    bool hasLoopHeader() const { return ContainingLoop; }
-    bool isLoopHeader() const { return Loop; }
+    bool isLoopHeader() const { return Loop && Loop->isHeader(Node); }
+    bool isDoubleLoopHeader() const {
+      return isLoopHeader() && Loop->Parent && Loop->Parent->isIrreducible() &&
+             Loop->Parent->isHeader(Node);
+    }
 
-    BlockNode getContainingHeader() const {
-      if (ContainingLoop)
-        return ContainingLoop->Header;
-      return BlockNode();
+    LoopData *getContainingLoop() const {
+      if (!isLoopHeader())
+        return Loop;
+      if (!isDoubleLoopHeader())
+        return Loop->Parent;
+      return Loop->Parent->Parent;
+    }
+
+    /// \brief Resolve a node to its representative.
+    ///
+    /// Get the node currently representing Node, which could be a containing
+    /// loop.
+    ///
+    /// This function should only be called when distributing mass.  As long as
+    /// there are no irreducilbe edges to Node, then it will have complexity
+    /// O(1) in this context.
+    ///
+    /// In general, the complexity is O(L), where L is the number of loop
+    /// headers Node has been packaged into.  Since this method is called in
+    /// the context of distributing mass, L will be the number of loop headers
+    /// an early exit edge jumps out of.
+    BlockNode getResolvedNode() const {
+      auto L = getPackagedLoop();
+      return L ? L->getHeader() : Node;
+    }
+    LoopData *getPackagedLoop() const {
+      if (!Loop || !Loop->IsPackaged)
+        return nullptr;
+      auto L = Loop;
+      while (L->Parent && L->Parent->IsPackaged)
+        L = L->Parent;
+      return L;
+    }
+
+    /// \brief Get the appropriate mass for a node.
+    ///
+    /// Get appropriate mass for Node.  If Node is a loop-header (whose loop
+    /// has been packaged), returns the mass of its pseudo-node.  If it's a
+    /// node inside a packaged loop, it returns the loop's mass.
+    BlockMass &getMass() {
+      if (!isAPackage())
+        return Mass;
+      if (!isADoublePackage())
+        return Loop->Mass;
+      return Loop->Parent->Mass;
     }
 
     /// \brief Has ContainingLoop been packaged up?
-    bool isPackaged() const {
-      return ContainingLoop && ContainingLoop->IsPackaged;
-    }
+    bool isPackaged() const { return getResolvedNode() != Node; }
     /// \brief Has Loop been packaged up?
-    bool isAPackage() const { return Loop && Loop->IsPackaged; }
+    bool isAPackage() const { return isLoopHeader() && Loop->IsPackaged; }
+    /// \brief Has Loop been packaged up twice?
+    bool isADoublePackage() const {
+      return isDoubleLoopHeader() && Loop->Parent->IsPackaged;
+    }
   };
 
   /// \brief Unscaled probability weight.
@@ -1008,17 +1012,14 @@ public:
   /// This class collates the successor edge weights for later processing.
   ///
   /// \a DidOverflow indicates whether \a Total did overflow while adding to
-  /// the distribution.  It should never overflow twice.  There's no flag for
-  /// whether \a ForwardTotal overflows, since when \a Total exceeds 32-bits
-  /// they both get re-computed during \a normalize().
+  /// the distribution.  It should never overflow twice.
   struct Distribution {
     typedef SmallVector<Weight, 4> WeightList;
     WeightList Weights;    ///< Individual successor weights.
     uint64_t Total;        ///< Sum of all weights.
     bool DidOverflow;      ///< Whether \a Total did overflow.
-    uint32_t ForwardTotal; ///< Total excluding backedges.
 
-    Distribution() : Total(0), DidOverflow(false), ForwardTotal(0) {}
+    Distribution() : Total(0), DidOverflow(false) {}
     void addLocal(const BlockNode &Node, uint64_t Amount) {
       add(Node, Amount, Weight::Local);
     }
@@ -1051,30 +1052,51 @@ public:
   std::vector<WorkingData> Working;
 
   /// \brief Indexed information about loops.
-  std::vector<std::unique_ptr<LoopData>> Loops;
+  std::list<LoopData> Loops;
 
   /// \brief Add all edges out of a packaged loop to the distribution.
   ///
   /// Adds all edges from LocalLoopHead to Dist.  Calls addToDist() to add each
   /// successor edge.
-  void addLoopSuccessorsToDist(const BlockNode &LoopHead,
-                               const BlockNode &LocalLoopHead,
+  ///
+  /// \return \c true unless there's an irreducible backedge.
+  bool addLoopSuccessorsToDist(const LoopData *OuterLoop, LoopData &Loop,
                                Distribution &Dist);
 
   /// \brief Add an edge to the distribution.
   ///
   /// Adds an edge to Succ to Dist.  If \c LoopHead.isValid(), then whether the
-  /// edge is forward/exit/backedge is in the context of LoopHead.  Otherwise,
-  /// every edge should be a forward edge (since all the loops are packaged
-  /// up).
-  void addToDist(Distribution &Dist, const BlockNode &LoopHead,
+  /// edge is local/exit/backedge is in the context of LoopHead.  Otherwise,
+  /// every edge should be a local edge (since all the loops are packaged up).
+  ///
+  /// \return \c true unless aborted due to an irreducible backedge.
+  bool addToDist(Distribution &Dist, const LoopData *OuterLoop,
                  const BlockNode &Pred, const BlockNode &Succ, uint64_t Weight);
 
   LoopData &getLoopPackage(const BlockNode &Head) {
     assert(Head.Index < Working.size());
-    assert(Working[Head.Index].Loop != nullptr);
+    assert(Working[Head.Index].isLoopHeader());
     return *Working[Head.Index].Loop;
   }
+
+  /// \brief Analyze irreducible SCCs.
+  ///
+  /// Separate irreducible SCCs from \c G, which is an explict graph of \c
+  /// OuterLoop (or the top-level function, if \c OuterLoop is \c nullptr).
+  /// Insert them into \a Loops before \c Insert.
+  ///
+  /// \return the \c LoopData nodes representing the irreducible SCCs.
+  iterator_range<std::list<LoopData>::iterator>
+  analyzeIrreducible(const bfi_detail::IrreducibleGraph &G, LoopData *OuterLoop,
+                     std::list<LoopData>::iterator Insert);
+
+  /// \brief Update a loop after packaging irreducible SCCs inside of it.
+  ///
+  /// Update \c OuterLoop.  Before finding irreducible control flow, it was
+  /// partway through \a computeMassInLoop(), so \a LoopData::Exits and \a
+  /// LoopData::BackedgeMass need to be reset.  Also, nodes that were packaged
+  /// up need to be removed from \a OuterLoop::Nodes.
+  void updateLoopWithIrreducible(LoopData &OuterLoop);
 
   /// \brief Distribute mass according to a distribution.
   ///
@@ -1082,38 +1104,29 @@ public:
   /// backedges and exits are stored in its entry in Loops.
   ///
   /// Mass is distributed in parallel from two copies of the source mass.
-  ///
-  /// The first mass (forward) represents the distribution of mass through the
-  /// local DAG.  This distribution should lose mass at loop exits and ignore
-  /// backedges.
-  ///
-  /// The second mass (general) represents the behavior of the loop in the
-  /// global context.  In a given distribution from the head, how much mass
-  /// exits, and to where?  How much mass returns to the loop head?
-  ///
-  /// The forward mass should be split up between local successors and exits,
-  /// but only actually distributed to the local successors.  The general mass
-  /// should be split up between all three types of successors, but distributed
-  /// only to exits and backedges.
-  void distributeMass(const BlockNode &Source, const BlockNode &LoopHead,
+  void distributeMass(const BlockNode &Source, LoopData *OuterLoop,
                       Distribution &Dist);
 
   /// \brief Compute the loop scale for a loop.
-  void computeLoopScale(const BlockNode &LoopHead);
+  void computeLoopScale(LoopData &Loop);
 
   /// \brief Package up a loop.
-  void packageLoop(const BlockNode &LoopHead);
+  void packageLoop(LoopData &Loop);
+
+  /// \brief Unwrap loops.
+  void unwrapLoops();
 
   /// \brief Finalize frequency metrics.
   ///
-  /// Unwraps loop packages, calculates final frequencies, and cleans up
-  /// no-longer-needed data structures.
+  /// Calculates final frequencies and cleans up no-longer-needed data
+  /// structures.
   void finalizeMetrics();
 
   /// \brief Clear all memory.
   void clear();
 
   virtual std::string getBlockName(const BlockNode &Node) const;
+  std::string getLoopName(const LoopData &Loop) const;
 
   virtual raw_ostream &print(raw_ostream &OS) const { return OS; }
   void dump() const { print(dbgs()); }
@@ -1173,6 +1186,106 @@ template <> inline std::string getBlockName(const BasicBlock *BB) {
   assert(BB && "Unexpected nullptr");
   return BB->getName().str();
 }
+
+/// \brief Graph of irreducible control flow.
+///
+/// This graph is used for determining the SCCs in a loop (or top-level
+/// function) that has irreducible control flow.
+///
+/// During the block frequency algorithm, the local graphs are defined in a
+/// light-weight way, deferring to the \a BasicBlock or \a MachineBasicBlock
+/// graphs for most edges, but getting others from \a LoopData::ExitMap.  The
+/// latter only has successor information.
+///
+/// \a IrreducibleGraph makes this graph explicit.  It's in a form that can use
+/// \a GraphTraits (so that \a analyzeIrreducible() can use \a scc_iterator),
+/// and it explicitly lists predecessors and successors.  The initialization
+/// that relies on \c MachineBasicBlock is defined in the header.
+struct IrreducibleGraph {
+  typedef BlockFrequencyInfoImplBase BFIBase;
+
+  BFIBase &BFI;
+
+  typedef BFIBase::BlockNode BlockNode;
+  struct IrrNode {
+    BlockNode Node;
+    unsigned NumIn;
+    std::deque<const IrrNode *> Edges;
+    IrrNode(const BlockNode &Node) : Node(Node), NumIn(0) {}
+
+    typedef std::deque<const IrrNode *>::const_iterator iterator;
+    iterator pred_begin() const { return Edges.begin(); }
+    iterator succ_begin() const { return Edges.begin() + NumIn; }
+    iterator pred_end() const { return succ_begin(); }
+    iterator succ_end() const { return Edges.end(); }
+  };
+  BlockNode Start;
+  const IrrNode *StartIrr;
+  std::vector<IrrNode> Nodes;
+  SmallDenseMap<uint32_t, IrrNode *, 4> Lookup;
+
+  /// \brief Construct an explicit graph containing irreducible control flow.
+  ///
+  /// Construct an explicit graph of the control flow in \c OuterLoop (or the
+  /// top-level function, if \c OuterLoop is \c nullptr).  Uses \c
+  /// addBlockEdges to add block successors that have not been packaged into
+  /// loops.
+  ///
+  /// \a BlockFrequencyInfoImpl::computeIrreducibleMass() is the only expected
+  /// user of this.
+  template <class BlockEdgesAdder>
+  IrreducibleGraph(BFIBase &BFI, const BFIBase::LoopData *OuterLoop,
+                   BlockEdgesAdder addBlockEdges)
+      : BFI(BFI), StartIrr(nullptr) {
+    initialize(OuterLoop, addBlockEdges);
+  }
+
+  template <class BlockEdgesAdder>
+  void initialize(const BFIBase::LoopData *OuterLoop,
+                  BlockEdgesAdder addBlockEdges);
+  void addNodesInLoop(const BFIBase::LoopData &OuterLoop);
+  void addNodesInFunction();
+  void addNode(const BlockNode &Node) {
+    Nodes.emplace_back(Node);
+    BFI.Working[Node.Index].getMass() = BlockMass::getEmpty();
+  }
+  void indexNodes();
+  template <class BlockEdgesAdder>
+  void addEdges(const BlockNode &Node, const BFIBase::LoopData *OuterLoop,
+                BlockEdgesAdder addBlockEdges);
+  void addEdge(IrrNode &Irr, const BlockNode &Succ,
+               const BFIBase::LoopData *OuterLoop);
+};
+template <class BlockEdgesAdder>
+void IrreducibleGraph::initialize(const BFIBase::LoopData *OuterLoop,
+                                  BlockEdgesAdder addBlockEdges) {
+  if (OuterLoop) {
+    addNodesInLoop(*OuterLoop);
+    for (auto N : OuterLoop->Nodes)
+      addEdges(N, OuterLoop, addBlockEdges);
+  } else {
+    addNodesInFunction();
+    for (uint32_t Index = 0; Index < BFI.Working.size(); ++Index)
+      addEdges(Index, OuterLoop, addBlockEdges);
+  }
+  StartIrr = Lookup[Start.Index];
+}
+template <class BlockEdgesAdder>
+void IrreducibleGraph::addEdges(const BlockNode &Node,
+                                const BFIBase::LoopData *OuterLoop,
+                                BlockEdgesAdder addBlockEdges) {
+  auto L = Lookup.find(Node.Index);
+  if (L == Lookup.end())
+    return;
+  IrrNode &Irr = *L->second;
+  const auto &Working = BFI.Working[Node.Index];
+
+  if (Working.isAPackage())
+    for (const auto &I : Working.Loop->Exits)
+      addEdge(Irr, I.first, OuterLoop);
+  else
+    addBlockEdges(*this, Irr, OuterLoop);
+}
 }
 
 /// \brief Shared implementation for block frequency analysis.
@@ -1180,6 +1293,22 @@ template <> inline std::string getBlockName(const BasicBlock *BB) {
 /// This is a shared implementation of BlockFrequencyInfo and
 /// MachineBlockFrequencyInfo, and calculates the relative frequencies of
 /// blocks.
+///
+/// LoopInfo defines a loop as a "non-trivial" SCC dominated by a single block,
+/// which is called the header.  A given loop, L, can have sub-loops, which are
+/// loops within the subgraph of L that exclude its header.  (A "trivial" SCC
+/// consists of a single block that does not have a self-edge.)
+///
+/// In addition to loops, this algorithm has limited support for irreducible
+/// SCCs, which are SCCs with multiple entry blocks.  Irreducible SCCs are
+/// discovered on they fly, and modelled as loops with multiple headers.
+///
+/// The headers of irreducible sub-SCCs consist of its entry blocks and all
+/// nodes that are targets of a backedge within it (excluding backedges within
+/// true sub-loops).  Block frequency calculations act as if a block is
+/// inserted that intercepts all the edges to the headers.  All backedges and
+/// entries point to this block.  Its successors are the headers, which split
+/// the frequency evenly.
 ///
 /// This algorithm leverages BlockMass and UnsignedFloat to maintain precision,
 /// separates mass distribution from loop scaling, and dithers to eliminate
@@ -1204,7 +1333,7 @@ template <> inline std::string getBlockName(const BasicBlock *BB) {
 ///     All other stages make use of this ordering.  Save a lookup from BlockT
 ///     to BlockNode (the index into RPOT) in Nodes.
 ///
-///  1. Loop indexing (\a initializeLoops()).
+///  1. Loop initialization (\a initializeLoops()).
 ///
 ///     Translate LoopInfo/MachineLoopInfo into a form suitable for the rest of
 ///     the algorithm.  In particular, store the immediate members of each loop
@@ -1215,11 +1344,9 @@ template <> inline std::string getBlockName(const BasicBlock *BB) {
 ///     For each loop (bottom-up), distribute mass through the DAG resulting
 ///     from ignoring backedges and treating sub-loops as a single pseudo-node.
 ///     Track the backedge mass distributed to the loop header, and use it to
-///     calculate the loop scale (number of loop iterations).
-///
-///     Visiting loops bottom-up is a post-order traversal of loop headers.
-///     For each loop, immediate members that represent sub-loops will already
-///     have been visited and packaged into a pseudo-node.
+///     calculate the loop scale (number of loop iterations).  Immediate
+///     members that represent sub-loops will already have been visited and
+///     packaged into a pseudo-node.
 ///
 ///     Distributing mass in a loop is a reverse-post-order traversal through
 ///     the loop.  Start by assigning full mass to the Loop header.  For each
@@ -1230,23 +1357,22 @@ template <> inline std::string getBlockName(const BasicBlock *BB) {
 ///           in \a LoopData::Exits.  Otherwise, fetch it from
 ///           BranchProbabilityInfo.
 ///
-///         - Each successor is categorized as \a Weight::Local, a normal
-///           forward edge within the current loop, \a Weight::Backedge, a
-///           backedge to the loop header, or \a Weight::Exit, any successor
-///           outside the loop.  The weight, the successor, and its category
-///           are stored in \a Distribution.  There can be multiple edges to
-///           each successor.
+///         - Each successor is categorized as \a Weight::Local, a local edge
+///           within the current loop, \a Weight::Backedge, a backedge to the
+///           loop header, or \a Weight::Exit, any successor outside the loop.
+///           The weight, the successor, and its category are stored in \a
+///           Distribution.  There can be multiple edges to each successor.
+///
+///         - If there's a backedge to a non-header, there's an irreducible SCC.
+///           The usual flow is temporarily aborted.  \a
+///           computeIrreducibleMass() finds the irreducible SCCs within the
+///           loop, packages them up, and restarts the flow.
 ///
 ///         - Normalize the distribution:  scale weights down so that their sum
 ///           is 32-bits, and coalesce multiple edges to the same node.
 ///
 ///         - Distribute the mass accordingly, dithering to minimize mass loss,
-///           as described in \a distributeMass().  Mass is distributed in
-///           parallel in two ways: forward, and general.  Local successors
-///           take their mass from the forward mass, while exit and backedge
-///           successors take their mass from the general mass.  Additionally,
-///           exit edges use up (ignored) mass from the forward mass, and local
-///           edges use up (ignored) mass from the general distribution.
+///           as described in \a distributeMass().
 ///
 ///     Finally, calculate the loop scale from the accumulated backedge mass.
 ///
@@ -1256,39 +1382,62 @@ template <> inline std::string getBlockName(const BasicBlock *BB) {
 ///     loops in the function.  This uses the same algorithm as distributing
 ///     mass in a loop, except that there are no exit or backedge edges.
 ///
-///  4. Loop unpackaging and cleanup (\a finalizeMetrics()).
+///  4. Unpackage loops (\a unwrapLoops()).
 ///
-///     Initialize the frequency to a floating point representation of its
-///     mass.
+///     Initialize each block's frequency to a floating point representation of
+///     its mass.
 ///
-///     Visit loops top-down (reverse post-order), scaling the loop header's
-///     frequency by its psuedo-node's mass and loop scale.  Keep track of the
-///     minimum and maximum final frequencies.
+///     Visit loops top-down, scaling the frequencies of its immediate members
+///     by the loop's pseudo-node's frequency.
+///
+///  5. Convert frequencies to a 64-bit range (\a finalizeMetrics()).
 ///
 ///     Using the min and max frequencies as a guide, translate floating point
 ///     frequencies to an appropriate range in uint64_t.
 ///
 /// It has some known flaws.
 ///
-///   - Irreducible control flow isn't modelled correctly.  In particular,
-///     LoopInfo and MachineLoopInfo ignore irreducible backedges.  The main
-///     result is that irreducible SCCs will under-scaled.  No mass is lost,
-///     but the computed branch weights for the loop pseudo-node will be
-///     incorrect.
+///   - Loop scale is limited to 4096 per loop (2^12) to avoid exhausting
+///     BlockFrequency's 64-bit integer precision.
+///
+///   - The model of irreducible control flow is a rough approximation.
 ///
 ///     Modelling irreducible control flow exactly involves setting up and
 ///     solving a group of infinite geometric series.  Such precision is
 ///     unlikely to be worthwhile, since most of our algorithms give up on
 ///     irreducible control flow anyway.
 ///
-///     Nevertheless, we might find that we need to get closer.  If
-///     LoopInfo/MachineLoopInfo flags loops with irreducible control flow
-///     (and/or the function as a whole), we can find the SCCs, compute an
-///     approximate exit frequency for the SCC as a whole, and scale up
-///     accordingly.
+///     Nevertheless, we might find that we need to get closer.  Here's a sort
+///     of TODO list for the model with diminishing returns, to be completed as
+///     necessary.
 ///
-///   - Loop scale is limited to 4096 per loop (2^12) to avoid exhausting
-///     BlockFrequency's 64-bit integer precision.
+///       - The headers for the \a LoopData representing an irreducible SCC
+///         include non-entry blocks.  When these extra blocks exist, they
+///         indicate a self-contained irreducible sub-SCC.  We could treat them
+///         as sub-loops, rather than arbitrarily shoving the problematic
+///         blocks into the headers of the main irreducible SCC.
+///
+///       - Backedge frequencies are assumed to be evenly split between the
+///         headers of a given irreducible SCC.  Instead, we could track the
+///         backedge mass separately for each header, and adjust their relative
+///         frequencies.
+///
+///       - Entry frequencies are assumed to be evenly split between the
+///         headers of a given irreducible SCC, which is the only option if we
+///         need to compute mass in the SCC before its parent loop.  Instead,
+///         we could partially compute mass in the parent loop, and stop when
+///         we get to the SCC.  Here, we have the correct ratio of entry
+///         masses, which we can use to adjust their relative frequencies.
+///         Compute mass in the SCC, and then continue propagation in the
+///         parent.
+///
+///       - We can propagate mass iteratively through the SCC, for some fixed
+///         number of iterations.  Each iteration starts by assigning the entry
+///         blocks their backedge mass from the prior iteration.  The final
+///         mass for each block (and each exit, and the total backedge mass
+///         used for computing loop scale) is the sum of all iterations.
+///         (Running this until fixed point would "solve" the geometric
+///         series by simulation.)
 template <class BT> class BlockFrequencyInfoImpl : BlockFrequencyInfoImplBase {
   typedef typename bfi_detail::TypeMap<BT>::BlockT BlockT;
   typedef typename bfi_detail::TypeMap<BT>::FunctionT FunctionT;
@@ -1296,6 +1445,9 @@ template <class BT> class BlockFrequencyInfoImpl : BlockFrequencyInfoImplBase {
   BranchProbabilityInfoT;
   typedef typename bfi_detail::TypeMap<BT>::LoopT LoopT;
   typedef typename bfi_detail::TypeMap<BT>::LoopInfoT LoopInfoT;
+
+  // This is part of a workaround for a GCC 4.7 crash on lambdas.
+  friend struct bfi_detail::BlockEdgesAdder<BT>;
 
   typedef GraphTraits<const BlockT *> Successor;
   typedef GraphTraits<Inverse<const BlockT *>> Predecessor;
@@ -1325,14 +1477,80 @@ template <class BT> class BlockFrequencyInfoImpl : BlockFrequencyInfoImplBase {
     return RPOT[Node.Index];
   }
 
+  /// \brief Run (and save) a post-order traversal.
+  ///
+  /// Saves a reverse post-order traversal of all the nodes in \a F.
   void initializeRPOT();
-  void initializeLoops();
-  void runOnFunction(const FunctionT *F);
 
-  void propagateMassToSuccessors(const BlockNode &LoopHead,
-                                 const BlockNode &Node);
+  /// \brief Initialize loop data.
+  ///
+  /// Build up \a Loops using \a LoopInfo.  \a LoopInfo gives us a mapping from
+  /// each block to the deepest loop it's in, but we need the inverse.  For each
+  /// loop, we store in reverse post-order its "immediate" members, defined as
+  /// the header, the headers of immediate sub-loops, and all other blocks in
+  /// the loop that are not in sub-loops.
+  void initializeLoops();
+
+  /// \brief Propagate to a block's successors.
+  ///
+  /// In the context of distributing mass through \c OuterLoop, divide the mass
+  /// currently assigned to \c Node between its successors.
+  ///
+  /// \return \c true unless there's an irreducible backedge.
+  bool propagateMassToSuccessors(LoopData *OuterLoop, const BlockNode &Node);
+
+  /// \brief Compute mass in a particular loop.
+  ///
+  /// Assign mass to \c Loop's header, and then for each block in \c Loop in
+  /// reverse post-order, distribute mass to its successors.  Only visits nodes
+  /// that have not been packaged into sub-loops.
+  ///
+  /// \pre \a computeMassInLoop() has been called for each subloop of \c Loop.
+  /// \return \c true unless there's an irreducible backedge.
+  bool computeMassInLoop(LoopData &Loop);
+
+  /// \brief Try to compute mass in the top-level function.
+  ///
+  /// Assign mass to the entry block, and then for each block in reverse
+  /// post-order, distribute mass to its successors.  Skips nodes that have
+  /// been packaged into loops.
+  ///
+  /// \pre \a computeMassInLoops() has been called.
+  /// \return \c true unless there's an irreducible backedge.
+  bool tryToComputeMassInFunction();
+
+  /// \brief Compute mass in (and package up) irreducible SCCs.
+  ///
+  /// Find the irreducible SCCs in \c OuterLoop, add them to \a Loops (in front
+  /// of \c Insert), and call \a computeMassInLoop() on each of them.
+  ///
+  /// If \c OuterLoop is \c nullptr, it refers to the top-level function.
+  ///
+  /// \pre \a computeMassInLoop() has been called for each subloop of \c
+  /// OuterLoop.
+  /// \pre \c Insert points at the the last loop successfully processed by \a
+  /// computeMassInLoop().
+  /// \pre \c OuterLoop has irreducible SCCs.
+  void computeIrreducibleMass(LoopData *OuterLoop,
+                              std::list<LoopData>::iterator Insert);
+
+  /// \brief Compute mass in all loops.
+  ///
+  /// For each loop bottom-up, call \a computeMassInLoop().
+  ///
+  /// \a computeMassInLoop() aborts (and returns \c false) on loops that
+  /// contain a irreducible sub-SCCs.  Use \a computeIrreducibleMass() and then
+  /// re-enter \a computeMassInLoop().
+  ///
+  /// \post \a computeMassInLoop() has returned \c true for every loop.
   void computeMassInLoops();
-  void computeMassInLoop(const BlockNode &LoopHead);
+
+  /// \brief Compute mass in the top-level function.
+  ///
+  /// Uses \a tryToComputeMassInFunction() and \a computeIrreducibleMass() to
+  /// compute mass in the top-level function.
+  ///
+  /// \post \a tryToComputeMassInFunction() has returned \c true.
   void computeMassInFunction();
 
   std::string getBlockName(const BlockNode &Node) const override {
@@ -1344,7 +1562,7 @@ public:
 
   void doFunction(const FunctionT *F, const BranchProbabilityInfoT *BPI,
                   const LoopInfoT *LI);
-  BlockFrequencyInfoImpl() : BPI(0), LI(0), F(0) {}
+  BlockFrequencyInfoImpl() : BPI(nullptr), LI(nullptr), F(nullptr) {}
 
   using BlockFrequencyInfoImplBase::getEntryFreq;
   BlockFrequency getBlockFreq(const BlockT *BB) const {
@@ -1398,6 +1616,7 @@ void BlockFrequencyInfoImpl<BT>::doFunction(const FunctionT *F,
   // the full function.
   computeMassInLoops();
   computeMassInFunction();
+  unwrapLoops();
   finalizeMetrics();
 }
 
@@ -1417,7 +1636,9 @@ template <class BT> void BlockFrequencyInfoImpl<BT>::initializeRPOT() {
     Nodes[*I] = Node;
   }
 
-  Working.resize(RPOT.size());
+  Working.reserve(RPOT.size());
+  for (size_t Index = 0; Index < RPOT.size(); ++Index)
+    Working.emplace_back(Index);
   Freqs.resize(RPOT.size());
 }
 
@@ -1427,33 +1648,39 @@ template <class BT> void BlockFrequencyInfoImpl<BT>::initializeLoops() {
     return;
 
   // Visit loops top down and assign them an index.
-  std::deque<const LoopT *> Q;
-  Q.insert(Q.end(), LI->begin(), LI->end());
+  std::deque<std::pair<const LoopT *, LoopData *>> Q;
+  for (const LoopT *L : *LI)
+    Q.emplace_back(L, nullptr);
   while (!Q.empty()) {
-    const LoopT *Loop = Q.front();
+    const LoopT *Loop = Q.front().first;
+    LoopData *Parent = Q.front().second;
     Q.pop_front();
-    Q.insert(Q.end(), Loop->begin(), Loop->end());
 
-    // Save the order this loop was visited.
     BlockNode Header = getNode(Loop->getHeader());
     assert(Header.isValid());
 
-    Loops.emplace_back(new LoopData(Header));
-    Working[Header.Index].Loop = Loops.back().get();
+    Loops.emplace_back(Parent, Header);
+    Working[Header.Index].Loop = &Loops.back();
     DEBUG(dbgs() << " - loop = " << getBlockName(Header) << "\n");
+
+    for (const LoopT *L : *Loop)
+      Q.emplace_back(L, &Loops.back());
   }
 
   // Visit nodes in reverse post-order and add them to their deepest containing
   // loop.
   for (size_t Index = 0; Index < RPOT.size(); ++Index) {
+    // Loop headers have already been mostly mapped.
+    if (Working[Index].isLoopHeader()) {
+      LoopData *ContainingLoop = Working[Index].getContainingLoop();
+      if (ContainingLoop)
+        ContainingLoop->Nodes.push_back(Index);
+      continue;
+    }
+
     const LoopT *Loop = LI->getLoopFor(RPOT[Index]);
     if (!Loop)
       continue;
-
-    // If this is a loop header, find its parent loop (if any).
-    if (Working[Index].isLoopHeader())
-      if (!(Loop = Loop->getParentLoop()))
-        continue;
 
     // Add this node to its containing loop's member list.
     BlockNode Header = getNode(Loop->getHeader());
@@ -1461,8 +1688,8 @@ template <class BT> void BlockFrequencyInfoImpl<BT>::initializeLoops() {
     const auto &HeaderData = Working[Header.Index];
     assert(HeaderData.isLoopHeader());
 
-    Working[Index].ContainingLoop = HeaderData.Loop;
-    HeaderData.Loop->Members.push_back(Index);
+    Working[Index].Loop = HeaderData.Loop;
+    HeaderData.Loop->Nodes.push_back(Index);
     DEBUG(dbgs() << " - loop = " << getBlockName(Header)
                  << ": member = " << getBlockName(Index) << "\n");
   }
@@ -1470,63 +1697,145 @@ template <class BT> void BlockFrequencyInfoImpl<BT>::initializeLoops() {
 
 template <class BT> void BlockFrequencyInfoImpl<BT>::computeMassInLoops() {
   // Visit loops with the deepest first, and the top-level loops last.
-  for (const auto &L : make_range(Loops.rbegin(), Loops.rend()))
-    computeMassInLoop(L->Header);
+  for (auto L = Loops.rbegin(), E = Loops.rend(); L != E; ++L) {
+    if (computeMassInLoop(*L))
+      continue;
+    auto Next = std::next(L);
+    computeIrreducibleMass(&*L, L.base());
+    L = std::prev(Next);
+    if (computeMassInLoop(*L))
+      continue;
+    llvm_unreachable("unhandled irreducible control flow");
+  }
 }
 
 template <class BT>
-void BlockFrequencyInfoImpl<BT>::computeMassInLoop(const BlockNode &LoopHead) {
+bool BlockFrequencyInfoImpl<BT>::computeMassInLoop(LoopData &Loop) {
   // Compute mass in loop.
-  DEBUG(dbgs() << "compute-mass-in-loop: " << getBlockName(LoopHead) << "\n");
+  DEBUG(dbgs() << "compute-mass-in-loop: " << getLoopName(Loop) << "\n");
 
-  Working[LoopHead.Index].Mass = BlockMass::getFull();
-  propagateMassToSuccessors(LoopHead, LoopHead);
+  if (Loop.isIrreducible()) {
+    BlockMass Remaining = BlockMass::getFull();
+    for (uint32_t H = 0; H < Loop.NumHeaders; ++H) {
+      auto &Mass = Working[Loop.Nodes[H].Index].getMass();
+      Mass = Remaining * BranchProbability(1, Loop.NumHeaders - H);
+      Remaining -= Mass;
+    }
+    for (const BlockNode &M : Loop.Nodes)
+      if (!propagateMassToSuccessors(&Loop, M))
+        llvm_unreachable("unhandled irreducible control flow");
+  } else {
+    Working[Loop.getHeader().Index].getMass() = BlockMass::getFull();
+    if (!propagateMassToSuccessors(&Loop, Loop.getHeader()))
+      llvm_unreachable("irreducible control flow to loop header!?");
+    for (const BlockNode &M : Loop.members())
+      if (!propagateMassToSuccessors(&Loop, M))
+        // Irreducible backedge.
+        return false;
+  }
 
-  for (const BlockNode &M : getLoopPackage(LoopHead).Members)
-    propagateMassToSuccessors(LoopHead, M);
-
-  computeLoopScale(LoopHead);
-  packageLoop(LoopHead);
+  computeLoopScale(Loop);
+  packageLoop(Loop);
+  return true;
 }
 
-template <class BT> void BlockFrequencyInfoImpl<BT>::computeMassInFunction() {
+template <class BT>
+bool BlockFrequencyInfoImpl<BT>::tryToComputeMassInFunction() {
   // Compute mass in function.
   DEBUG(dbgs() << "compute-mass-in-function\n");
   assert(!Working.empty() && "no blocks in function");
   assert(!Working[0].isLoopHeader() && "entry block is a loop header");
 
-  Working[0].Mass = BlockMass::getFull();
+  Working[0].getMass() = BlockMass::getFull();
   for (rpot_iterator I = rpot_begin(), IE = rpot_end(); I != IE; ++I) {
     // Check for nodes that have been packaged.
     BlockNode Node = getNode(I);
-    if (Working[Node.Index].hasLoopHeader())
+    if (Working[Node.Index].isPackaged())
       continue;
 
-    propagateMassToSuccessors(BlockNode(), Node);
+    if (!propagateMassToSuccessors(nullptr, Node))
+      return false;
   }
+  return true;
+}
+
+template <class BT> void BlockFrequencyInfoImpl<BT>::computeMassInFunction() {
+  if (tryToComputeMassInFunction())
+    return;
+  computeIrreducibleMass(nullptr, Loops.begin());
+  if (tryToComputeMassInFunction())
+    return;
+  llvm_unreachable("unhandled irreducible control flow");
+}
+
+/// \note This should be a lambda, but that crashes GCC 4.7.
+namespace bfi_detail {
+template <class BT> struct BlockEdgesAdder {
+  typedef BT BlockT;
+  typedef BlockFrequencyInfoImplBase::LoopData LoopData;
+  typedef GraphTraits<const BlockT *> Successor;
+
+  const BlockFrequencyInfoImpl<BT> &BFI;
+  explicit BlockEdgesAdder(const BlockFrequencyInfoImpl<BT> &BFI)
+      : BFI(BFI) {}
+  void operator()(IrreducibleGraph &G, IrreducibleGraph::IrrNode &Irr,
+                  const LoopData *OuterLoop) {
+    const BlockT *BB = BFI.RPOT[Irr.Node.Index];
+    for (auto I = Successor::child_begin(BB), E = Successor::child_end(BB);
+         I != E; ++I)
+      G.addEdge(Irr, BFI.getNode(*I), OuterLoop);
+  }
+};
+}
+template <class BT>
+void BlockFrequencyInfoImpl<BT>::computeIrreducibleMass(
+    LoopData *OuterLoop, std::list<LoopData>::iterator Insert) {
+  DEBUG(dbgs() << "analyze-irreducible-in-";
+        if (OuterLoop) dbgs() << "loop: " << getLoopName(*OuterLoop) << "\n";
+        else dbgs() << "function\n");
+
+  using namespace bfi_detail;
+  // Ideally, addBlockEdges() would be declared here as a lambda, but that
+  // crashes GCC 4.7.
+  BlockEdgesAdder<BT> addBlockEdges(*this);
+  IrreducibleGraph G(*this, OuterLoop, addBlockEdges);
+
+  for (auto &L : analyzeIrreducible(G, OuterLoop, Insert))
+    computeMassInLoop(L);
+
+  if (!OuterLoop)
+    return;
+  updateLoopWithIrreducible(*OuterLoop);
 }
 
 template <class BT>
-void
-BlockFrequencyInfoImpl<BT>::propagateMassToSuccessors(const BlockNode &LoopHead,
+bool
+BlockFrequencyInfoImpl<BT>::propagateMassToSuccessors(LoopData *OuterLoop,
                                                       const BlockNode &Node) {
   DEBUG(dbgs() << " - node: " << getBlockName(Node) << "\n");
   // Calculate probability for successors.
   Distribution Dist;
-  if (Node != LoopHead && Working[Node.Index].isLoopHeader())
-    addLoopSuccessorsToDist(LoopHead, Node, Dist);
-  else {
+  if (auto *Loop = Working[Node.Index].getPackagedLoop()) {
+    assert(Loop != OuterLoop && "Cannot propagate mass in a packaged loop");
+    if (!addLoopSuccessorsToDist(OuterLoop, *Loop, Dist))
+      // Irreducible backedge.
+      return false;
+  } else {
     const BlockT *BB = getBlock(Node);
     for (auto SI = Successor::child_begin(BB), SE = Successor::child_end(BB);
          SI != SE; ++SI)
       // Do not dereference SI, or getEdgeWeight() is linear in the number of
       // successors.
-      addToDist(Dist, LoopHead, Node, getNode(*SI), BPI->getEdgeWeight(BB, SI));
+      if (!addToDist(Dist, OuterLoop, Node, getNode(*SI),
+                     BPI->getEdgeWeight(BB, SI)))
+        // Irreducible backedge.
+        return false;
   }
 
   // Distribute mass to successors, saving exit and backedge data in the
   // loop header.
-  distributeMass(Node, LoopHead, Dist);
+  distributeMass(Node, OuterLoop, Dist);
+  return true;
 }
 
 template <class BT>

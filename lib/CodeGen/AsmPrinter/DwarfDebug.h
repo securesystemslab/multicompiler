@@ -17,6 +17,7 @@
 #include "DwarfFile.h"
 #include "AsmPrinterHandler.h"
 #include "DIE.h"
+#include "DbgValueHistoryCalculator.h"
 #include "DebugLocEntry.h"
 #include "DebugLocList.h"
 #include "DwarfAccelTable.h"
@@ -78,12 +79,12 @@ class DbgVariable {
 public:
   // AbsVar may be NULL.
   DbgVariable(DIVariable V, DbgVariable *AV, DwarfDebug *DD)
-      : Var(V), TheDIE(0), DotDebugLocOffset(~0U), AbsVar(AV), MInsn(0),
-        FrameIndex(~0), DD(DD) {}
+      : Var(V), TheDIE(nullptr), DotDebugLocOffset(~0U), AbsVar(AV),
+        MInsn(nullptr), FrameIndex(~0), DD(DD) {}
 
   // Accessors.
   DIVariable getVariable() const { return Var; }
-  void setDIE(DIE *D) { TheDIE = D; }
+  void setDIE(DIE &D) { TheDIE = &D; }
   DIE *getDIE() const { return TheDIE; }
   void setDotDebugLocOffset(unsigned O) { DotDebugLocOffset = O; }
   unsigned getDotDebugLocOffset() const { return DotDebugLocOffset; }
@@ -218,15 +219,8 @@ class DwarfDebug : public AsmPrinterHandler {
   // Maps instruction with label emitted after instruction.
   DenseMap<const MachineInstr *, MCSymbol *> LabelsAfterInsn;
 
-  // Every user variable mentioned by a DBG_VALUE instruction in order of
-  // appearance.
-  SmallVector<const MDNode *, 8> UserVariables;
-
-  // For each user variable, keep a list of DBG_VALUE instructions in order.
-  // The list can also contain normal instructions that clobber the previous
-  // DBG_VALUE.
-  typedef DenseMap<const MDNode *, SmallVector<const MachineInstr *, 4> >
-  DbgValueHistoryMap;
+  // History of DBG_VALUE and clobber instructions for each user variable.
+  // Variables are listed in order of appearance.
   DbgValueHistoryMap DbgValues;
 
   // Previous instruction's location information. This is used to determine
@@ -283,6 +277,8 @@ class DwarfDebug : public AsmPrinterHandler {
   // Map from MDNodes for user-defined types to the type units that describe
   // them.
   DenseMap<const MDNode *, const DwarfTypeUnit *> DwarfTypeUnits;
+
+  SmallVector<std::pair<std::unique_ptr<DwarfTypeUnit>, DICompositeType>, 1> TypeUnitsUnderConstruction;
 
   // Whether to emit the pubnames/pubtypes sections.
   bool HasDwarfPubSections;
@@ -344,7 +340,7 @@ class DwarfDebug : public AsmPrinterHandler {
   /// DW_AT_low_pc and DW_AT_high_pc attributes. If there are global
   /// variables in this scope then create and insert DIEs for these
   /// variables.
-  DIE *updateSubprogramScopeDIE(DwarfCompileUnit &SPCU, DISubprogram SP);
+  DIE &updateSubprogramScopeDIE(DwarfCompileUnit &SPCU, DISubprogram SP);
 
   /// \brief A helper function to check whether the DIE for a given Scope is
   /// going to be null.
@@ -352,22 +348,33 @@ class DwarfDebug : public AsmPrinterHandler {
 
   /// \brief A helper function to construct a RangeSpanList for a given
   /// lexical scope.
-  void addScopeRangeList(DwarfCompileUnit &TheCU, DIE *ScopeDIE,
+  void addScopeRangeList(DwarfCompileUnit &TheCU, DIE &ScopeDIE,
                          const SmallVectorImpl<InsnRange> &Range);
 
   /// \brief Construct new DW_TAG_lexical_block for this scope and
   /// attach DW_AT_low_pc/DW_AT_high_pc labels.
-  DIE *constructLexicalScopeDIE(DwarfCompileUnit &TheCU, LexicalScope *Scope);
+  std::unique_ptr<DIE> constructLexicalScopeDIE(DwarfCompileUnit &TheCU,
+                                                LexicalScope *Scope);
 
   /// \brief This scope represents inlined body of a function. Construct
   /// DIE to represent this concrete inlined copy of the function.
-  DIE *constructInlinedScopeDIE(DwarfCompileUnit &TheCU, LexicalScope *Scope);
+  std::unique_ptr<DIE> constructInlinedScopeDIE(DwarfCompileUnit &TheCU,
+                                                LexicalScope *Scope);
 
   /// \brief Construct a DIE for this scope.
-  DIE *constructScopeDIE(DwarfCompileUnit &TheCU, LexicalScope *Scope);
+  std::unique_ptr<DIE> constructScopeDIE(DwarfCompileUnit &TheCU,
+                                         LexicalScope *Scope);
+  void createAndAddScopeChildren(DwarfCompileUnit &TheCU, LexicalScope *Scope,
+                                 DIE &ScopeDIE);
+  /// \brief Construct a DIE for this abstract scope.
+  void constructAbstractSubprogramScopeDIE(DwarfCompileUnit &TheCU,
+                                           LexicalScope *Scope);
+  /// \brief Construct a DIE for this subprogram scope.
+  DIE &constructSubprogramScopeDIE(DwarfCompileUnit &TheCU,
+                                   LexicalScope *Scope);
   /// A helper function to create children of a Scope DIE.
   DIE *createScopeChildrenDIE(DwarfCompileUnit &TheCU, LexicalScope *Scope,
-                              SmallVectorImpl<DIE *> &Children);
+                              SmallVectorImpl<std::unique_ptr<DIE>> &Children);
 
   /// \brief Emit initial Dwarf sections with a label at the start of each one.
   void emitSectionLabels();
@@ -377,9 +384,6 @@ class DwarfDebug : public AsmPrinterHandler {
 
   /// \brief Compute the size and offset of all the DIEs.
   void computeSizeAndOffsets();
-
-  /// \brief Attach DW_AT_inline attribute with inlined subprogram DIEs.
-  void computeInlinedDIEs();
 
   /// \brief Collect info for variables that were optimized out.
   void collectDeadVariables();
@@ -453,7 +457,7 @@ class DwarfDebug : public AsmPrinterHandler {
   /// DWARF 5 Experimental Split Dwarf Emitters
 
   /// \brief Initialize common features of skeleton units.
-  void initSkeletonUnit(const DwarfUnit &U, DIE *Die,
+  void initSkeletonUnit(const DwarfUnit &U, DIE &Die,
                         std::unique_ptr<DwarfUnit> NewU);
 
   /// \brief Construct the split debug info compile unit for the debug info
@@ -478,7 +482,7 @@ class DwarfDebug : public AsmPrinterHandler {
 
   /// Flags to let the linker know we have emitted new style pubnames. Only
   /// emit it here if we don't have a skeleton CU for split dwarf.
-  void addGnuPubAttributes(DwarfUnit &U, DIE *D) const;
+  void addGnuPubAttributes(DwarfUnit &U, DIE &D) const;
 
   /// \brief Create new DwarfCompileUnit for the given metadata node with tag
   /// DW_TAG_compile_unit.
@@ -492,11 +496,11 @@ class DwarfDebug : public AsmPrinterHandler {
 
   /// \brief Construct import_module DIE.
   void constructImportedEntityDIE(DwarfCompileUnit &TheCU, const MDNode *N,
-                                  DIE *Context);
+                                  DIE &Context);
 
   /// \brief Construct import_module DIE.
   void constructImportedEntityDIE(DwarfCompileUnit &TheCU,
-                                  const DIImportedEntity &Module, DIE *Context);
+                                  const DIImportedEntity &Module, DIE &Context);
 
   /// \brief Register a source line with debug info. Returns the unique
   /// label that was emitted and which provides correspondence to the
@@ -521,7 +525,7 @@ class DwarfDebug : public AsmPrinterHandler {
 
   /// \brief Ensure that a label will be emitted before MI.
   void requestLabelBeforeInsn(const MachineInstr *MI) {
-    LabelsBeforeInsn.insert(std::make_pair(MI, (MCSymbol *)0));
+    LabelsBeforeInsn.insert(std::make_pair(MI, nullptr));
   }
 
   /// \brief Return Label preceding the instruction.
@@ -529,13 +533,13 @@ class DwarfDebug : public AsmPrinterHandler {
 
   /// \brief Ensure that a label will be emitted after MI.
   void requestLabelAfterInsn(const MachineInstr *MI) {
-    LabelsAfterInsn.insert(std::make_pair(MI, (MCSymbol *)0));
+    LabelsAfterInsn.insert(std::make_pair(MI, nullptr));
   }
 
   /// \brief Return Label immediately following the instruction.
   MCSymbol *getLabelAfterInsn(const MachineInstr *MI);
 
-  void attachLowHighPC(DwarfCompileUnit &Unit, DIE *D, MCSymbol *Begin,
+  void attachLowHighPC(DwarfCompileUnit &Unit, DIE &D, MCSymbol *Begin,
                        MCSymbol *End);
 
 public:
@@ -543,6 +547,8 @@ public:
   // Main entry points.
   //
   DwarfDebug(AsmPrinter *A, Module *M);
+
+  ~DwarfDebug() override;
 
   void insertDIE(const MDNode *TypeMD, DIE *Die) {
     MDTypeNodeToDieMap.insert(std::make_pair(TypeMD, Die));
@@ -573,7 +579,7 @@ public:
   /// \brief Add a DIE to the set of types that we're going to pull into
   /// type units.
   void addDwarfTypeUnitType(DwarfCompileUnit &CU, StringRef Identifier,
-                            DIE *Die, DICompositeType CTy);
+                            DIE &Die, DICompositeType CTy);
 
   /// \brief Add a label so that arange data can be generated for it.
   void addArangeLabel(SymbolCU SCU) { ArangeLabels.push_back(SCU); }
@@ -640,17 +646,17 @@ public:
   /// or another context nested inside a subprogram.
   bool isSubprogramContext(const MDNode *Context);
 
-  void addSubprogramNames(DISubprogram SP, DIE *Die);
+  void addSubprogramNames(DISubprogram SP, DIE &Die);
 
   AddressPool &getAddressPool() { return AddrPool; }
 
-  void addAccelName(StringRef Name, const DIE *Die);
+  void addAccelName(StringRef Name, const DIE &Die);
 
-  void addAccelObjC(StringRef Name, const DIE *Die);
+  void addAccelObjC(StringRef Name, const DIE &Die);
 
-  void addAccelNamespace(StringRef Name, const DIE *Die);
+  void addAccelNamespace(StringRef Name, const DIE &Die);
 
-  void addAccelType(StringRef Name, const DIE *Die, char Flags);
+  void addAccelType(StringRef Name, const DIE &Die, char Flags);
 };
 } // End of namespace llvm
 

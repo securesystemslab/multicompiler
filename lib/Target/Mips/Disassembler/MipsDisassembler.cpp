@@ -64,12 +64,12 @@ public:
     }
 
   /// getInstruction - See MCDisassembler.
-  virtual DecodeStatus getInstruction(MCInst &instr,
-                                      uint64_t &size,
-                                      const MemoryObject &region,
-                                      uint64_t address,
-                                      raw_ostream &vStream,
-                                      raw_ostream &cStream) const;
+  DecodeStatus getInstruction(MCInst &instr,
+                              uint64_t &size,
+                              const MemoryObject &region,
+                              uint64_t address,
+                              raw_ostream &vStream,
+                              raw_ostream &cStream) const override;
 };
 
 
@@ -83,12 +83,12 @@ public:
     MipsDisassemblerBase(STI, Ctx, bigEndian) {}
 
   /// getInstruction - See MCDisassembler.
-  virtual DecodeStatus getInstruction(MCInst &instr,
-                                      uint64_t &size,
-                                      const MemoryObject &region,
-                                      uint64_t address,
-                                      raw_ostream &vStream,
-                                      raw_ostream &cStream) const;
+  DecodeStatus getInstruction(MCInst &instr,
+                              uint64_t &size,
+                              const MemoryObject &region,
+                              uint64_t address,
+                              raw_ostream &vStream,
+                              raw_ostream &cStream) const override;
 };
 
 } // end anonymous namespace
@@ -262,6 +262,9 @@ static DecodeStatus DecodeExtSize(MCInst &Inst,
                                   unsigned Insn,
                                   uint64_t Address,
                                   const void *Decoder);
+
+static DecodeStatus DecodeSimm19Lsl2(MCInst &Inst, unsigned Insn,
+                                     uint64_t Address, const void *Decoder);
 
 /// INSVE_[BHWD] have an implicit operand that the generated decoder doesn't
 /// handle.
@@ -906,5 +909,11 @@ static DecodeStatus DecodeExtSize(MCInst &Inst,
                                   const void *Decoder) {
   int Size = (int) Insn  + 1;
   Inst.addOperand(MCOperand::CreateImm(SignExtend32<16>(Size)));
+  return MCDisassembler::Success;
+}
+
+static DecodeStatus DecodeSimm19Lsl2(MCInst &Inst, unsigned Insn,
+                                     uint64_t Address, const void *Decoder) {
+  Inst.addOperand(MCOperand::CreateImm(SignExtend32<19>(Insn) << 2));
   return MCDisassembler::Success;
 }

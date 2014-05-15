@@ -250,6 +250,10 @@ def int_gcwrite : Intrinsic<[],
 //
 def int_returnaddress : Intrinsic<[llvm_ptr_ty], [llvm_i32_ty], [IntrNoMem]>;
 def int_frameaddress  : Intrinsic<[llvm_ptr_ty], [llvm_i32_ty], [IntrNoMem]>;
+def int_read_register  : Intrinsic<[llvm_anyint_ty], [llvm_metadata_ty],
+                                   [IntrNoMem], "llvm.read_register">;
+def int_write_register : Intrinsic<[], [llvm_metadata_ty, llvm_anyint_ty],
+                                   [IntrNoMem], "llvm.write_register">;
 
 // Note: we treat stacksave/stackrestore as writemem because we don't otherwise
 // model their dependencies on allocas.
@@ -443,19 +447,6 @@ def int_smul_with_overflow : Intrinsic<[llvm_anyint_ty, llvm_i1_ty],
 def int_umul_with_overflow : Intrinsic<[llvm_anyint_ty, llvm_i1_ty],
                                        [LLVMMatchType<0>, LLVMMatchType<0>],
                                        [IntrNoMem]>;
-
-def int_safe_udiv : Intrinsic<[llvm_anyint_ty, llvm_i1_ty],
-                              [LLVMMatchType<0>, LLVMMatchType<0>],
-                              [IntrNoMem]>;
-def int_safe_urem : Intrinsic<[llvm_anyint_ty, llvm_i1_ty],
-                              [LLVMMatchType<0>, LLVMMatchType<0>],
-                              [IntrNoMem]>;
-def int_safe_sdiv : Intrinsic<[llvm_anyint_ty, llvm_i1_ty],
-                              [LLVMMatchType<0>, LLVMMatchType<0>],
-                              [IntrNoMem]>;
-def int_safe_srem : Intrinsic<[llvm_anyint_ty, llvm_i1_ty],
-                              [LLVMMatchType<0>, LLVMMatchType<0>],
-                              [IntrNoMem]>;
 
 //===------------------------- Memory Use Markers -------------------------===//
 //

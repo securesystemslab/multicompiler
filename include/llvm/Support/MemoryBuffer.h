@@ -67,34 +67,52 @@ public:
   /// MemoryBuffer if successful, otherwise returning null.  If FileSize is
   /// specified, this means that the client knows that the file exists and that
   /// it has the specified size.
+  ///
+  /// \param IsVolatileSize Set to true to indicate that the file size may be
+  /// changing, e.g. when libclang tries to parse while the user is
+  /// editing/updating the file.
   static error_code getFile(Twine Filename, OwningPtr<MemoryBuffer> &Result,
                             int64_t FileSize = -1,
-                            bool RequiresNullTerminator = true);
+                            bool RequiresNullTerminator = true,
+                            bool IsVolatileSize = false);
   static error_code getFile(Twine Filename,
                             std::unique_ptr<MemoryBuffer> &Result,
                             int64_t FileSize = -1,
-                            bool RequiresNullTerminator = true);
+                            bool RequiresNullTerminator = true,
+                            bool IsVolatileSize = false);
 
   /// Given an already-open file descriptor, map some slice of it into a
   /// MemoryBuffer. The slice is specified by an \p Offset and \p MapSize.
   /// Since this is in the middle of a file, the buffer is not null terminated.
+  ///
+  /// \param IsVolatileSize Set to true to indicate that the file size may be
+  /// changing, e.g. when libclang tries to parse while the user is
+  /// editing/updating the file.
   static error_code getOpenFileSlice(int FD, const char *Filename,
                                      OwningPtr<MemoryBuffer> &Result,
-                                     uint64_t MapSize, int64_t Offset);
+                                     uint64_t MapSize, int64_t Offset,
+                                     bool IsVolatileSize = false);
   static error_code getOpenFileSlice(int FD, const char *Filename,
                                      std::unique_ptr<MemoryBuffer> &Result,
-                                     uint64_t MapSize, int64_t Offset);
+                                     uint64_t MapSize, int64_t Offset,
+                                     bool IsVolatileSize = false);
 
   /// Given an already-open file descriptor, read the file and return a
   /// MemoryBuffer.
+  ///
+  /// \param IsVolatileSize Set to true to indicate that the file size may be
+  /// changing, e.g. when libclang tries to parse while the user is
+  /// editing/updating the file.
   static error_code getOpenFile(int FD, const char *Filename,
                                 OwningPtr<MemoryBuffer> &Result,
                                 uint64_t FileSize,
-                                bool RequiresNullTerminator = true);
+                                bool RequiresNullTerminator = true,
+                                bool IsVolatileSize = false);
   static error_code getOpenFile(int FD, const char *Filename,
                                 std::unique_ptr<MemoryBuffer> &Result,
                                 uint64_t FileSize,
-                                bool RequiresNullTerminator = true);
+                                bool RequiresNullTerminator = true,
+                                bool IsVolatileSize = false);
 
   /// getMemBuffer - Open the specified memory range as a MemoryBuffer.  Note
   /// that InputData must be null terminated if RequiresNullTerminator is true.

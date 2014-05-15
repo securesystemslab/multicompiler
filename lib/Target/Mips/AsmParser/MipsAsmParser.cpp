@@ -75,10 +75,10 @@ class MipsAsmParser : public MCTargetAsmParser {
   bool MatchAndEmitInstruction(SMLoc IDLoc, unsigned &Opcode,
                                SmallVectorImpl<MCParsedAsmOperand *> &Operands,
                                MCStreamer &Out, unsigned &ErrorInfo,
-                               bool MatchingInlineAsm);
+                               bool MatchingInlineAsm) override;
 
   /// Parse a register as used in CFI directives
-  bool ParseRegister(unsigned &RegNo, SMLoc &StartLoc, SMLoc &EndLoc);
+  bool ParseRegister(unsigned &RegNo, SMLoc &StartLoc, SMLoc &EndLoc) override;
 
   bool ParseParenSuffix(StringRef Name,
                         SmallVectorImpl<MCParsedAsmOperand *> &Operands);
@@ -86,11 +86,11 @@ class MipsAsmParser : public MCTargetAsmParser {
   bool ParseBracketSuffix(StringRef Name,
                           SmallVectorImpl<MCParsedAsmOperand *> &Operands);
 
-  bool ParseInstruction(ParseInstructionInfo &Info, StringRef Name,
-                        SMLoc NameLoc,
-                        SmallVectorImpl<MCParsedAsmOperand *> &Operands);
+  bool
+  ParseInstruction(ParseInstructionInfo &Info, StringRef Name, SMLoc NameLoc,
+                   SmallVectorImpl<MCParsedAsmOperand *> &Operands) override;
 
-  bool ParseDirective(AsmToken DirectiveID);
+  bool ParseDirective(AsmToken DirectiveID) override;
 
   MipsAsmParser::OperandMatchResultTy
   parseMemOperand(SmallVectorImpl<MCParsedAsmOperand *> &Operands);
@@ -137,6 +137,7 @@ class MipsAsmParser : public MCTargetAsmParser {
                      SmallVectorImpl<MCInst> &Instructions, bool isLoad,
                      bool isImmOpnd);
   bool reportParseError(StringRef ErrorMsg);
+  bool reportParseError(SMLoc Loc, StringRef ErrorMsg);
 
   bool parseMemOffset(const MCExpr *&Res, bool isParenExpr);
   bool parseRelocOperand(const MCExpr *&Res);
@@ -145,6 +146,7 @@ class MipsAsmParser : public MCTargetAsmParser {
 
   bool isEvaluated(const MCExpr *Expr);
   bool parseSetFeature(uint64_t Feature);
+  bool parseDirectiveCPLoad(SMLoc Loc);
   bool parseDirectiveCPSetup();
   bool parseDirectiveNaN();
   bool parseDirectiveSet();
@@ -270,11 +272,12 @@ public:
                           /// context).
     RegKind_CCR = 128,    /// CCR
     RegKind_HWRegs = 256, /// HWRegs
+    RegKind_COP3 = 512,   /// COP3
 
     /// Potentially any (e.g. $1)
     RegKind_Numeric = RegKind_GPR | RegKind_FGR | RegKind_FCC | RegKind_MSA128 |
                       RegKind_MSACtrl | RegKind_COP2 | RegKind_ACC |
-                      RegKind_CCR | RegKind_HWRegs
+                      RegKind_CCR | RegKind_HWRegs | RegKind_COP3
   };
 
 private:
@@ -426,6 +429,14 @@ private:
     return RegIdx.RegInfo->getRegClass(ClassID).getRegister(RegIdx.Index);
   }
 
+  /// Coerce the register to COP3 and return the real register for the
+  /// current target.
+  unsigned getCOP3Reg() const {
+    assert(isRegIdx() && (RegIdx.Kind & RegKind_COP3) && "Invalid access!");
+    unsigned ClassID = Mips::COP3RegClassID;
+    return RegIdx.RegInfo->getRegClass(ClassID).getRegister(RegIdx.Index);
+  }
+
   /// Coerce the register to ACC64DSP and return the real register for the
   /// current target.
   unsigned getACC64DSPReg() const {
@@ -469,7 +480,7 @@ private:
 public:
   void addExpr(MCInst &Inst, const MCExpr *Expr) const {
     // Add as immediate when possible.  Null MCExpr = 0.
-    if (Expr == 0)
+    if (!Expr)
       Inst.addOperand(MCOperand::CreateImm(0));
     else if (const MCConstantExpr *CE = dyn_cast<MCConstantExpr>(Expr))
       Inst.addOperand(MCOperand::CreateImm(CE->getValue()));
@@ -537,6 +548,11 @@ public:
     Inst.addOperand(MCOperand::CreateReg(getCOP2Reg()));
   }
 
+  void addCOP3AsmRegOperands(MCInst &Inst, unsigned N) const {
+    assert(N == 1 && "Invalid number of operands!");
+    Inst.addOperand(MCOperand::CreateReg(getCOP3Reg()));
+  }
+
   void addACC64DSPAsmRegOperands(MCInst &Inst, unsigned N) const {
     assert(N == 1 && "Invalid number of operands!");
     Inst.addOperand(MCOperand::CreateReg(getACC64DSPReg()));
@@ -577,7 +593,7 @@ public:
     addExpr(Inst, Expr);
   }
 
-  bool isReg() const {
+  bool isReg() const override {
     // As a special case until we sort out the definition of div/divu, pretend
     // that $0/$zero are k_PhysRegister so that MCK_ZERO works correctly.
     if (isGPRAsmReg() && RegIdx.Index == 0)
@@ -586,16 +602,16 @@ public:
     return Kind == k_PhysRegister;
   }
   bool isRegIdx() const { return Kind == k_RegisterIndex; }
-  bool isImm() const { return Kind == k_Immediate; }
+  bool isImm() const override { return Kind == k_Immediate; }
   bool isConstantImm() const {
     return isImm() && dyn_cast<MCConstantExpr>(getImm());
   }
-  bool isToken() const {
+  bool isToken() const override {
     // Note: It's not possible to pretend that other operand kinds are tokens.
     // The matcher emitter checks tokens first.
     return Kind == k_Token;
   }
-  bool isMem() const { return Kind == k_Memory; }
+  bool isMem() const override { return Kind == k_Memory; }
   bool isInvNum() const { return Kind == k_Immediate; }
   bool isLSAImm() const {
     if (!isConstantImm())
@@ -609,7 +625,7 @@ public:
     return StringRef(Tok.Data, Tok.Length);
   }
 
-  unsigned getReg() const {
+  unsigned getReg() const override {
     // As a special case until we sort out the definition of div/divu, pretend
     // that $0/$zero are k_PhysRegister so that MCK_ZERO works correctly.
     if (Kind == k_RegisterIndex && RegIdx.Index == 0 &&
@@ -748,6 +764,9 @@ public:
   bool isCOP2AsmReg() const {
     return isRegIdx() && RegIdx.Kind & RegKind_COP2 && RegIdx.Index <= 31;
   }
+  bool isCOP3AsmReg() const {
+    return isRegIdx() && RegIdx.Kind & RegKind_COP3 && RegIdx.Index <= 31;
+  }
   bool isMSA128AsmReg() const {
     return isRegIdx() && RegIdx.Kind & RegKind_MSA128 && RegIdx.Index <= 31;
   }
@@ -756,9 +775,9 @@ public:
   }
 
   /// getStartLoc - Get the location of the first token of this operand.
-  SMLoc getStartLoc() const { return StartLoc; }
+  SMLoc getStartLoc() const override { return StartLoc; }
   /// getEndLoc - Get the location of the last token of this operand.
-  SMLoc getEndLoc() const { return EndLoc; }
+  SMLoc getEndLoc() const override { return EndLoc; }
 
   virtual ~MipsOperand() {
     switch (Kind) {
@@ -774,7 +793,7 @@ public:
     }
   }
 
-  virtual void print(raw_ostream &OS) const {
+  void print(raw_ostream &OS) const override {
     switch (Kind) {
     case k_Immediate:
       OS << "Imm<";
@@ -1616,7 +1635,7 @@ bool MipsAsmParser::parseMemOffset(const MCExpr *&Res, bool isParenExpr) {
 MipsAsmParser::OperandMatchResultTy MipsAsmParser::parseMemOperand(
     SmallVectorImpl<MCParsedAsmOperand *> &Operands) {
   DEBUG(dbgs() << "parseMemOperand\n");
-  const MCExpr *IdVal = 0;
+  const MCExpr *IdVal = nullptr;
   SMLoc S;
   bool isParenExpr = false;
   MipsAsmParser::OperandMatchResultTy Res = MatchOperand_NoMatch;
@@ -1672,7 +1691,7 @@ MipsAsmParser::OperandMatchResultTy MipsAsmParser::parseMemOperand(
 
   Parser.Lex(); // Eat the ')' token.
 
-  if (IdVal == 0)
+  if (!IdVal)
     IdVal = MCConstantExpr::Create(0, getContext());
 
   // Replace the register operand with the memory operand.
@@ -2083,6 +2102,10 @@ bool MipsAsmParser::reportParseError(StringRef ErrorMsg) {
   return Error(Loc, ErrorMsg);
 }
 
+bool MipsAsmParser::reportParseError(SMLoc Loc, StringRef ErrorMsg) {
+  return Error(Loc, ErrorMsg);
+}
+
 bool MipsAsmParser::parseSetNoAtDirective() {
   // Line should look like: ".set noat".
   // set at reg to 0.
@@ -2301,6 +2324,30 @@ bool MipsAsmParser::eatComma(StringRef ErrorStr) {
   return true;
 }
 
+bool MipsAsmParser::parseDirectiveCPLoad(SMLoc Loc) {
+  if (Options.isReorder())
+    Warning(Loc, ".cpload in reorder section");
+
+  // FIXME: Warn if cpload is used in Mips16 mode.
+
+  SmallVector<MCParsedAsmOperand *, 1> Reg;
+  OperandMatchResultTy ResTy = ParseAnyRegister(Reg);
+  if (ResTy == MatchOperand_NoMatch || ResTy == MatchOperand_ParseFail) {
+    reportParseError("expected register containing function address");
+    return false;
+  }
+
+  MipsOperand *RegOpnd = static_cast<MipsOperand *>(Reg[0]);
+  if (!RegOpnd->isGPRAsmReg()) {
+    reportParseError(RegOpnd->getStartLoc(), "invalid register");
+    return false;
+  }
+
+  getTargetStreamer().emitDirectiveCpload(RegOpnd->getGPR32Reg());
+  delete RegOpnd;
+  return false;
+}
+
 bool MipsAsmParser::parseDirectiveCPSetup() {
   unsigned FuncReg;
   unsigned Save;
@@ -2331,58 +2378,8 @@ bool MipsAsmParser::parseDirectiveCPSetup() {
   if (Parser.parseIdentifier(Name))
     reportParseError("expected identifier");
   MCSymbol *Sym = getContext().GetOrCreateSymbol(Name);
-  unsigned GPReg = getGPR(matchCPURegisterName("gp"));
 
-  // FIXME: The code below this point should be in the TargetStreamers.
-  // Only N32 and N64 emit anything for .cpsetup
-  // FIXME: We should only emit something for PIC mode too.
-  if (!isN32() && !isN64())
-    return false;
-
-  MCStreamer &TS = getStreamer();
-  MCInst Inst;
-  // Either store the old $gp in a register or on the stack
-  if (SaveIsReg) {
-    // move $save, $gpreg
-    Inst.setOpcode(Mips::DADDu);
-    Inst.addOperand(MCOperand::CreateReg(Save));
-    Inst.addOperand(MCOperand::CreateReg(GPReg));
-    Inst.addOperand(MCOperand::CreateReg(getGPR(0)));
-  } else {
-    // sd $gpreg, offset($sp)
-    Inst.setOpcode(Mips::SD);
-    Inst.addOperand(MCOperand::CreateReg(GPReg));
-    Inst.addOperand(MCOperand::CreateReg(getGPR(matchCPURegisterName("sp"))));
-    Inst.addOperand(MCOperand::CreateImm(Save));
-  }
-  TS.EmitInstruction(Inst, STI);
-  Inst.clear();
-
-  const MCSymbolRefExpr *HiExpr = MCSymbolRefExpr::Create(
-      Sym->getName(), MCSymbolRefExpr::VK_Mips_GPOFF_HI, getContext());
-  const MCSymbolRefExpr *LoExpr = MCSymbolRefExpr::Create(
-      Sym->getName(), MCSymbolRefExpr::VK_Mips_GPOFF_LO, getContext());
-  // lui $gp, %hi(%neg(%gp_rel(funcSym)))
-  Inst.setOpcode(Mips::LUi);
-  Inst.addOperand(MCOperand::CreateReg(GPReg));
-  Inst.addOperand(MCOperand::CreateExpr(HiExpr));
-  TS.EmitInstruction(Inst, STI);
-  Inst.clear();
-
-  // addiu  $gp, $gp, %lo(%neg(%gp_rel(funcSym)))
-  Inst.setOpcode(Mips::ADDiu);
-  Inst.addOperand(MCOperand::CreateReg(GPReg));
-  Inst.addOperand(MCOperand::CreateReg(GPReg));
-  Inst.addOperand(MCOperand::CreateExpr(LoExpr));
-  TS.EmitInstruction(Inst, STI);
-  Inst.clear();
-
-  // daddu  $gp, $gp, $funcreg
-  Inst.setOpcode(Mips::DADDu);
-  Inst.addOperand(MCOperand::CreateReg(GPReg));
-  Inst.addOperand(MCOperand::CreateReg(GPReg));
-  Inst.addOperand(MCOperand::CreateReg(FuncReg));
-  TS.EmitInstruction(Inst, STI);
+  getTargetStreamer().emitDirectiveCpsetup(FuncReg, Save, *Sym, SaveIsReg);
   return false;
 }
 
@@ -2550,6 +2547,8 @@ bool MipsAsmParser::parseDirectiveOption() {
 bool MipsAsmParser::ParseDirective(AsmToken DirectiveID) {
   StringRef IDVal = DirectiveID.getString();
 
+  if (IDVal == ".cpload")
+    return parseDirectiveCPLoad(DirectiveID.getLoc());
   if (IDVal == ".dword") {
     parseDataDirective(8, DirectiveID.getLoc());
     return false;

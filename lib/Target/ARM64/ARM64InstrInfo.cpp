@@ -260,7 +260,7 @@ unsigned ARM64InstrInfo::InsertBranch(
   // Shouldn't be a fall through.
   assert(TBB && "InsertBranch must not be told to insert a fallthrough");
 
-  if (FBB == 0) {
+  if (!FBB) {
     if (Cond.empty()) // Unconditional branch?
       BuildMI(&MBB, DL, get(ARM64::B)).addMBB(TBB);
     else
@@ -289,7 +289,7 @@ static unsigned removeCopies(const MachineRegisterInfo &MRI, unsigned VReg) {
 // csel instruction. If so, return the folded opcode, and the replacement
 // register.
 static unsigned canFoldIntoCSel(const MachineRegisterInfo &MRI, unsigned VReg,
-                                unsigned *NewVReg = 0) {
+                                unsigned *NewVReg = nullptr) {
   VReg = removeCopies(MRI, VReg);
   if (!TargetRegisterInfo::isVirtualRegister(VReg))
     return 0;
@@ -301,8 +301,8 @@ static unsigned canFoldIntoCSel(const MachineRegisterInfo &MRI, unsigned VReg,
   switch (DefMI->getOpcode()) {
   case ARM64::ADDSXri:
   case ARM64::ADDSWri:
-    // if CPSR is used, do not fold.
-    if (DefMI->findRegisterDefOperandIdx(ARM64::CPSR, true) == -1)
+    // if NZCV is used, do not fold.
+    if (DefMI->findRegisterDefOperandIdx(ARM64::NZCV, true) == -1)
       return 0;
   // fall-through to ADDXri and ADDWri.
   case ARM64::ADDXri:
@@ -328,8 +328,8 @@ static unsigned canFoldIntoCSel(const MachineRegisterInfo &MRI, unsigned VReg,
 
   case ARM64::SUBSXrr:
   case ARM64::SUBSWrr:
-    // if CPSR is used, do not fold.
-    if (DefMI->findRegisterDefOperandIdx(ARM64::CPSR, true) == -1)
+    // if NZCV is used, do not fold.
+    if (DefMI->findRegisterDefOperandIdx(ARM64::NZCV, true) == -1)
       return 0;
   // fall-through to SUBXrr and SUBWrr.
   case ARM64::SUBXrr:
@@ -469,7 +469,7 @@ void ARM64InstrInfo::insertSelect(MachineBasicBlock &MBB,
   }
 
   unsigned Opc = 0;
-  const TargetRegisterClass *RC = 0;
+  const TargetRegisterClass *RC = nullptr;
   bool TryFold = false;
   if (MRI.constrainRegClass(DstReg, &ARM64::GPR64RegClass)) {
     RC = &ARM64::GPR64RegClass;
@@ -559,7 +559,7 @@ bool ARM64InstrInfo::analyzeCompare(const MachineInstr *MI, unsigned &SrcReg,
   case ARM64::ADDSXrr:
   case ARM64::ADDSXrs:
   case ARM64::ADDSXrx:
-    // Replace SUBSWrr with SUBWrr if CPSR is not used.
+    // Replace SUBSWrr with SUBWrr if NZCV is not used.
     SrcReg = MI->getOperand(1).getReg();
     SrcReg2 = MI->getOperand(2).getReg();
     CmpMask = ~0;
@@ -635,9 +635,9 @@ bool ARM64InstrInfo::optimizeCompareInstr(
     MachineInstr *CmpInstr, unsigned SrcReg, unsigned SrcReg2, int CmpMask,
     int CmpValue, const MachineRegisterInfo *MRI) const {
 
-  // Replace SUBSWrr with SUBWrr if CPSR is not used.
-  int Cmp_CPSR = CmpInstr->findRegisterDefOperandIdx(ARM64::CPSR, true);
-  if (Cmp_CPSR != -1) {
+  // Replace SUBSWrr with SUBWrr if NZCV is not used.
+  int Cmp_NZCV = CmpInstr->findRegisterDefOperandIdx(ARM64::NZCV, true);
+  if (Cmp_NZCV != -1) {
     unsigned NewOpc;
     switch (CmpInstr->getOpcode()) {
     default:
@@ -662,7 +662,7 @@ bool ARM64InstrInfo::optimizeCompareInstr(
 
     const MCInstrDesc &MCID = get(NewOpc);
     CmpInstr->setDesc(MCID);
-    CmpInstr->RemoveOperand(Cmp_CPSR);
+    CmpInstr->RemoveOperand(Cmp_NZCV);
     bool succeeded = UpdateOperandRegClass(CmpInstr);
     (void)succeeded;
     assert(succeeded && "Some operands reg class are incompatible!");
@@ -684,7 +684,7 @@ bool ARM64InstrInfo::optimizeCompareInstr(
 
   // We iterate backward, starting from the instruction before CmpInstr and
   // stop when reaching the definition of the source register or done with the
-  // basic block, to check whether CPSR is used or modified in between.
+  // basic block, to check whether NZCV is used or modified in between.
   MachineBasicBlock::iterator I = CmpInstr, E = MI,
                               B = CmpInstr->getParent()->begin();
 
@@ -697,15 +697,15 @@ bool ARM64InstrInfo::optimizeCompareInstr(
   if (MI->getParent() != CmpInstr->getParent())
     return false;
 
-  // Check that CPSR isn't set between the comparison instruction and the one we
+  // Check that NZCV isn't set between the comparison instruction and the one we
   // want to change.
   const TargetRegisterInfo *TRI = &getRegisterInfo();
   for (--I; I != E; --I) {
     const MachineInstr &Instr = *I;
 
-    if (Instr.modifiesRegister(ARM64::CPSR, TRI) ||
-        Instr.readsRegister(ARM64::CPSR, TRI))
-      // This instruction modifies or uses CPSR after the one we want to
+    if (Instr.modifiesRegister(ARM64::NZCV, TRI) ||
+        Instr.readsRegister(ARM64::NZCV, TRI))
+      // This instruction modifies or uses NZCV after the one we want to
       // change. We can't do this transformation.
       return false;
     if (I == B)
@@ -742,11 +742,11 @@ bool ARM64InstrInfo::optimizeCompareInstr(
   case ARM64::ANDXri:    NewOpc = ARM64::ANDSXri; break;
   }
 
-  // Scan forward for the use of CPSR.
+  // Scan forward for the use of NZCV.
   // When checking against MI: if it's a conditional code requires
   // checking of V bit, then this is not safe to do.
-  // It is safe to remove CmpInstr if CPSR is redefined or killed.
-  // If we are done with the basic block, we need to check whether CPSR is
+  // It is safe to remove CmpInstr if NZCV is redefined or killed.
+  // If we are done with the basic block, we need to check whether NZCV is
   // live-out.
   bool IsSafe = false;
   for (MachineBasicBlock::iterator I = CmpInstr,
@@ -756,11 +756,11 @@ bool ARM64InstrInfo::optimizeCompareInstr(
     for (unsigned IO = 0, EO = Instr.getNumOperands(); !IsSafe && IO != EO;
          ++IO) {
       const MachineOperand &MO = Instr.getOperand(IO);
-      if (MO.isRegMask() && MO.clobbersPhysReg(ARM64::CPSR)) {
+      if (MO.isRegMask() && MO.clobbersPhysReg(ARM64::NZCV)) {
         IsSafe = true;
         break;
       }
-      if (!MO.isReg() || MO.getReg() != ARM64::CPSR)
+      if (!MO.isReg() || MO.getReg() != ARM64::NZCV)
         continue;
       if (MO.isDef()) {
         IsSafe = true;
@@ -793,7 +793,7 @@ bool ARM64InstrInfo::optimizeCompareInstr(
       // It is not safe to remove Compare instruction if Overflow(V) is used.
       switch (CC) {
       default:
-        // CPSR can be used multiple times, we should continue.
+        // NZCV can be used multiple times, we should continue.
         break;
       case ARM64CC::VS:
       case ARM64CC::VC:
@@ -806,22 +806,22 @@ bool ARM64InstrInfo::optimizeCompareInstr(
     }
   }
 
-  // If CPSR is not killed nor re-defined, we should check whether it is
+  // If NZCV is not killed nor re-defined, we should check whether it is
   // live-out. If it is live-out, do not optimize.
   if (!IsSafe) {
     MachineBasicBlock *ParentBlock = CmpInstr->getParent();
     for (auto *MBB : ParentBlock->successors())
-      if (MBB->isLiveIn(ARM64::CPSR))
+      if (MBB->isLiveIn(ARM64::NZCV))
         return false;
   }
 
-  // Update the instruction to set CPSR.
+  // Update the instruction to set NZCV.
   MI->setDesc(get(NewOpc));
   CmpInstr->eraseFromParent();
   bool succeeded = UpdateOperandRegClass(MI);
   (void)succeeded;
   assert(succeeded && "Some operands reg class are incompatible!");
-  MI->addRegisterDefined(ARM64::CPSR, TRI);
+  MI->addRegisterDefined(ARM64::NZCV, TRI);
   return true;
 }
 
@@ -975,7 +975,7 @@ bool ARM64InstrInfo::isScaledAddr(const MachineInstr *MI) const {
   case ARM64::STRWro:
   case ARM64::STRXro:
     unsigned Val = MI->getOperand(3).getImm();
-    ARM64_AM::ExtendType ExtType = ARM64_AM::getMemExtendType(Val);
+    ARM64_AM::ShiftExtendType ExtType = ARM64_AM::getMemExtendType(Val);
     return (ExtType != ARM64_AM::UXTX) || ARM64_AM::getMemDoShift(Val);
   }
   return false;
@@ -1591,7 +1591,7 @@ void llvm::emitFrameOffset(MachineBasicBlock &MBB,
                            MachineBasicBlock::iterator MBBI, DebugLoc DL,
                            unsigned DestReg, unsigned SrcReg, int Offset,
                            const ARM64InstrInfo *TII, MachineInstr::MIFlag Flag,
-                           bool SetCPSR) {
+                           bool SetNZCV) {
   if (DestReg == SrcReg && Offset == 0)
     return;
 
@@ -1611,7 +1611,7 @@ void llvm::emitFrameOffset(MachineBasicBlock &MBB,
   //  assert(Offset < (1 << 24) && "unimplemented reg plus immediate");
 
   unsigned Opc;
-  if (SetCPSR)
+  if (SetNZCV)
     Opc = isSub ? ARM64::SUBSXri : ARM64::ADDSXri;
   else
     Opc = isSub ? ARM64::SUBXri : ARM64::ADDXri;
@@ -1667,16 +1667,16 @@ ARM64InstrInfo::foldMemoryOperandImpl(MachineFunction &MF, MachineInstr *MI,
     unsigned SrcReg = MI->getOperand(1).getReg();
     if (SrcReg == ARM64::SP && TargetRegisterInfo::isVirtualRegister(DstReg)) {
       MF.getRegInfo().constrainRegClass(DstReg, &ARM64::GPR64RegClass);
-      return 0;
+      return nullptr;
     }
     if (DstReg == ARM64::SP && TargetRegisterInfo::isVirtualRegister(SrcReg)) {
       MF.getRegInfo().constrainRegClass(SrcReg, &ARM64::GPR64RegClass);
-      return 0;
+      return nullptr;
     }
   }
 
   // Cannot fold.
-  return 0;
+  return nullptr;
 }
 
 int llvm::isARM64FrameOffsetLegal(const MachineInstr &MI, int &Offset,

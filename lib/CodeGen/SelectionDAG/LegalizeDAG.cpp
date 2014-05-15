@@ -387,9 +387,7 @@ static void ExpandUnalignedStore(StoreSDNode *ST, SelectionDAG &DAG,
                                        MinAlign(ST->getAlignment(), Offset),
                                        ST->getTBAAInfo()));
     // The order of the stores doesn't matter - say it with a TokenFactor.
-    SDValue Result =
-      DAG.getNode(ISD::TokenFactor, dl, MVT::Other, &Stores[0],
-                  Stores.size());
+    SDValue Result = DAG.getNode(ISD::TokenFactor, dl, MVT::Other, Stores);
     DAGLegalize->ReplaceNode(SDValue(ST, 0), Result);
     return;
   }
@@ -506,8 +504,7 @@ ExpandUnalignedLoad(LoadSDNode *LD, SelectionDAG &DAG,
                                        false, false, 0));
 
     // The order of the stores doesn't matter - say it with a TokenFactor.
-    SDValue TF = DAG.getNode(ISD::TokenFactor, dl, MVT::Other, &Stores[0],
-                             Stores.size());
+    SDValue TF = DAG.getNode(ISD::TokenFactor, dl, MVT::Other, Stores);
 
     // Finally, perform the original load only redirected to the stack slot.
     Load = DAG.getExtLoad(LD->getExtensionType(), dl, VT, TF, StackBase,
@@ -1268,6 +1265,13 @@ void SelectionDAGLegalize::LegalizeOp(SDNode *Node) {
     if (Action == TargetLowering::Legal)
       Action = TargetLowering::Custom;
     break;
+  case ISD::READ_REGISTER:
+  case ISD::WRITE_REGISTER:
+    // Named register is legal in the DAG, but blocked by register name
+    // selection if not implemented by target (to chose the correct register)
+    // They'll be converted to Copy(To/From)Reg.
+    Action = TargetLowering::Legal;
+    break;
   case ISD::DEBUGTRAP:
     Action = TLI.getOperationAction(Node->getOpcode(), Node->getValueType(0));
     if (Action == TargetLowering::Expand) {
@@ -1528,8 +1532,7 @@ SDValue SelectionDAGLegalize::ExpandVectorBuildThroughStack(SDNode* Node) {
 
   SDValue StoreChain;
   if (!Stores.empty())    // Not all undef elements?
-    StoreChain = DAG.getNode(ISD::TokenFactor, dl, MVT::Other,
-                             &Stores[0], Stores.size());
+    StoreChain = DAG.getNode(ISD::TokenFactor, dl, MVT::Other, Stores);
   else
     StoreChain = DAG.getEntryNode();
 
@@ -1649,8 +1652,8 @@ void SelectionDAGLegalize::ExpandDYNAMIC_STACKALLOC(SDNode* Node,
 /// If the SETCC has been legalized using the inverse condcode, then LHS and
 /// RHS will be unchanged, CC will set to the inverted condcode, and NeedInvert
 /// will be set to true. The caller must invert the result of the SETCC with
-/// SelectionDAG::getNOT() or take equivalent action to swap the effect of a
-/// true/false result.
+/// SelectionDAG::getLogicalNOT() or take equivalent action to swap the effect
+/// of a true/false result.
 ///
 /// \returns true if the SetCC has been legalized, false if it hasn't.
 bool SelectionDAGLegalize::LegalizeSetCCCondCode(EVT VT,
@@ -3304,7 +3307,7 @@ void SelectionDAGLegalize::ExpandNode(SDNode *Node) {
                                                   TLI.getVectorIdxTy())));
     }
 
-    Tmp1 = DAG.getNode(ISD::BUILD_VECTOR, dl, VT, &Ops[0], Ops.size());
+    Tmp1 = DAG.getNode(ISD::BUILD_VECTOR, dl, VT, Ops);
     // We may have changed the BUILD_VECTOR type. Cast it back to the Node type.
     Tmp1 = DAG.getNode(ISD::BITCAST, dl, Node->getValueType(0), Tmp1);
     Results.push_back(Tmp1);
@@ -3715,8 +3718,7 @@ void SelectionDAGLegalize::ExpandNode(SDNode *Node) {
       BottomHalf = DAG.getNode(Ops[isSigned][1], dl, DAG.getVTList(VT, VT), LHS,
                                RHS);
       TopHalf = BottomHalf.getValue(1);
-    } else if (TLI.isTypeLegal(EVT::getIntegerVT(*DAG.getContext(),
-                                                 VT.getSizeInBits() * 2))) {
+    } else if (TLI.isTypeLegal(WideVT)) {
       LHS = DAG.getNode(Ops[isSigned][2], dl, WideVT, LHS);
       RHS = DAG.getNode(Ops[isSigned][2], dl, WideVT, RHS);
       Tmp1 = DAG.getNode(ISD::MUL, dl, WideVT, LHS, RHS);
@@ -3874,7 +3876,7 @@ void SelectionDAGLegalize::ExpandNode(SDNode *Node) {
       // If we expanded the SETCC by inverting the condition code, then wrap
       // the existing SETCC in a NOT to restore the intended condition.
       if (NeedInvert)
-        Tmp1 = DAG.getNOT(dl, Tmp1, Tmp1->getValueType(0));
+        Tmp1 = DAG.getLogicalNOT(dl, Tmp1, Tmp1->getValueType(0));
 
       Results.push_back(Tmp1);
       break;
@@ -4011,8 +4013,7 @@ void SelectionDAGLegalize::ExpandNode(SDNode *Node) {
                                     VT.getScalarType(), Ex, Sh));
     }
     SDValue Result =
-      DAG.getNode(ISD::BUILD_VECTOR, dl, Node->getValueType(0),
-                  &Scalars[0], Scalars.size());
+      DAG.getNode(ISD::BUILD_VECTOR, dl, Node->getValueType(0), Scalars);
     ReplaceNode(SDValue(Node, 0), Result);
     break;
   }

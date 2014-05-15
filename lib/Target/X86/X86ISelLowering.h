@@ -83,6 +83,9 @@ namespace llvm {
       /// readcyclecounter
       RDTSC_DAG,
 
+      /// X86 Read Time-Stamp Counter and Processor ID.
+      RDTSCP_DAG,
+
       /// X86 compare and logical compare instructions.
       CMP, COMI, UCOMI,
 
@@ -344,6 +347,8 @@ namespace llvm {
 
       // PMULUDQ - Vector multiply packed unsigned doubleword integers
       PMULUDQ,
+      // PMULUDQ - Vector multiply packed signed doubleword integers
+      PMULDQ,
 
       // FMA nodes
       FMADD,
@@ -613,14 +618,14 @@ namespace llvm {
     /// getSetCCResultType - Return the value type to use for ISD::SETCC.
     EVT getSetCCResultType(LLVMContext &Context, EVT VT) const override;
 
-    /// computeMaskedBitsForTargetNode - Determine which of the bits specified
+    /// computeKnownBitsForTargetNode - Determine which of the bits specified
     /// in Mask are known to be either zero or one and return them in the
     /// KnownZero/KnownOne bitsets.
-    void computeMaskedBitsForTargetNode(const SDValue Op,
-                                        APInt &KnownZero,
-                                        APInt &KnownOne,
-                                        const SelectionDAG &DAG,
-                                        unsigned Depth = 0) const override;
+    void computeKnownBitsForTargetNode(const SDValue Op,
+                                       APInt &KnownZero,
+                                       APInt &KnownOne,
+                                       const SelectionDAG &DAG,
+                                       unsigned Depth = 0) const override;
 
     // ComputeNumSignBitsForTargetNode - Determine the number of bits in the
     // operation that are sign bits.
@@ -679,6 +684,12 @@ namespace llvm {
     /// the immediate into a register.
     bool isLegalAddImmediate(int64_t Imm) const override;
 
+    /// \brief Return the cost of the scaling factor used in the addressing
+    /// mode represented by AM for this target, for a load/store
+    /// of the specified type.
+    /// If the AM is supported, the return value must be >= 0.
+    /// If the AM is not supported, it returns a negative value.
+    int getScalingFactorCost(const AddrMode &AM, Type *Ty) const override;
 
     bool isVectorShiftByScalarCheap(Type *Ty) const override;
 
@@ -771,9 +782,11 @@ namespace llvm {
                                            Type *Ty) const override;
 
     /// Intel processors have a unified instruction and data cache
-    const char * getClearCacheBuiltinName() const {
-      return 0; // nothing to do, move along.
+    const char * getClearCacheBuiltinName() const override {
+      return nullptr; // nothing to do, move along.
     }
+
+    unsigned getRegisterByName(const char* RegName, EVT VT) const override;
 
     /// createFastISel - This method returns a target specific FastISel object,
     /// or null if the target does not support "fast" ISel.
@@ -910,6 +923,7 @@ namespace llvm {
     SDValue LowerINIT_TRAMPOLINE(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerFLT_ROUNDS_(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerSIGN_EXTEND_INREG(SDValue Op, SelectionDAG &DAG) const;
+    SDValue LowerWin64_i128OP(SDValue Op, SelectionDAG &DAG) const;
 
     SDValue
       LowerFormalArguments(SDValue Chain,

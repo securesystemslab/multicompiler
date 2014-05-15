@@ -72,7 +72,8 @@ ARMSelectionDAGInfo::EmitTargetCodeForMemcpy(SelectionDAG &DAG, SDLoc dl,
       TFOps[i] = Loads[i].getValue(1);
       SrcOff += VTSize;
     }
-    Chain = DAG.getNode(ISD::TokenFactor, dl, MVT::Other, &TFOps[0], i);
+    Chain = DAG.getNode(ISD::TokenFactor, dl, MVT::Other,
+                        makeArrayRef(TFOps, i));
 
     for (i = 0;
          i < MAX_LOADS_IN_LDM && EmittedNumMemOps + i < NumMemOps; ++i) {
@@ -83,7 +84,8 @@ ARMSelectionDAGInfo::EmitTargetCodeForMemcpy(SelectionDAG &DAG, SDLoc dl,
                               isVolatile, false, 0);
       DstOff += VTSize;
     }
-    Chain = DAG.getNode(ISD::TokenFactor, dl, MVT::Other, &TFOps[0], i);
+    Chain = DAG.getNode(ISD::TokenFactor, dl, MVT::Other,
+                        makeArrayRef(TFOps, i));
 
     EmittedNumMemOps += i;
   }
@@ -113,7 +115,8 @@ ARMSelectionDAGInfo::EmitTargetCodeForMemcpy(SelectionDAG &DAG, SDLoc dl,
     SrcOff += VTSize;
     BytesLeft -= VTSize;
   }
-  Chain = DAG.getNode(ISD::TokenFactor, dl, MVT::Other, &TFOps[0], i);
+  Chain = DAG.getNode(ISD::TokenFactor, dl, MVT::Other,
+                      makeArrayRef(TFOps, i));
 
   i = 0;
   BytesLeft = BytesLeftSave;
@@ -134,7 +137,8 @@ ARMSelectionDAGInfo::EmitTargetCodeForMemcpy(SelectionDAG &DAG, SDLoc dl,
     DstOff += VTSize;
     BytesLeft -= VTSize;
   }
-  return DAG.getNode(ISD::TokenFactor, dl, MVT::Other, &TFOps[0], i);
+  return DAG.getNode(ISD::TokenFactor, dl, MVT::Other,
+                     makeArrayRef(TFOps, i));
 }
 
 // Adjust parameters for memset, EABI uses format (ptr, size, value),
@@ -147,7 +151,8 @@ EmitTargetCodeForMemset(SelectionDAG &DAG, SDLoc dl,
                         unsigned Align, bool isVolatile,
                         MachinePointerInfo DstPtrInfo) const {
   // Use default for non-AAPCS (or MachO) subtargets
-  if (!Subtarget->isAAPCS_ABI() || Subtarget->isTargetMachO())
+  if (!Subtarget->isAAPCS_ABI() || Subtarget->isTargetMachO() ||
+      Subtarget->isTargetWindows())
     return SDValue();
 
   const ARMTargetLowering &TLI =

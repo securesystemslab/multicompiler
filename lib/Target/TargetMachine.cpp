@@ -54,12 +54,7 @@ TargetMachine::TargetMachine(const Target &T,
                              StringRef TT, StringRef CPU, StringRef FS,
                              const TargetOptions &Options)
   : TheTarget(T), TargetTriple(TT), TargetCPU(CPU), TargetFS(FS),
-    CodeGenInfo(0), AsmInfo(0),
-    MCRelaxAll(false),
-    MCNoExecStack(false),
-    MCSaveTempLabels(false),
-    MCUseCFI(true),
-    MCUseDwarfDirectory(false),
+    CodeGenInfo(nullptr), AsmInfo(nullptr),
     RequireStructuredCFG(false),
     Options(Options) {
 }

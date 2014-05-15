@@ -27,9 +27,11 @@
 #include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Module.h"
+#include "llvm/Pass.h"
 #include "llvm/PassManager.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
+#include "llvm/Support/FileSystem.h"
 #include "llvm/Support/ManagedStatic.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/Threading.h"
@@ -42,6 +44,21 @@
 using namespace llvm;
 
 #define DEBUG_TYPE "ir"
+
+namespace {
+struct LLVMPassRunListener : PassRunListener {
+  LLVMPassRunListenerHandlerTy Callback;
+
+  LLVMPassRunListener(LLVMContext *Context, LLVMPassRunListenerHandlerTy Fn)
+    : PassRunListener(Context), Callback(Fn) {}
+  void passRun(LLVMContext *C, Pass *P, Module *M, Function *F,
+               BasicBlock *BB) override {
+    Callback(wrap(C), wrap(P), wrap(M), wrap(F), wrap(BB));
+  }
+};
+// Create wrappers for C Binding types (see CBindingWrapping.h).
+DEFINE_SIMPLE_CONVERSION_FUNCTIONS(LLVMPassRunListener, LLVMPassRunListenerRef)
+} // end anonymous namespace
 
 void llvm::initializeCore(PassRegistry &Registry) {
   initializeDominatorTreeWrapperPassPass(Registry);
@@ -133,7 +150,15 @@ LLVMDiagnosticSeverity LLVMGetDiagInfoSeverity(LLVMDiagnosticInfoRef DI){
     return severity;
 }
 
+LLVMPassRunListenerRef LLVMAddPassRunListener(LLVMContextRef Context,
+                                              LLVMPassRunListenerHandlerTy Fn) {
+  return wrap(new LLVMPassRunListener(unwrap(Context), Fn));
+}
 
+void LLVMRemovePassRunListener(LLVMContextRef Context,
+                               LLVMPassRunListenerRef Listener) {
+  unwrap(Context)->removeRunListener(unwrap(Listener));
+}
 
 
 /*===-- Operations on modules ---------------------------------------------===*/
@@ -1282,7 +1307,7 @@ const char *LLVMGetSection(LLVMValueRef Global) {
 }
 
 void LLVMSetSection(LLVMValueRef Global, const char *Section) {
-  unwrap<GlobalValue>(Global)->setSection(Section);
+  unwrap<GlobalObject>(Global)->setSection(Section);
 }
 
 LLVMVisibility LLVMGetVisibility(LLVMValueRef Global) {
@@ -1332,7 +1357,7 @@ unsigned LLVMGetAlignment(LLVMValueRef V) {
 
 void LLVMSetAlignment(LLVMValueRef V, unsigned Bytes) {
   Value *P = unwrap<Value>(V);
-  if (GlobalValue *GV = dyn_cast<GlobalValue>(P))
+  if (GlobalObject *GV = dyn_cast<GlobalObject>(P))
     GV->setAlignment(Bytes);
   else if (AllocaInst *AI = dyn_cast<AllocaInst>(P))
     AI->setAlignment(Bytes);
@@ -2644,6 +2669,12 @@ size_t LLVMGetBufferSize(LLVMMemoryBufferRef MemBuf) {
 
 void LLVMDisposeMemoryBuffer(LLVMMemoryBufferRef MemBuf) {
   delete unwrap(MemBuf);
+}
+
+/*===-- Pass  -------------------------------------------------------------===*/
+
+const char *LLVMGetPassName(LLVMPassRef P) {
+  return unwrap(P)->getPassName();
 }
 
 /*===-- Pass Registry -----------------------------------------------------===*/

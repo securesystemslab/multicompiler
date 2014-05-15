@@ -1418,7 +1418,8 @@ error_code BitcodeReader::ParseConstants() {
                                   ValueList.getConstantFwdRef(Record[2],CurTy));
       break;
     }
-    case bitc::CST_CODE_CE_EXTRACTELT: { // CE_EXTRACTELT: [opty, opval, opval]
+    case bitc::CST_CODE_CE_EXTRACTELT
+        : { // CE_EXTRACTELT: [opty, opval, opty, opval]
       if (Record.size() < 3)
         return Error(InvalidRecord);
       VectorType *OpTy =
@@ -1426,20 +1427,37 @@ error_code BitcodeReader::ParseConstants() {
       if (!OpTy)
         return Error(InvalidRecord);
       Constant *Op0 = ValueList.getConstantFwdRef(Record[1], OpTy);
-      Constant *Op1 = ValueList.getConstantFwdRef(Record[2],
-                                                  Type::getInt32Ty(Context));
+      Constant *Op1 = nullptr;
+      if (Record.size() == 4) {
+        Type *IdxTy = getTypeByID(Record[2]);
+        if (!IdxTy)
+          return Error(InvalidRecord);
+        Op1 = ValueList.getConstantFwdRef(Record[3], IdxTy);
+      } else // TODO: Remove with llvm 4.0
+        Op1 = ValueList.getConstantFwdRef(Record[2], Type::getInt32Ty(Context));
+      if (!Op1)
+        return Error(InvalidRecord);
       V = ConstantExpr::getExtractElement(Op0, Op1);
       break;
     }
-    case bitc::CST_CODE_CE_INSERTELT: { // CE_INSERTELT: [opval, opval, opval]
+    case bitc::CST_CODE_CE_INSERTELT
+        : { // CE_INSERTELT: [opval, opval, opty, opval]
       VectorType *OpTy = dyn_cast<VectorType>(CurTy);
       if (Record.size() < 3 || !OpTy)
         return Error(InvalidRecord);
       Constant *Op0 = ValueList.getConstantFwdRef(Record[0], OpTy);
       Constant *Op1 = ValueList.getConstantFwdRef(Record[1],
                                                   OpTy->getElementType());
-      Constant *Op2 = ValueList.getConstantFwdRef(Record[2],
-                                                  Type::getInt32Ty(Context));
+      Constant *Op2 = nullptr;
+      if (Record.size() == 4) {
+        Type *IdxTy = getTypeByID(Record[2]);
+        if (!IdxTy)
+          return Error(InvalidRecord);
+        Op2 = ValueList.getConstantFwdRef(Record[3], IdxTy);
+      } else // TODO: Remove with llvm 4.0
+        Op2 = ValueList.getConstantFwdRef(Record[2], Type::getInt32Ty(Context));
+      if (!Op2)
+        return Error(InvalidRecord);
       V = ConstantExpr::getInsertElement(Op0, Op1, Op2);
       break;
     }
@@ -1838,7 +1856,9 @@ error_code BitcodeReader::ParseModule(bool Resume) {
         Section = SectionTable[Record[5]-1];
       }
       GlobalValue::VisibilityTypes Visibility = GlobalValue::DefaultVisibility;
-      if (Record.size() > 6)
+      // Local linkage must have default visibility.
+      if (Record.size() > 6 && !GlobalValue::isLocalLinkage(Linkage))
+        // FIXME: Change to an error if non-default in 4.0.
         Visibility = GetDecodedVisibility(Record[6]);
 
       GlobalVariable::ThreadLocalMode TLM = GlobalVariable::NotThreadLocal;
@@ -1904,7 +1924,10 @@ error_code BitcodeReader::ParseModule(bool Resume) {
           return Error(InvalidID);
         Func->setSection(SectionTable[Record[6]-1]);
       }
-      Func->setVisibility(GetDecodedVisibility(Record[7]));
+      // Local linkage must have default visibility.
+      if (!Func->hasLocalLinkage())
+        // FIXME: Change to an error if non-default in 4.0.
+        Func->setVisibility(GetDecodedVisibility(Record[7]));
       if (Record.size() > 8 && Record[8]) {
         if (Record[8]-1 > GCTable.size())
           return Error(InvalidID);
@@ -1946,7 +1969,9 @@ error_code BitcodeReader::ParseModule(bool Resume) {
       GlobalAlias *NewGA = new GlobalAlias(Ty, GetDecodedLinkage(Record[2]),
                                            "", nullptr, TheModule);
       // Old bitcode files didn't have visibility field.
-      if (Record.size() > 3)
+      // Local linkage must have default visibility.
+      if (Record.size() > 3 && !NewGA->hasLocalLinkage())
+        // FIXME: Change to an error if non-default in 4.0.
         NewGA->setVisibility(GetDecodedVisibility(Record[3]));
       if (Record.size() > 4)
         NewGA->setDLLStorageClass(GetDecodedDLLStorageClass(Record[4]));
@@ -2460,7 +2485,7 @@ error_code BitcodeReader::ParseFunctionBody(Function *F) {
       unsigned OpNum = 0;
       Value *Vec, *Idx;
       if (getValueTypePair(Record, OpNum, NextValueNo, Vec) ||
-          popValue(Record, OpNum, NextValueNo, Type::getInt32Ty(Context), Idx))
+          getValueTypePair(Record, OpNum, NextValueNo, Idx))
         return Error(InvalidRecord);
       I = ExtractElementInst::Create(Vec, Idx);
       InstructionList.push_back(I);
@@ -2473,7 +2498,7 @@ error_code BitcodeReader::ParseFunctionBody(Function *F) {
       if (getValueTypePair(Record, OpNum, NextValueNo, Vec) ||
           popValue(Record, OpNum, NextValueNo,
                    cast<VectorType>(Vec->getType())->getElementType(), Elt) ||
-          popValue(Record, OpNum, NextValueNo, Type::getInt32Ty(Context), Idx))
+          getValueTypePair(Record, OpNum, NextValueNo, Idx))
         return Error(InvalidRecord);
       I = InsertElementInst::Create(Vec, Elt, Idx);
       InstructionList.push_back(I);
@@ -2994,8 +3019,13 @@ error_code BitcodeReader::ParseFunctionBody(Function *F) {
       I = CallInst::Create(Callee, Args);
       InstructionList.push_back(I);
       cast<CallInst>(I)->setCallingConv(
-        static_cast<CallingConv::ID>(CCInfo>>1));
-      cast<CallInst>(I)->setTailCall(CCInfo & 1);
+          static_cast<CallingConv::ID>((~(1U << 14) & CCInfo) >> 1));
+      CallInst::TailCallKind TCK = CallInst::TCK_None;
+      if (CCInfo & 1)
+        TCK = CallInst::TCK_Tail;
+      if (CCInfo & (1 << 14))
+        TCK = CallInst::TCK_MustTail;
+      cast<CallInst>(I)->setTailCallKind(TCK);
       cast<CallInst>(I)->setAttributes(PAL);
       break;
     }

@@ -11,17 +11,25 @@
 #include "X86AsmInstrumentation.h"
 #include "X86Operand.h"
 #include "llvm/ADT/StringExtras.h"
+#include "llvm/ADT/Triple.h"
 #include "llvm/IR/Function.h"
 #include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCInst.h"
 #include "llvm/MC/MCInstBuilder.h"
+#include "llvm/MC/MCInstrInfo.h"
 #include "llvm/MC/MCParser/MCParsedAsmOperand.h"
 #include "llvm/MC/MCStreamer.h"
 #include "llvm/MC/MCSubtargetInfo.h"
 #include "llvm/MC/MCTargetOptions.h"
+#include "llvm/Support/CommandLine.h"
 
 namespace llvm {
 namespace {
+
+static cl::opt<bool> ClAsanInstrumentAssembly(
+    "asan-instrument-assembly",
+    cl::desc("instrument assembly with AddressSanitizer checks"), cl::Hidden,
+    cl::init(false));
 
 bool IsStackReg(unsigned Reg) {
   return Reg == X86::RSP || Reg == X86::ESP || Reg == X86::SP;
@@ -40,8 +48,8 @@ public:
   // X86AsmInstrumentation implementation:
   virtual void InstrumentInstruction(
       const MCInst &Inst, SmallVectorImpl<MCParsedAsmOperand *> &Operands,
-      MCContext &Ctx, MCStreamer &Out) override {
-    InstrumentMOV(Inst, Operands, Ctx, Out);
+      MCContext &Ctx, const MCInstrInfo &MII, MCStreamer &Out) override {
+    InstrumentMOV(Inst, Operands, Ctx, MII, Out);
   }
 
   // Should be implemented differently in x86_32 and x86_64 subclasses.
@@ -53,7 +61,7 @@ public:
                             bool IsWrite, MCContext &Ctx, MCStreamer &Out);
   void InstrumentMOV(const MCInst &Inst,
                      SmallVectorImpl<MCParsedAsmOperand *> &Operands,
-                     MCContext &Ctx, MCStreamer &Out);
+                     MCContext &Ctx, const MCInstrInfo &MII, MCStreamer &Out);
   void EmitInstruction(MCStreamer &Out, const MCInst &Inst) {
     Out.EmitInstruction(Inst, STI);
   }
@@ -79,63 +87,47 @@ void X86AddressSanitizer::InstrumentMemOperand(
 
 void X86AddressSanitizer::InstrumentMOV(
     const MCInst &Inst, SmallVectorImpl<MCParsedAsmOperand *> &Operands,
-    MCContext &Ctx, MCStreamer &Out) {
+    MCContext &Ctx, const MCInstrInfo &MII, MCStreamer &Out) {
   // Access size in bytes.
   unsigned AccessSize = 0;
-  unsigned long OpIx = Operands.size();
+
   switch (Inst.getOpcode()) {
   case X86::MOV8mi:
   case X86::MOV8mr:
-    AccessSize = 1;
-    OpIx = 2;
-    break;
   case X86::MOV8rm:
     AccessSize = 1;
-    OpIx = 1;
     break;
   case X86::MOV16mi:
   case X86::MOV16mr:
-    AccessSize = 2;
-    OpIx = 2;
-    break;
   case X86::MOV16rm:
     AccessSize = 2;
-    OpIx = 1;
     break;
   case X86::MOV32mi:
   case X86::MOV32mr:
-    AccessSize = 4;
-    OpIx = 2;
-    break;
   case X86::MOV32rm:
     AccessSize = 4;
-    OpIx = 1;
     break;
   case X86::MOV64mi32:
   case X86::MOV64mr:
-    AccessSize = 8;
-    OpIx = 2;
-    break;
   case X86::MOV64rm:
     AccessSize = 8;
-    OpIx = 1;
     break;
   case X86::MOVAPDmr:
   case X86::MOVAPSmr:
-    AccessSize = 16;
-    OpIx = 2;
-    break;
   case X86::MOVAPDrm:
   case X86::MOVAPSrm:
     AccessSize = 16;
-    OpIx = 1;
     break;
-  }
-  if (OpIx >= Operands.size())
+  default:
     return;
+  }
 
-  const bool IsWrite = (OpIx != 1);
-  InstrumentMemOperand(Operands[OpIx], AccessSize, IsWrite, Ctx, Out);
+  const bool IsWrite = MII.get(Inst.getOpcode()).mayStore();
+  for (unsigned Ix = 0; Ix < Operands.size(); ++Ix) {
+    MCParsedAsmOperand *Op = Operands[Ix];
+    if (Op && Op->isMem())
+      InstrumentMemOperand(Op, AccessSize, IsWrite, Ctx, Out);
+  }
 }
 
 class X86AddressSanitizer32 : public X86AddressSanitizer {
@@ -185,13 +177,26 @@ public:
                                         MCStreamer &Out) override;
 };
 
-void X86AddressSanitizer64::InstrumentMemOperandImpl(
-    X86Operand *Op, unsigned AccessSize, bool IsWrite, MCContext &Ctx,
-    MCStreamer &Out) {
+void X86AddressSanitizer64::InstrumentMemOperandImpl(X86Operand *Op,
+                                                     unsigned AccessSize,
+                                                     bool IsWrite,
+                                                     MCContext &Ctx,
+                                                     MCStreamer &Out) {
   // FIXME: emit .cfi directives for correct stack unwinding.
-  // Set %rsp below current red zone (128 bytes wide)
-  EmitInstruction(Out, MCInstBuilder(X86::SUB64ri32).addReg(X86::RSP)
-                           .addReg(X86::RSP).addImm(128));
+
+  // Set %rsp below current red zone (128 bytes wide) using LEA instruction to
+  // preserve flags.
+  {
+    MCInst Inst;
+    Inst.setOpcode(X86::LEA64r);
+    Inst.addOperand(MCOperand::CreateReg(X86::RSP));
+
+    const MCExpr *Disp = MCConstantExpr::Create(-128, Ctx);
+    std::unique_ptr<X86Operand> Op(
+        X86Operand::CreateMem(0, Disp, X86::RSP, 0, 1, SMLoc(), SMLoc()));
+    Op->addMemOperands(Inst, 5);
+    EmitInstruction(Out, Inst);
+  }
   EmitInstruction(Out, MCInstBuilder(X86::PUSH64r).addReg(X86::RDI));
   {
     MCInst Inst;
@@ -208,8 +213,19 @@ void X86AddressSanitizer64::InstrumentMemOperandImpl(
     EmitInstruction(Out, MCInstBuilder(X86::CALL64pcrel32).addExpr(FuncExpr));
   }
   EmitInstruction(Out, MCInstBuilder(X86::POP64r).addReg(X86::RDI));
-  EmitInstruction(Out, MCInstBuilder(X86::ADD64ri32).addReg(X86::RSP)
-                           .addReg(X86::RSP).addImm(128));
+
+  // Restore old %rsp value.
+  {
+    MCInst Inst;
+    Inst.setOpcode(X86::LEA64r);
+    Inst.addOperand(MCOperand::CreateReg(X86::RSP));
+
+    const MCExpr *Disp = MCConstantExpr::Create(128, Ctx);
+    std::unique_ptr<X86Operand> Op(
+        X86Operand::CreateMem(0, Disp, X86::RSP, 0, 1, SMLoc(), SMLoc()));
+    Op->addMemOperands(Inst, 5);
+    EmitInstruction(Out, Inst);
+  }
 }
 
 } // End anonymous namespace
@@ -219,12 +235,15 @@ X86AsmInstrumentation::~X86AsmInstrumentation() {}
 
 void X86AsmInstrumentation::InstrumentInstruction(
     const MCInst &Inst, SmallVectorImpl<MCParsedAsmOperand *> &Operands,
-    MCContext &Ctx, MCStreamer &Out) {}
+    MCContext &Ctx, const MCInstrInfo &MII, MCStreamer &Out) {}
 
 X86AsmInstrumentation *
-CreateX86AsmInstrumentation(const MCTargetOptions &MCOptions, const MCContext &Ctx,
-                            const MCSubtargetInfo &STI) {
-  if (MCOptions.SanitizeAddress) {
+CreateX86AsmInstrumentation(const MCTargetOptions &MCOptions,
+                            const MCContext &Ctx, const MCSubtargetInfo &STI) {
+  Triple T(STI.getTargetTriple());
+  const bool hasCompilerRTSupport = T.isOSLinux();
+  if (ClAsanInstrumentAssembly && hasCompilerRTSupport &&
+      MCOptions.SanitizeAddress) {
     if ((STI.getFeatureBits() & X86::Mode32Bit) != 0)
       return new X86AddressSanitizer32(STI);
     if ((STI.getFeatureBits() & X86::Mode64Bit) != 0)

@@ -24,6 +24,7 @@
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
 #include <map>
+#include <tuple>
 
 #define DEBUG_TYPE "ir"
 
@@ -586,7 +587,7 @@ public:
   /// necessary.
   ConstantClass *getOrCreate(TypeClass *Ty, ValRefType V) {
     MapKey Lookup(Ty, V);
-    ConstantClass* Result = 0;
+    ConstantClass* Result = nullptr;
     
     typename MapTy::iterator I = Map.find(Lookup);
     // Is it in the map?  
@@ -722,7 +723,7 @@ public:
   /// necessary.
   ConstantClass *getOrCreate(TypeClass *Ty, Operands V) {
     LookupKey Lookup(Ty, V);
-    ConstantClass* Result = 0;
+    ConstantClass* Result = nullptr;
 
     typename MapTy::iterator I = Map.find_as(Lookup);
     // Is it in the map?

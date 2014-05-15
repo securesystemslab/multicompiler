@@ -27,7 +27,15 @@ class AddressPool {
   };
   DenseMap<const MCSymbol *, AddressPoolEntry> Pool;
 
+  /// Record whether the AddressPool has been queried for an address index since
+  /// the last "resetUsedFlag" call. Used to implement type unit fallback - a
+  /// type that references addresses cannot be placed in a type unit when using
+  /// fission.
+  bool HasBeenUsed;
+
 public:
+  AddressPool() : HasBeenUsed(false) {}
+
   /// \brief Returns the index into the address pool with the given
   /// label/symbol.
   unsigned getIndex(const MCSymbol *Sym, bool TLS = false);
@@ -35,6 +43,10 @@ public:
   void emit(AsmPrinter &Asm, const MCSection *AddrSection);
 
   bool isEmpty() { return Pool.empty(); }
+
+  bool hasBeenUsed() const { return HasBeenUsed; }
+
+  void resetUsedFlag() { HasBeenUsed = false; }
 };
 }
 #endif

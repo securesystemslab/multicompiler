@@ -162,7 +162,7 @@ void emitFrameOffset(MachineBasicBlock &MBB, MachineBasicBlock::iterator MBBI,
                      DebugLoc DL, unsigned DestReg, unsigned SrcReg, int Offset,
                      const ARM64InstrInfo *TII,
                      MachineInstr::MIFlag = MachineInstr::NoFlags,
-                     bool SetCPSR = false);
+                     bool SetNZCV = false);
 
 /// rewriteARM64FrameIndex - Rewrite MI to access 'Offset' bytes from the
 /// FP. Return false if the offset could not be handled directly in MI, and
@@ -193,9 +193,9 @@ enum ARM64FrameOffsetStatus {
 /// (possibly with @p OutUnscaledOp if OutUseUnscaledOp is true) and that
 /// is a legal offset.
 int isARM64FrameOffsetLegal(const MachineInstr &MI, int &Offset,
-                            bool *OutUseUnscaledOp = NULL,
-                            unsigned *OutUnscaledOp = NULL,
-                            int *EmittableOffset = NULL);
+                            bool *OutUseUnscaledOp = nullptr,
+                            unsigned *OutUnscaledOp = nullptr,
+                            int *EmittableOffset = nullptr);
 
 static inline bool isUncondBranchOpcode(int Opc) { return Opc == ARM64::B; }
 

@@ -84,11 +84,6 @@ protected: // Can only create subclasses.
   ///
   const MCAsmInfo *AsmInfo;
 
-  unsigned MCRelaxAll : 1;
-  unsigned MCNoExecStack : 1;
-  unsigned MCSaveTempLabels : 1;
-  unsigned MCUseCFI : 1;
-  unsigned MCUseDwarfDirectory : 1;
   unsigned RequireStructuredCFG : 1;
 
 public:
@@ -169,39 +164,18 @@ public:
 
   /// hasMCRelaxAll - Check whether all machine code instructions should be
   /// relaxed.
-  bool hasMCRelaxAll() const { return MCRelaxAll; }
-
-  /// setMCRelaxAll - Set whether all machine code instructions should be
-  /// relaxed.
-  void setMCRelaxAll(bool Value) { MCRelaxAll = Value; }
+  bool hasMCRelaxAll() const { return Options.MCOptions.MCRelaxAll; }
 
   /// hasMCSaveTempLabels - Check whether temporary labels will be preserved
   /// (i.e., not treated as temporary).
-  bool hasMCSaveTempLabels() const { return MCSaveTempLabels; }
-
-  /// setMCSaveTempLabels - Set whether temporary labels will be preserved
-  /// (i.e., not treated as temporary).
-  void setMCSaveTempLabels(bool Value) { MCSaveTempLabels = Value; }
+  bool hasMCSaveTempLabels() const { return Options.MCOptions.MCSaveTempLabels; }
 
   /// hasMCNoExecStack - Check whether an executable stack is not needed.
-  bool hasMCNoExecStack() const { return MCNoExecStack; }
-
-  /// setMCNoExecStack - Set whether an executabel stack is not needed.
-  void setMCNoExecStack(bool Value) { MCNoExecStack = Value; }
-
-  /// hasMCUseCFI - Check whether we should use dwarf's .cfi_* directives.
-  bool hasMCUseCFI() const { return MCUseCFI; }
-
-  /// setMCUseCFI - Set whether all we should use dwarf's .cfi_* directives.
-  void setMCUseCFI(bool Value) { MCUseCFI = Value; }
+  bool hasMCNoExecStack() const { return Options.MCOptions.MCNoExecStack; }
 
   /// hasMCUseDwarfDirectory - Check whether we should use .file directives with
   /// explicit directories.
-  bool hasMCUseDwarfDirectory() const { return MCUseDwarfDirectory; }
-
-  /// setMCUseDwarfDirectory - Set whether all we should use .file directives
-  /// with explicit directories.
-  void setMCUseDwarfDirectory(bool Value) { MCUseDwarfDirectory = Value; }
+  bool hasMCUseDwarfDirectory() const { return Options.MCOptions.MCUseDwarfDirectory; }
 
   /// getRelocationModel - Returns the code generation relocation model. The
   /// choices are static, PIC, and dynamic-no-pic, and target default.

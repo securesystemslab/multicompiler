@@ -440,6 +440,9 @@ styles:
     defining module will bind to the local symbol. That is, the symbol
     cannot be overridden by another module.
 
+A symbol with ``internal`` or ``private`` linkage must have ``default``
+visibility.
+
 .. _namedtypes:
 
 DLL Storage Classes
@@ -4470,7 +4473,7 @@ Syntax:
 
 ::
 
-      <result> = extractelement <n x <ty>> <val>, i32 <idx>    ; yields <ty>
+      <result> = extractelement <n x <ty>> <val>, <ty2> <idx>  ; yields <ty>
 
 Overview:
 """""""""
@@ -4484,7 +4487,7 @@ Arguments:
 The first operand of an '``extractelement``' instruction is a value of
 :ref:`vector <t_vector>` type. The second operand is an index indicating
 the position from which to extract the element. The index may be a
-variable.
+variable of any integer type.
 
 Semantics:
 """"""""""
@@ -4510,7 +4513,7 @@ Syntax:
 
 ::
 
-      <result> = insertelement <n x <ty>> <val>, <ty> <elt>, i32 <idx>    ; yields <n x <ty>>
+      <result> = insertelement <n x <ty>> <val>, <ty> <elt>, <ty2> <idx>    ; yields <n x <ty>>
 
 Overview:
 """""""""
@@ -4525,7 +4528,7 @@ The first operand of an '``insertelement``' instruction is a value of
 :ref:`vector <t_vector>` type. The second operand is a scalar value whose
 type must equal the element type of the first operand. The third operand
 is an index indicating the position at which to insert the value. The
-index may be a variable.
+index may be a variable of any integer type.
 
 Semantics:
 """"""""""
@@ -6161,7 +6164,7 @@ Syntax:
 
 ::
 
-      <result> = [tail] call [cconv] [ret attrs] <ty> [<fnty>*] <fnptrval>(<function args>) [fn attrs]
+      <result> = [tail | musttail] call [cconv] [ret attrs] <ty> [<fnty>*] <fnptrval>(<function args>) [fn attrs]
 
 Overview:
 """""""""
@@ -6173,17 +6176,34 @@ Arguments:
 
 This instruction requires several arguments:
 
-#. The optional "tail" marker indicates that the callee function does
-   not access any allocas or varargs in the caller. Note that calls may
-   be marked "tail" even if they do not occur before a
-   :ref:`ret <i_ret>` instruction. If the "tail" marker is present, the
-   function call is eligible for tail call optimization, but `might not
-   in fact be optimized into a jump <CodeGenerator.html#tailcallopt>`_.
-   The code generator may optimize calls marked "tail" with either 1)
-   automatic `sibling call
-   optimization <CodeGenerator.html#sibcallopt>`_ when the caller and
-   callee have matching signatures, or 2) forced tail call optimization
-   when the following extra requirements are met:
+#. The optional ``tail`` and ``musttail`` markers indicate that the optimizers
+   should perform tail call optimization.  The ``tail`` marker is a hint that
+   `can be ignored <CodeGenerator.html#sibcallopt>`_.  The ``musttail`` marker
+   means that the call must be tail call optimized in order for the program to
+   be correct.  The ``musttail`` marker provides these guarantees:
+
+   #. The call will not cause unbounded stack growth if it is part of a
+      recursive cycle in the call graph.
+   #. Arguments with the :ref:`inalloca <attr_inalloca>` attribute are
+      forwarded in place.
+
+   Both markers imply that the callee does not access allocas or varargs from
+   the caller.  Calls marked ``musttail`` must obey the following additional
+   rules:
+
+   - The call must immediately precede a :ref:`ret <i_ret>` instruction,
+     or a pointer bitcast followed by a ret instruction.
+   - The ret instruction must return the (possibly bitcasted) value
+     produced by the call or void.
+   - The caller and callee prototypes must match.  Pointer types of
+     parameters or return types may differ in pointee type, but not
+     in address space.
+   - The calling conventions of the caller and callee must match.
+   - All ABI-impacting function attributes, such as sret, byval, inreg,
+     returned, and inalloca, must match.
+
+   Tail call optimization for calls marked ``tail`` is guaranteed to occur if
+   the following conditions are met:
 
    -  Caller and callee both have the calling convention ``fastcc``.
    -  The call is in tail position (ret immediately follows call and ret
@@ -6786,6 +6806,51 @@ used for debugging purposes.
 Note that calling this intrinsic does not prevent function inlining or
 other aggressive transformations, so the value returned may not be that
 of the obvious source-language caller.
+
+.. _int_read_register:
+.. _int_write_register:
+
+'``llvm.read_register``' and '``llvm.write_register``' Intrinsics
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Syntax:
+"""""""
+
+::
+
+      declare i32 @llvm.read_register.i32(metadata)
+      declare i64 @llvm.read_register.i64(metadata)
+      declare void @llvm.write_register.i32(metadata, i32 @value)
+      declare void @llvm.write_register.i64(metadata, i64 @value)
+      !0 = metadata !{metadata !"sp\00"}
+
+Overview:
+"""""""""
+
+The '``llvm.read_register``' and '``llvm.write_register``' intrinsics
+provides access to the named register. The register must be valid on
+the architecture being compiled to. The type needs to be compatible
+with the register being read.
+
+Semantics:
+""""""""""
+
+The '``llvm.read_register``' intrinsic returns the current value of the
+register, where possible. The '``llvm.write_register``' intrinsic sets
+the current value of the register, where possible.
+
+This is useful to implement named register global variables that need
+to always be mapped to a specific register, as is common practice on
+bare-metal programs including OS kernels.
+
+The compiler doesn't check for register availability or use of the used
+register in surrounding code, including inline assembly. Because of that,
+allocatable registers are not supported.
+
+Warning: So far it only works with the stack pointer on selected
+architectures (ARM, ARM64, AArch64, PowerPC and x86_64). Significant amount of
+work is needed to support other registers and even more so, allocatable
+registers.
 
 .. _int_stacksave:
 

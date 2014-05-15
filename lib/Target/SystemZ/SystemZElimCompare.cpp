@@ -64,14 +64,14 @@ class SystemZElimCompare : public MachineFunctionPass {
 public:
   static char ID;
   SystemZElimCompare(const SystemZTargetMachine &tm)
-    : MachineFunctionPass(ID), TII(0), TRI(0) {}
+    : MachineFunctionPass(ID), TII(nullptr), TRI(nullptr) {}
 
   const char *getPassName() const override {
     return "SystemZ Comparison Elimination";
   }
 
   bool processBlock(MachineBasicBlock &MBB);
-  bool runOnMachineFunction(MachineFunction &F);
+  bool runOnMachineFunction(MachineFunction &F) override;
 
 private:
   Reference getRegReferences(MachineInstr *MI, unsigned Reg);

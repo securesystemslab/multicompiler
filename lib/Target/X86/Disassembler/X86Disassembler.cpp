@@ -140,7 +140,7 @@ X86GenericDisassembler::getInstruction(MCInst &instr,
 
   dlog_t loggerFn = logger;
   if (&vStream == &nulls())
-    loggerFn = 0; // Disable logging completely if it's going to nulls().
+    loggerFn = nullptr; // Disable logging completely if it's going to nulls().
   
   int ret = decodeInstruction(&internalInstr,
                               regionReader,
@@ -787,13 +787,11 @@ static bool translateInstruction(MCInst &mcInst,
       mcInst.setOpcode(X86::XACQUIRE_PREFIX);
   }
   
-  int index;
-  
   insn.numImmediatesTranslated = 0;
   
-  for (index = 0; index < X86_MAX_OPERANDS; ++index) {
-    if (insn.operands[index].encoding != ENCODING_NONE) {
-      if (translateOperand(mcInst, insn.operands[index], insn, Dis)) {
+  for (const auto &Op : insn.operands) {
+    if (Op.encoding != ENCODING_NONE) {
+      if (translateOperand(mcInst, Op, insn, Dis)) {
         return true;
       }
     }

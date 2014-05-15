@@ -286,7 +286,7 @@ enum GlobalOffsetTableExprKind {
 };
 static GlobalOffsetTableExprKind
 StartsWithGlobalOffsetTable(const MCExpr *Expr) {
-  const MCExpr *RHS = 0;
+  const MCExpr *RHS = nullptr;
   if (Expr->getKind() == MCExpr::Binary) {
     const MCBinaryExpr *BE = static_cast<const MCBinaryExpr *>(Expr);
     Expr = BE->getLHS();
@@ -317,7 +317,7 @@ void X86MCCodeEmitter::
 EmitImmediate(const MCOperand &DispOp, SMLoc Loc, unsigned Size,
               MCFixupKind FixupKind, unsigned &CurByte, raw_ostream &OS,
               SmallVectorImpl<MCFixup> &Fixups, int ImmOffset) const {
-  const MCExpr *Expr = NULL;
+  const MCExpr *Expr = nullptr;
   if (DispOp.isImm()) {
     // If this is a simple integer displacement that doesn't require a
     // relocation, emit it now.
@@ -1428,6 +1428,8 @@ EncodeInstruction(const MCInst &MI, raw_ostream &OS,
   case X86II::MRM6r: case X86II::MRM7r: {
     if (HasVEX_4V) // Skip the register dst (which is encoded in VEX_VVVV).
       ++CurOp;
+    if (HasEVEX_K) // Skip writemask
+      ++CurOp;
     EmitByte(BaseOpcode, CurByte, OS);
     uint64_t Form = TSFlags & X86II::FormMask;
     EmitRegModRMByte(MI.getOperand(CurOp++),
@@ -1442,6 +1444,8 @@ EncodeInstruction(const MCInst &MI, raw_ostream &OS,
   case X86II::MRM4m: case X86II::MRM5m:
   case X86II::MRM6m: case X86II::MRM7m: {
     if (HasVEX_4V) // Skip the register dst (which is encoded in VEX_VVVV).
+      ++CurOp;
+    if (HasEVEX_K) // Skip writemask
       ++CurOp;
     EmitByte(BaseOpcode, CurByte, OS);
     uint64_t Form = TSFlags & X86II::FormMask;

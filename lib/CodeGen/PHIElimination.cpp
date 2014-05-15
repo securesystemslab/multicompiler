@@ -532,13 +532,14 @@ void PHIElimination::LowerPHINode(MachineBasicBlock &MBB,
 /// used later to determine when the vreg is killed in the BB.
 ///
 void PHIElimination::analyzePHINodes(const MachineFunction& MF) {
-  for (MachineFunction::const_iterator I = MF.begin(), E = MF.end();
-       I != E; ++I)
-    for (MachineBasicBlock::const_iterator BBI = I->begin(), BBE = I->end();
-         BBI != BBE && BBI->isPHI(); ++BBI)
-      for (unsigned i = 1, e = BBI->getNumOperands(); i != e; i += 2)
-        ++VRegPHIUseCount[BBVRegPair(BBI->getOperand(i+1).getMBB()->getNumber(),
-                                     BBI->getOperand(i).getReg())];
+  for (const auto &MBB : MF)
+    for (const auto &BBI : MBB) {
+      if (!BBI.isPHI())
+        break;
+      for (unsigned i = 1, e = BBI.getNumOperands(); i != e; i += 2)
+        ++VRegPHIUseCount[BBVRegPair(BBI.getOperand(i+1).getMBB()->getNumber(),
+                                     BBI.getOperand(i).getReg())];
+    }
 }
 
 bool PHIElimination::SplitPHIEdges(MachineFunction &MF,

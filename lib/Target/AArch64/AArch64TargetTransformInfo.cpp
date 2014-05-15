@@ -38,7 +38,7 @@ class AArch64TTI final : public ImmutablePass, public TargetTransformInfo {
   const AArch64TargetLowering *TLI;
 
 public:
-  AArch64TTI() : ImmutablePass(ID), ST(0), TLI(0) {
+  AArch64TTI() : ImmutablePass(ID), ST(nullptr), TLI(nullptr) {
     llvm_unreachable("This pass cannot be directly constructed");
   }
 
@@ -75,7 +75,7 @@ public:
   /// \name Vector TTI Implementations
   /// @{
 
-  unsigned getNumberOfRegisters(bool Vector) const {
+  unsigned getNumberOfRegisters(bool Vector) const override {
     if (Vector) {
       if (ST->hasNEON())
         return 32;
@@ -84,7 +84,7 @@ public:
     return 32;
   }
 
-  unsigned getRegisterBitWidth(bool Vector) const {
+  unsigned getRegisterBitWidth(bool Vector) const override {
     if (Vector) {
       if (ST->hasNEON())
         return 128;

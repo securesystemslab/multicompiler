@@ -18,35 +18,10 @@
 #include "llvm/Target/TargetLoweringObjectFile.h"
 
 namespace llvm {
-DwarfFile::DwarfFile(AsmPrinter *AP, const char *Pref, BumpPtrAllocator &DA)
-    : Asm(AP), StringPool(DA), NextStringPoolNumber(0), StringPref(Pref) {}
+DwarfFile::DwarfFile(AsmPrinter *AP, StringRef Pref, BumpPtrAllocator &DA)
+    : Asm(AP), StrPool(DA, *Asm, Pref) {}
 
 DwarfFile::~DwarfFile() {}
-
-MCSymbol *DwarfFile::getStringPoolSym() {
-  return Asm->GetTempSymbol(StringPref);
-}
-
-MCSymbol *DwarfFile::getStringPoolEntry(StringRef Str) {
-  std::pair<MCSymbol *, unsigned> &Entry =
-      StringPool.GetOrCreateValue(Str).getValue();
-  if (Entry.first)
-    return Entry.first;
-
-  Entry.second = NextStringPoolNumber++;
-  return Entry.first = Asm->GetTempSymbol(StringPref, Entry.second);
-}
-
-unsigned DwarfFile::getStringPoolIndex(StringRef Str) {
-  std::pair<MCSymbol *, unsigned> &Entry =
-      StringPool.GetOrCreateValue(Str).getValue();
-  if (Entry.first)
-    return Entry.second;
-
-  Entry.second = NextStringPoolNumber++;
-  Entry.first = Asm->GetTempSymbol(StringPref, Entry.second);
-  return Entry.second;
-}
 
 // Define a unique number for the abbreviation.
 //
@@ -75,7 +50,7 @@ void DwarfFile::addUnit(std::unique_ptr<DwarfUnit> U) {
 // the abbreviations going into ASection.
 void DwarfFile::emitUnits(DwarfDebug *DD, const MCSymbol *ASectionSym) {
   for (const auto &TheU : CUs) {
-    DIE *Die = TheU->getUnitDie();
+    DIE &Die = TheU->getUnitDie();
     const MCSection *USection = TheU->getSection();
     Asm->OutStreamer.SwitchSection(USection);
 
@@ -84,11 +59,11 @@ void DwarfFile::emitUnits(DwarfDebug *DD, const MCSymbol *ASectionSym) {
 
     // Emit size of content not including length itself
     Asm->OutStreamer.AddComment("Length of Unit");
-    Asm->EmitInt32(TheU->getHeaderSize() + Die->getSize());
+    Asm->EmitInt32(TheU->getHeaderSize() + Die.getSize());
 
     TheU->emitHeader(ASectionSym);
 
-    DD->emitDIE(*Die);
+    DD->emitDIE(Die);
     Asm->OutStreamer.EmitLabel(TheU->getLabelEnd());
   }
 }
@@ -108,7 +83,7 @@ void DwarfFile::computeSizeAndOffsets() {
 
     // EndOffset here is CU-relative, after laying out
     // all of the CU DIE.
-    unsigned EndOffset = computeSizeAndOffset(*TheU->getUnitDie(), Offset);
+    unsigned EndOffset = computeSizeAndOffset(TheU->getUnitDie(), Offset);
     SecOffset += EndOffset;
   }
 }
@@ -176,40 +151,6 @@ void DwarfFile::emitAbbrevs(const MCSection *Section) {
 void DwarfFile::emitStrings(const MCSection *StrSection,
                             const MCSection *OffsetSection,
                             const MCSymbol *StrSecSym) {
-
-  if (StringPool.empty())
-    return;
-
-  // Start the dwarf str section.
-  Asm->OutStreamer.SwitchSection(StrSection);
-
-  // Get all of the string pool entries and put them in an array by their ID so
-  // we can sort them.
-  SmallVector<std::pair<unsigned, const StrPool::value_type *>, 64> Entries;
-
-  for (const auto &I : StringPool)
-    Entries.push_back(std::make_pair(I.second.second, &I));
-
-  array_pod_sort(Entries.begin(), Entries.end());
-
-  for (const auto &Entry : Entries) {
-    // Emit a label for reference from debug information entries.
-    Asm->OutStreamer.EmitLabel(Entry.second->getValue().first);
-
-    // Emit the string itself with a terminating null byte.
-    Asm->OutStreamer.EmitBytes(StringRef(Entry.second->getKeyData(),
-                                         Entry.second->getKeyLength() + 1));
-  }
-
-  // If we've got an offset section go ahead and emit that now as well.
-  if (OffsetSection) {
-    Asm->OutStreamer.SwitchSection(OffsetSection);
-    unsigned offset = 0;
-    unsigned size = 4; // FIXME: DWARF64 is 8.
-    for (const auto &Entry : Entries) {
-      Asm->OutStreamer.EmitIntValue(offset, size);
-      offset += Entry.second->getKeyLength() + 1;
-    }
-  }
+  StrPool.emit(*Asm, StrSection, OffsetSection, StrSecSym);
 }
 }
