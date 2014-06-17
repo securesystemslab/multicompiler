@@ -28,8 +28,8 @@
 #include "llvm/Support/Mutex.h"
 #include "llvm/Support/SwapByteOrder.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/Support/system_error.h"
 #include <map>
+#include <system_error>
 
 using namespace llvm;
 using namespace llvm::object;
@@ -245,14 +245,14 @@ protected:
 
   void writeInt16BE(uint8_t *Addr, uint16_t Value) {
     if (IsTargetLittleEndian)
-      Value = sys::SwapByteOrder(Value);
+      sys::swapByteOrder(Value);
     *Addr       = (Value >> 8) & 0xFF;
     *(Addr + 1) = Value & 0xFF;
   }
 
   void writeInt32BE(uint8_t *Addr, uint32_t Value) {
     if (IsTargetLittleEndian)
-      Value = sys::SwapByteOrder(Value);
+      sys::swapByteOrder(Value);
     *Addr       = (Value >> 24) & 0xFF;
     *(Addr + 1) = (Value >> 16) & 0xFF;
     *(Addr + 2) = (Value >> 8) & 0xFF;
@@ -261,7 +261,7 @@ protected:
 
   void writeInt64BE(uint8_t *Addr, uint64_t Value) {
     if (IsTargetLittleEndian)
-      Value = sys::SwapByteOrder(Value);
+      sys::swapByteOrder(Value);
     *Addr       = (Value >> 56) & 0xFF;
     *(Addr + 1) = (Value >> 48) & 0xFF;
     *(Addr + 2) = (Value >> 40) & 0xFF;

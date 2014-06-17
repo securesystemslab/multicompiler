@@ -40,9 +40,8 @@
 using namespace llvm;
 
 DwarfCFIException::DwarfCFIException(AsmPrinter *A)
-  : DwarfException(A),
-    shouldEmitPersonality(false), shouldEmitLSDA(false), shouldEmitMoves(false),
-    moveTypeModule(AsmPrinter::CFI_M_None) {}
+  : EHStreamer(A), shouldEmitPersonality(false), shouldEmitLSDA(false),
+    shouldEmitMoves(false), moveTypeModule(AsmPrinter::CFI_M_None) {}
 
 DwarfCFIException::~DwarfCFIException() {}
 
@@ -59,7 +58,7 @@ void DwarfCFIException::endModule() {
 
   unsigned PerEncoding = TLOF.getPersonalityEncoding();
 
-  if ((PerEncoding & 0x70) != dwarf::DW_EH_PE_pcrel)
+  if ((PerEncoding & 0x80) != dwarf::DW_EH_PE_indirect)
     return;
 
   // Emit references to all used personality functions
@@ -153,5 +152,5 @@ void DwarfCFIException::endFunction(const MachineFunction *) {
   // Map all labels and get rid of any dead landing pads.
   MMI->TidyLandingPads();
 
-  EmitExceptionTable();
+  emitExceptionTable();
 }

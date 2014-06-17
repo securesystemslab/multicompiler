@@ -387,7 +387,8 @@ Fine grained debug info with ``DEBUG_TYPE`` and the ``-debug-only`` option
 Sometimes you may find yourself in a situation where enabling ``-debug`` just
 turns on **too much** information (such as when working on the code generator).
 If you want to enable debug information with more fine-grained control, you
-define the ``DEBUG_TYPE`` macro and the ``-debug`` only option as follows:
+can define the ``DEBUG_TYPE`` macro and use the ``-debug-only`` option as
+follows:
 
 .. code-block:: c++
 
@@ -545,14 +546,15 @@ methods.  Within GDB, for example, you can usually use something like ``call
 DAG.viewGraph()`` to pop up a window.  Alternatively, you can sprinkle calls to
 these functions in your code in places you want to debug.
 
-Getting this to work requires a small amount of configuration.  On Unix systems
+Getting this to work requires a small amount of setup.  On Unix systems
 with X11, install the `graphviz <http://www.graphviz.org>`_ toolkit, and make
 sure 'dot' and 'gv' are in your path.  If you are running on Mac OS X, download
 and install the Mac OS X `Graphviz program
 <http://www.pixelglow.com/graphviz/>`_ and add
 ``/Applications/Graphviz.app/Contents/MacOS/`` (or wherever you install it) to
-your path.  Once in your system and path are set up, rerun the LLVM configure
-script and rebuild LLVM to enable this functionality.
+your path. The programs need not be present when configuring, building or
+running LLVM and can simply be installed when needed during an active debug
+session.
 
 ``SelectionDAG`` has been extended to make it easier to locate *interesting*
 nodes in large complex graphs.  From gdb, if you ``call DAG.setGraphColor(node,
@@ -1916,7 +1918,7 @@ which is a pointer to an integer on the run time stack.
 
 *Inserting instructions*
 
-There are essentially two ways to insert an ``Instruction`` into an existing
+There are essentially three ways to insert an ``Instruction`` into an existing
 sequence of instructions that form a ``BasicBlock``:
 
 * Insertion into an explicit instruction list
@@ -1985,6 +1987,41 @@ sequence of instructions that form a ``BasicBlock``:
 
   which is much cleaner, especially if you're creating a lot of instructions and
   adding them to ``BasicBlock``\ s.
+
+* Insertion using an instance of ``IRBuilder``
+
+  Inserting several ``Instruction``\ s can be quite laborious using the previous
+  methods. The ``IRBuilder`` is a convenience class that can be used to add
+  several instructions to the end of a ``BasicBlock`` or before a particular
+  ``Instruction``. It also supports constant folding and renaming named
+  registers (see ``IRBuilder``'s template arguments).
+
+  The example below demonstrates a very simple use of the ``IRBuilder`` where
+  three instructions are inserted before the instruction ``pi``. The first two
+  instructions are Call instructions and third instruction multiplies the return
+  value of the two calls.
+
+  .. code-block:: c++
+
+    Instruction *pi = ...;
+    IRBuilder<> Builder(pi);
+    CallInst* callOne = Builder.CreateCall(...);
+    CallInst* callTwo = Builder.CreateCall(...);
+    Value* result = Builder.CreateMul(callOne, callTwo);
+
+  The example below is similar to the above example except that the created
+  ``IRBuilder`` inserts instructions at the end of the ``BasicBlock`` ``pb``.
+
+  .. code-block:: c++
+
+    BasicBlock *pb = ...;
+    IRBuilder<> Builder(pb);
+    CallInst* callOne = Builder.CreateCall(...);
+    CallInst* callTwo = Builder.CreateCall(...);
+    Value* result = Builder.CreateMul(callOne, callTwo);
+
+  See :doc:`tutorial/LangImpl3` for a practical use of the ``IRBuilder``.
+
 
 .. _schanges_deleting:
 

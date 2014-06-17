@@ -17,9 +17,9 @@
 
 using namespace llvm;
 
-AMDGPURegisterInfo::AMDGPURegisterInfo(TargetMachine &tm)
+AMDGPURegisterInfo::AMDGPURegisterInfo(const AMDGPUSubtarget &st)
 : AMDGPUGenRegisterInfo(0),
-  TM(tm)
+  ST(st)
   { }
 
 //===----------------------------------------------------------------------===//
@@ -54,7 +54,7 @@ unsigned AMDGPURegisterInfo::getSubRegFromChannel(unsigned Channel) const {
     AMDGPU::sub15
   };
 
-  assert (Channel < array_lengthof(SubRegs));
+  assert(Channel < array_lengthof(SubRegs));
   return SubRegs[Channel];
 }
 

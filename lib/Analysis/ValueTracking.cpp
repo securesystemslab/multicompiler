@@ -16,6 +16,7 @@
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/Analysis/InstructionSimplify.h"
 #include "llvm/Analysis/MemoryBuiltins.h"
+#include "llvm/IR/CallSite.h"
 #include "llvm/IR/ConstantRange.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DataLayout.h"
@@ -2065,13 +2066,17 @@ bool llvm::isKnownNonNull(const Value *V, const TargetLibraryInfo *TLI) {
   // Alloca never returns null, malloc might.
   if (isa<AllocaInst>(V)) return true;
 
-  // A byval or inalloca argument is never null.
+  // A byval, inalloca, or nonnull argument is never null.
   if (const Argument *A = dyn_cast<Argument>(V))
-    return A->hasByValOrInAllocaAttr();
+    return A->hasByValOrInAllocaAttr() || A->hasNonNullAttr();
 
   // Global values are not null unless extern weak.
   if (const GlobalValue *GV = dyn_cast<GlobalValue>(V))
     return !GV->hasExternalWeakLinkage();
+
+  if (ImmutableCallSite CS = V)
+    if (CS.paramHasAttr(0, Attribute::NonNull))
+      return true;
 
   // operator new never returns null.
   if (isOperatorNewLikeFn(V, TLI, /*LookThroughBitCast=*/true))

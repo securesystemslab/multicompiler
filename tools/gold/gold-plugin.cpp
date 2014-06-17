@@ -21,13 +21,13 @@
 #include "llvm/Support/Path.h"
 #include "llvm/Support/Program.h"
 #include "llvm/Support/ToolOutputFile.h"
-#include "llvm/Support/system_error.h"
 #include <cerrno>
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
 #include <list>
 #include <plugin-api.h>
+#include <system_error>
 #include <vector>
 
 // Support Windows/MinGW crazyness.
@@ -258,7 +258,7 @@ static ld_plugin_status claim_file_hook(const ld_plugin_input_file *file,
     if (file->offset) {
       offset = file->offset;
     }
-    if (error_code ec = MemoryBuffer::getOpenFileSlice(
+    if (std::error_code ec = MemoryBuffer::getOpenFileSlice(
             file->fd, file->name, buffer, file->filesize, offset)) {
       (*message)(LDPL_ERROR, ec.message().c_str());
       return LDPS_ERR;
@@ -484,7 +484,7 @@ static ld_plugin_status all_symbols_read_hook(void) {
 
 static ld_plugin_status cleanup_hook(void) {
   for (int i = 0, e = Cleanup.size(); i != e; ++i) {
-    error_code EC = sys::fs::remove(Cleanup[i]);
+    std::error_code EC = sys::fs::remove(Cleanup[i]);
     if (EC)
       (*message)(LDPL_ERROR, "Failed to delete '%s': %s", Cleanup[i].c_str(),
                  EC.message().c_str());

@@ -38,13 +38,12 @@ using namespace llvm;
 
 static inline Type *checkType(Type *Ty) {
   assert(Ty && "Value defined with a null type: Error!");
-  return const_cast<Type*>(Ty);
+  return Ty;
 }
 
 Value::Value(Type *ty, unsigned scid)
-  : SubclassID(scid), HasValueHandle(0),
-    SubclassOptionalData(0), SubclassData(0), VTy((Type*)checkType(ty)),
-    UseList(nullptr), Name(nullptr) {
+    : VTy(checkType(ty)), UseList(nullptr), Name(nullptr), SubclassID(scid),
+      HasValueHandle(0), SubclassOptionalData(0), SubclassData(0) {
   // FIXME: Why isn't this in the subclass gunk??
   // Note, we cannot call isa<CallInst> before the CallInst has been
   // constructed.
@@ -214,7 +213,7 @@ void Value::setName(const Twine &NewName) {
     // then reallocated.
 
     // Create the new name.
-    Name = ValueName::Create(NameRef.begin(), NameRef.end());
+    Name = ValueName::Create(NameRef);
     Name->setValue(this);
     return;
   }
@@ -351,7 +350,7 @@ void Value::replaceAllUsesWith(Value *New) {
     Use &U = *UseList;
     // Must handle Constants specially, we cannot call replaceUsesOfWith on a
     // constant because they are uniqued.
-    if (Constant *C = dyn_cast<Constant>(U.getUser())) {
+    if (auto *C = dyn_cast<Constant>(U.getUser())) {
       if (!isa<GlobalValue>(C)) {
         C->replaceUsesOfWithOnConstant(this, New, &U);
         continue;

@@ -742,38 +742,30 @@ public:
 
 } // end anonymous namespace
 
-static unsigned CountNumOperands(StringRef AsmString) {
-  unsigned NumOps = 0;
-  std::pair<StringRef, StringRef> ASM = AsmString.split(' ');
+static unsigned CountNumOperands(StringRef AsmString, unsigned Variant) {
+  std::string FlatAsmString =
+      CodeGenInstruction::FlattenAsmStringVariants(AsmString, Variant);
+  AsmString = FlatAsmString;
 
-  while (!ASM.second.empty()) {
-    ++NumOps;
-    ASM = ASM.second.split(' ');
-  }
-
-  return NumOps;
+  return AsmString.count(' ') + AsmString.count('\t');
 }
 
-static unsigned CountResultNumOperands(StringRef AsmString) {
-  unsigned NumOps = 0;
-  std::pair<StringRef, StringRef> ASM = AsmString.split('\t');
+namespace {
+struct AliasPriorityComparator {
+  typedef std::pair<CodeGenInstAlias *, int> ValueType;
+  bool operator()(const ValueType &LHS, const ValueType &RHS) {
+    if (LHS.second ==  RHS.second) {
+      // We don't actually care about the order, but for consistency it
+      // shouldn't depend on pointer comparisons.
+      return LHS.first->TheDef->getName() < RHS.first->TheDef->getName();
+    }
 
-  if (!ASM.second.empty()) {
-    size_t I = ASM.second.find('{');
-    StringRef Str = ASM.second;
-    if (I != StringRef::npos)
-      Str = ASM.second.substr(I, ASM.second.find('|', I));
-
-    ASM = Str.split(' ');
-
-    do {
-      ++NumOps;
-      ASM = ASM.second.split(' ');
-    } while (!ASM.second.empty());
+    // Aliases with larger priorities should be considered first.
+    return LHS.second > RHS.second;
   }
-
-  return NumOps;
+};
 }
+
 
 void AsmWriterEmitter::EmitPrintAliasInstruction(raw_ostream &O) {
   Record *AsmWriter = Target.getAsmWriter();
@@ -787,41 +779,46 @@ void AsmWriterEmitter::EmitPrintAliasInstruction(raw_ostream &O) {
 
   // Emit the method that prints the alias instruction.
   std::string ClassName = AsmWriter->getValueAsString("AsmWriterClassName");
+  unsigned Variant = AsmWriter->getValueAsInt("Variant");
 
   std::vector<Record*> AllInstAliases =
     Records.getAllDerivedDefinitions("InstAlias");
 
   // Create a map from the qualified name to a list of potential matches.
-  std::map<std::string, std::vector<CodeGenInstAlias*> > AliasMap;
-  unsigned Variant = AsmWriter->getValueAsInt("Variant");
+  typedef std::set<std::pair<CodeGenInstAlias*, int>, AliasPriorityComparator>
+      AliasWithPriority;
+  std::map<std::string, AliasWithPriority> AliasMap;
   for (std::vector<Record*>::iterator
          I = AllInstAliases.begin(), E = AllInstAliases.end(); I != E; ++I) {
     CodeGenInstAlias *Alias = new CodeGenInstAlias(*I, Variant, Target);
     const Record *R = *I;
-    if (!R->getValueAsBit("EmitAlias"))
-      continue; // We were told not to emit the alias, but to emit the aliasee.
+    int Priority = R->getValueAsInt("EmitPriority");
+    if (Priority < 1)
+      continue; // Aliases with priority 0 are never emitted.
+
     const DagInit *DI = R->getValueAsDag("ResultInst");
     const DefInit *Op = cast<DefInit>(DI->getOperator());
-    AliasMap[getQualifiedName(Op->getDef())].push_back(Alias);
+    AliasMap[getQualifiedName(Op->getDef())].insert(std::make_pair(Alias,
+                                                                   Priority));
   }
 
   // A map of which conditions need to be met for each instruction operand
   // before it can be matched to the mnemonic.
   std::map<std::string, std::vector<IAPrinter*> > IAPrinterMap;
 
-  for (std::map<std::string, std::vector<CodeGenInstAlias*> >::iterator
-         I = AliasMap.begin(), E = AliasMap.end(); I != E; ++I) {
-    std::vector<CodeGenInstAlias*> &Aliases = I->second;
+  // A list of MCOperandPredicates for all operands in use, and the reverse map
+  std::vector<const Record*> MCOpPredicates;
+  DenseMap<const Record*, unsigned> MCOpPredicateMap;
 
-    for (std::vector<CodeGenInstAlias*>::iterator
-           II = Aliases.begin(), IE = Aliases.end(); II != IE; ++II) {
-      const CodeGenInstAlias *CGA = *II;
+  for (auto &Aliases : AliasMap) {
+    for (auto &Alias : Aliases.second) {
+      const CodeGenInstAlias *CGA = Alias.first;
       unsigned LastOpNo = CGA->ResultInstOperandIndex.size();
       unsigned NumResultOps =
-        CountResultNumOperands(CGA->ResultInst->AsmString);
+        CountNumOperands(CGA->ResultInst->AsmString, Variant);
 
       // Don't emit the alias if it has more operands than what it's aliasing.
-      if (NumResultOps < CountNumOperands(CGA->AsmString))
+      if (NumResultOps < CountNumOperands(CGA->AsmString, Variant))
         continue;
 
       IAPrinter *IAP = new IAPrinter(CGA->Result->getAsString(),
@@ -839,6 +836,8 @@ void AsmWriterEmitter::EmitPrintAliasInstruction(raw_ostream &O) {
 
       unsigned MIOpNum = 0;
       for (unsigned i = 0, e = LastOpNo; i != e; ++i) {
+        std::string Op = "MI->getOperand(" + llvm::utostr(MIOpNum) + ")";
+
         const CodeGenInstAlias::ResultOperand &RO = CGA->ResultOperands[i];
 
         switch (RO.Kind) {
@@ -865,9 +864,7 @@ void AsmWriterEmitter::EmitPrintAliasInstruction(raw_ostream &O) {
           if (Rec->isSubClassOf("RegisterOperand"))
             Rec = Rec->getValueAsDef("RegClass");
           if (Rec->isSubClassOf("RegisterClass")) {
-            Cond = std::string("MI->getOperand(") + llvm::utostr(MIOpNum) +
-                   ").isReg()";
-            IAP->addCond(Cond);
+            IAP->addCond(Op + ".isReg()");
 
             if (!IAP->isOpMapped(ROName)) {
               IAP->addOperand(ROName, MIOpNum, PrintMethodIdx);
@@ -876,26 +873,34 @@ void AsmWriterEmitter::EmitPrintAliasInstruction(raw_ostream &O) {
                 R = R->getValueAsDef("RegClass");
               Cond = std::string("MRI.getRegClass(") + Target.getName() + "::" +
                      R->getName() + "RegClassID)"
-                                    ".contains(MI->getOperand(" +
-                     llvm::utostr(MIOpNum) + ").getReg())";
-              IAP->addCond(Cond);
+                                    ".contains(" + Op + ".getReg())";
             } else {
-              Cond = std::string("MI->getOperand(") +
-                llvm::utostr(MIOpNum) + ").getReg() == MI->getOperand(" +
+              Cond = Op + ".getReg() == MI->getOperand(" +
                 llvm::utostr(IAP->getOpIndex(ROName)) + ").getReg()";
-              IAP->addCond(Cond);
             }
           } else {
             // Assume all printable operands are desired for now. This can be
             // overridden in the InstAlias instantiation if necessary.
             IAP->addOperand(ROName, MIOpNum, PrintMethodIdx);
-          }
 
+            // There might be an additional predicate on the MCOperand
+            unsigned Entry = MCOpPredicateMap[Rec];
+            if (!Entry) {
+              if (!Rec->isValueUnset("MCOperandPredicate")) {
+                MCOpPredicates.push_back(Rec);
+                Entry = MCOpPredicates.size();
+                MCOpPredicateMap[Rec] = Entry;
+              } else
+                break; // No conditions on this operand at all
+            }
+            Cond = Target.getName() + ClassName + "ValidateMCOperand(" +
+                   Op + ", " + llvm::utostr(Entry) + ")";
+          }
+          // for all subcases of ResultOperand::K_Record:
+          IAP->addCond(Cond);
           break;
         }
         case CodeGenInstAlias::ResultOperand::K_Imm: {
-          std::string Op = "MI->getOperand(" + llvm::utostr(MIOpNum) + ")";
-
           // Just because the alias has an immediate result, doesn't mean the
           // MCInst will. An MCExpr could be present, for example.
           IAP->addCond(Op + ".isImm()");
@@ -913,8 +918,7 @@ void AsmWriterEmitter::EmitPrintAliasInstruction(raw_ostream &O) {
             break;
           }
 
-          Cond = std::string("MI->getOperand(") +
-            llvm::utostr(MIOpNum) + ").getReg() == " + Target.getName() +
+          Cond = Op + ".getReg() == " + Target.getName() +
             "::" + CGA->ResultOperands[i].getRegister()->getName();
           IAP->addCond(Cond);
           break;
@@ -925,7 +929,7 @@ void AsmWriterEmitter::EmitPrintAliasInstruction(raw_ostream &O) {
       }
 
       if (CantHandle) continue;
-      IAPrinterMap[I->first].push_back(IAP);
+      IAPrinterMap[Aliases.first].push_back(IAP);
     }
   }
 
@@ -987,6 +991,11 @@ void AsmWriterEmitter::EmitPrintAliasInstruction(raw_ostream &O) {
     return;
   }
 
+  if (MCOpPredicates.size())
+    O << "static bool " << Target.getName() << ClassName
+      << "ValidateMCOperand(\n"
+      << "       const MCOperand &MCOp, unsigned PredicateIndex);\n";
+
   O << HeaderO.str();
   O.indent(2) << "const char *AsmString;\n";
   O.indent(2) << "switch (MI->getOpcode()) {\n";
@@ -1047,6 +1056,28 @@ void AsmWriterEmitter::EmitPrintAliasInstruction(raw_ostream &O) {
     O << "  }\n";
   }    
   O << "}\n\n";
+
+  if (MCOpPredicates.size()) {
+    O << "static bool " << Target.getName() << ClassName
+      << "ValidateMCOperand(\n"
+      << "       const MCOperand &MCOp, unsigned PredicateIndex) {\n"
+      << "  switch (PredicateIndex) {\n"
+      << "  default:\n"
+      << "    llvm_unreachable(\"Unknown MCOperandPredicate kind\");\n"
+      << "    break;\n";
+
+    for (unsigned i = 0; i < MCOpPredicates.size(); ++i) {
+      Init *MCOpPred = MCOpPredicates[i]->getValueInit("MCOperandPredicate");
+      if (StringInit *SI = dyn_cast<StringInit>(MCOpPred)) {
+        O << "  case " << i + 1 << ": {\n"
+          << SI->getValue() << "\n"
+          << "    }\n";
+      } else
+        llvm_unreachable("Unexpected MCOperandPredicate field!");
+    }
+    O << "  }\n"
+      << "}\n\n";
+  }
 
   O << "#endif // PRINT_ALIAS_INSTR\n";
 }

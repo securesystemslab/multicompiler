@@ -23,10 +23,9 @@
 #include "llvm/IR/Metadata.h"
 #include "llvm/Support/CBindingWrapping.h"
 #include "llvm/Support/DataTypes.h"
-#include "llvm/Support/system_error.h"
+#include <system_error>
 
 namespace llvm {
-
 class FunctionType;
 class GVMaterializer;
 class LLVMContext;
@@ -298,10 +297,6 @@ public:
   /// registered in this LLVMContext.
   void getMDKindNames(SmallVectorImpl<StringRef> &Result) const;
 
-
-  typedef DenseMap<StructType*, unsigned, DenseMapInfo<StructType*> >
-                   NumeredTypesMapTy;
-
   /// Return the type with the specified name, or null if there is none by that
   /// name.
   StructType *getTypeByName(StringRef Name) const;
@@ -458,12 +453,12 @@ public:
   void Dematerialize(GlobalValue *GV);
 
   /// Make sure all GlobalValues in this Module are fully read.
-  error_code materializeAll();
+  std::error_code materializeAll();
 
   /// Make sure all GlobalValues in this Module are fully read and clear the
   /// Materializer. If the module is corrupt, this DOES NOT clear the old
   /// Materializer.
-  error_code materializeAllPermanently();
+  std::error_code materializeAllPermanently();
 
 /// @}
 /// @name Direct access to the globals list, functions list, and symbol table

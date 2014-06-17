@@ -25,25 +25,17 @@
 
 namespace llvm {
 
-class AMDGPUTargetMachine;
+class AMDGPUSubtarget;
 class TargetInstrInfo;
 
 struct AMDGPURegisterInfo : public AMDGPUGenRegisterInfo {
-  TargetMachine &TM;
   static const MCPhysReg CalleeSavedReg;
+  const AMDGPUSubtarget &ST;
 
-  AMDGPURegisterInfo(TargetMachine &tm);
+  AMDGPURegisterInfo(const AMDGPUSubtarget &st);
 
   BitVector getReservedRegs(const MachineFunction &MF) const override {
     assert(!"Unimplemented");  return BitVector();
-  }
-
-  /// \param RC is an AMDIL reg class.
-  ///
-  /// \returns The ISA reg class that is equivalent to \p RC.
-  virtual const TargetRegisterClass * getISARegClass(
-                                         const TargetRegisterClass * RC) const {
-    assert(!"Unimplemented"); return nullptr;
   }
 
   virtual const TargetRegisterClass* getCFGStructurizerRegClass(MVT VT) const {

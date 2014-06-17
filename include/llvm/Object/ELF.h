@@ -133,6 +133,7 @@ public:
   typedef Elf_Vernaux_Impl<ELFT> Elf_Vernaux;
   typedef Elf_Versym_Impl<ELFT> Elf_Versym;
   typedef ELFEntityIterator<const Elf_Dyn> Elf_Dyn_Iter;
+  typedef iterator_range<Elf_Dyn_Iter> Elf_Dyn_Range;
   typedef ELFEntityIterator<const Elf_Rela> Elf_Rela_Iter;
   typedef ELFEntityIterator<const Elf_Rel> Elf_Rel_Iter;
   typedef ELFEntityIterator<const Elf_Shdr> Elf_Shdr_Iter;
@@ -316,7 +317,7 @@ public:
   std::pair<const Elf_Shdr *, const Elf_Sym *>
   getRelocationSymbol(const Elf_Shdr *RelSec, const RelT *Rel) const;
 
-  ELFFile(MemoryBuffer *Object, error_code &ec);
+  ELFFile(MemoryBuffer *Object, std::error_code &ec);
 
   bool isMipsELF64() const {
     return Header->e_machine == ELF::EM_MIPS &&
@@ -342,6 +343,9 @@ public:
   /// \param NULLEnd use one past the first DT_NULL entry as the end instead of
   /// the section size.
   Elf_Dyn_Iter end_dynamic_table(bool NULLEnd = false) const;
+  Elf_Dyn_Range dynamic_table(bool NULLEnd = false) const {
+    return make_range(begin_dynamic_table(), end_dynamic_table(NULLEnd));
+  }
 
   Elf_Sym_Iter begin_dynamic_symbols() const {
     if (DynSymRegion.Addr)
@@ -617,16 +621,11 @@ typename ELFFile<ELFT>::uintX_t ELFFile<ELFT>::getStringTableIndex() const {
 }
 
 template <class ELFT>
-ELFFile<ELFT>::ELFFile(MemoryBuffer *Object, error_code &ec)
-    : Buf(Object),
-      SectionHeaderTable(nullptr),
-      dot_shstrtab_sec(nullptr),
-      dot_strtab_sec(nullptr),
-      dot_symtab_sec(nullptr),
-      SymbolTableSectionHeaderIndex(nullptr),
-      dot_gnu_version_sec(nullptr),
-      dot_gnu_version_r_sec(nullptr),
-      dot_gnu_version_d_sec(nullptr),
+ELFFile<ELFT>::ELFFile(MemoryBuffer *Object, std::error_code &ec)
+    : Buf(Object), SectionHeaderTable(nullptr), dot_shstrtab_sec(nullptr),
+      dot_strtab_sec(nullptr), dot_symtab_sec(nullptr),
+      SymbolTableSectionHeaderIndex(nullptr), dot_gnu_version_sec(nullptr),
+      dot_gnu_version_r_sec(nullptr), dot_gnu_version_d_sec(nullptr),
       dt_soname(nullptr) {
   const uint64_t FileSize = Buf->getBufferSize();
 
@@ -744,7 +743,7 @@ ELFFile<ELFT>::ELFFile(MemoryBuffer *Object, error_code &ec)
     }
   }
 
-  ec = error_code::success();
+  ec = std::error_code();
 }
 
 // Get the symbol table index in the symtab section given a symbol
@@ -823,17 +822,13 @@ ELFFile<ELFT>::end_dynamic_table(bool NULLEnd) const {
 template <class ELFT>
 StringRef ELFFile<ELFT>::getLoadName() const {
   if (!dt_soname) {
+    dt_soname = "";
     // Find the DT_SONAME entry
-    Elf_Dyn_Iter it = begin_dynamic_table();
-    Elf_Dyn_Iter ie = end_dynamic_table();
-    while (it != ie && it->getTag() != ELF::DT_SONAME)
-      ++it;
-
-    if (it != ie) {
-      dt_soname = getDynamicString(it->getVal());
-    } else {
-      dt_soname = "";
-    }
+    for (const auto &Entry : dynamic_table())
+      if (Entry.getTag() == ELF::DT_SONAME) {
+        dt_soname = getDynamicString(Entry.getVal());
+        break;
+      }
   }
   return dt_soname;
 }

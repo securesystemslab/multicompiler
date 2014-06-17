@@ -19,8 +19,8 @@
 #include "llvm/Support/Format.h"
 #include "llvm/Support/MemoryObject.h"
 #include "llvm/Support/Path.h"
-#include "llvm/Support/system_error.h"
 #include <algorithm>
+#include <system_error>
 using namespace llvm;
 
 //===----------------------------------------------------------------------===//
@@ -438,7 +438,7 @@ class LineConsumer {
   StringRef Remaining;
 public:
   LineConsumer(StringRef Filename) {
-    if (error_code EC = MemoryBuffer::getFileOrSTDIN(Filename, Buffer)) {
+    if (std::error_code EC = MemoryBuffer::getFileOrSTDIN(Filename, Buffer)) {
       errs() << Filename << ": " << EC.message() << "\n";
       Remaining = "";
     } else

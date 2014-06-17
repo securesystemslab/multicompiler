@@ -22,10 +22,10 @@
 #include "llvm/Support/Format.h"
 #include "llvm/Support/Process.h"
 #include "llvm/Support/Program.h"
-#include "llvm/Support/system_error.h"
 #include <cctype>
 #include <cerrno>
 #include <sys/stat.h>
+#include <system_error>
 
 // <fcntl.h> may provide O_BINARY.
 #if defined(HAVE_FCNTL_H)
@@ -450,7 +450,7 @@ raw_fd_ostream::raw_fd_ostream(const char *Filename, std::string &ErrorInfo,
     return;
   }
 
-  error_code EC = sys::fs::openFileForWrite(Filename, FD, Flags);
+  std::error_code EC = sys::fs::openFileForWrite(Filename, FD, Flags);
 
   if (EC) {
     ErrorInfo = "Error opening output file '" + std::string(Filename) + "': " +

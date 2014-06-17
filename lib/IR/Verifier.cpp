@@ -241,6 +241,9 @@ private:
   void visitGlobalValue(const GlobalValue &GV);
   void visitGlobalVariable(const GlobalVariable &GV);
   void visitGlobalAlias(const GlobalAlias &GA);
+  void visitAliaseeSubExpr(const GlobalAlias &A, const Constant &C);
+  void visitAliaseeSubExpr(SmallPtrSet<const GlobalAlias *, 4> &Visited,
+                           const GlobalAlias &A, const Constant &C);
   void visitNamedMDNode(const NamedMDNode &NMD);
   void visitMDNode(MDNode &MD, Function *F);
   void visitModuleIdents(const Module &M);
@@ -396,14 +399,22 @@ void Verifier::visitGlobalVariable(const GlobalVariable &GV) {
             "invalid linkage for intrinsic global variable", &GV);
     // Don't worry about emitting an error for it not being an array,
     // visitGlobalValue will complain on appending non-array.
-    if (ArrayType *ATy = dyn_cast<ArrayType>(GV.getType())) {
+    if (ArrayType *ATy = dyn_cast<ArrayType>(GV.getType()->getElementType())) {
       StructType *STy = dyn_cast<StructType>(ATy->getElementType());
       PointerType *FuncPtrTy =
           FunctionType::get(Type::getVoidTy(*Context), false)->getPointerTo();
-      Assert1(STy && STy->getNumElements() == 2 &&
+      // FIXME: Reject the 2-field form in LLVM 4.0.
+      Assert1(STy && (STy->getNumElements() == 2 ||
+                      STy->getNumElements() == 3) &&
               STy->getTypeAtIndex(0u)->isIntegerTy(32) &&
               STy->getTypeAtIndex(1) == FuncPtrTy,
               "wrong type for intrinsic global variable", &GV);
+      if (STy->getNumElements() == 3) {
+        Type *ETy = STy->getTypeAtIndex(2);
+        Assert1(ETy->isPointerTy() &&
+                    cast<PointerType>(ETy)->getElementType()->isIntegerTy(8),
+                "wrong type for intrinsic global variable", &GV);
+      }
     }
   }
 
@@ -466,49 +477,55 @@ void Verifier::visitGlobalVariable(const GlobalVariable &GV) {
   visitGlobalValue(GV);
 }
 
+void Verifier::visitAliaseeSubExpr(const GlobalAlias &GA, const Constant &C) {
+  SmallPtrSet<const GlobalAlias*, 4> Visited;
+  Visited.insert(&GA);
+  visitAliaseeSubExpr(Visited, GA, C);
+}
+
+void Verifier::visitAliaseeSubExpr(SmallPtrSet<const GlobalAlias *, 4> &Visited,
+                                   const GlobalAlias &GA, const Constant &C) {
+  if (const auto *GV = dyn_cast<GlobalValue>(&C)) {
+    Assert1(!GV->isDeclaration(), "Alias must point to a definition", &GA);
+
+    if (const auto *GA2 = dyn_cast<GlobalAlias>(GV)) {
+      Assert1(Visited.insert(GA2), "Aliases cannot form a cycle", &GA);
+
+      Assert1(!GA2->mayBeOverridden(), "Alias cannot point to a weak alias",
+              &GA);
+    } else {
+      // Only continue verifying subexpressions of GlobalAliases.
+      // Do not recurse into global initializers.
+      return;
+    }
+  }
+
+  if (const auto *CE = dyn_cast<ConstantExpr>(&C))
+    VerifyConstantExprBitcastType(CE);
+
+  for (const Use &U : C.operands()) {
+    Value *V = &*U;
+    if (const auto *GA2 = dyn_cast<GlobalAlias>(V))
+      visitAliaseeSubExpr(Visited, GA, *GA2->getAliasee());
+    else if (const auto *C2 = dyn_cast<Constant>(V))
+      visitAliaseeSubExpr(Visited, GA, *C2);
+  }
+}
+
 void Verifier::visitGlobalAlias(const GlobalAlias &GA) {
   Assert1(!GA.getName().empty(),
           "Alias name cannot be empty!", &GA);
   Assert1(GlobalAlias::isValidLinkage(GA.getLinkage()),
           "Alias should have external or external weak linkage!", &GA);
-  Assert1(GA.getAliasee(),
-          "Aliasee cannot be NULL!", &GA);
-  Assert1(GA.getType() == GA.getAliasee()->getType(),
-          "Alias and aliasee types should match!", &GA);
-  Assert1(!GA.hasUnnamedAddr(), "Alias cannot have unnamed_addr!", &GA);
-
   const Constant *Aliasee = GA.getAliasee();
-  const GlobalValue *GV = dyn_cast<GlobalValue>(Aliasee);
+  Assert1(Aliasee, "Aliasee cannot be NULL!", &GA);
+  Assert1(GA.getType() == Aliasee->getType(),
+          "Alias and aliasee types should match!", &GA);
 
-  if (!GV) {
-    const ConstantExpr *CE = dyn_cast<ConstantExpr>(Aliasee);
-    if (CE && (CE->getOpcode() == Instruction::BitCast ||
-               CE->getOpcode() == Instruction::AddrSpaceCast ||
-               CE->getOpcode() == Instruction::GetElementPtr))
-      GV = dyn_cast<GlobalValue>(CE->getOperand(0));
+  Assert1(isa<GlobalValue>(Aliasee) || isa<ConstantExpr>(Aliasee),
+          "Aliasee should be either GlobalValue or ConstantExpr", &GA);
 
-    Assert1(GV, "Aliasee should be either GlobalValue, bitcast or "
-                "addrspacecast of GlobalValue",
-            &GA);
-
-    if (CE->getOpcode() == Instruction::BitCast) {
-      unsigned SrcAS = GV->getType()->getPointerAddressSpace();
-      unsigned DstAS = CE->getType()->getPointerAddressSpace();
-
-      Assert1(SrcAS == DstAS,
-              "Alias bitcasts cannot be between different address spaces",
-              &GA);
-    }
-  }
-  Assert1(!GV->isDeclaration(), "Alias must point to a definition", &GA);
-  if (const GlobalAlias *GAAliasee = dyn_cast<GlobalAlias>(GV)) {
-    Assert1(!GAAliasee->mayBeOverridden(), "Alias cannot point to a weak alias",
-            &GA);
-  }
-
-  const GlobalValue *AG = GA.getAliasedGlobal();
-  Assert1(AG, "Aliasing chain should end with function or global variable",
-          &GA);
+  visitAliaseeSubExpr(GA, *Aliasee);
 
   visitGlobalValue(GA);
 }
@@ -721,7 +738,8 @@ void Verifier::VerifyAttributeTypes(AttributeSet Attrs, unsigned Idx,
         I->getKindAsEnum() == Attribute::Builtin ||
         I->getKindAsEnum() == Attribute::NoBuiltin ||
         I->getKindAsEnum() == Attribute::Cold ||
-        I->getKindAsEnum() == Attribute::OptimizeNone) {
+        I->getKindAsEnum() == Attribute::OptimizeNone ||
+        I->getKindAsEnum() == Attribute::JumpTable) {
       if (!isFunction) {
         CheckFailed("Attribute '" + I->getAsString() +
                     "' only applies to functions!", V);
@@ -894,6 +912,14 @@ void Verifier::VerifyFunctionAttrs(FunctionType *FT, AttributeSet Attrs,
     Assert1(!Attrs.hasAttribute(AttributeSet::FunctionIndex,
                                 Attribute::MinSize),
             "Attributes 'minsize and optnone' are incompatible!", V);
+  }
+
+  if (Attrs.hasAttribute(AttributeSet::FunctionIndex,
+                         Attribute::JumpTable)) {
+    const GlobalValue *GV = cast<GlobalValue>(V);
+    Assert1(GV->hasUnnamedAddr(),
+            "Attribute 'jumptable' requires 'unnamed_addr'", V);
+
   }
 }
 
@@ -1567,6 +1593,20 @@ static bool isTypeCongruent(Type *L, Type *R) {
   return PL->getAddressSpace() == PR->getAddressSpace();
 }
 
+static AttrBuilder getParameterABIAttributes(int I, AttributeSet Attrs) {
+  static const Attribute::AttrKind ABIAttrs[] = {
+      Attribute::StructRet, Attribute::ByVal, Attribute::InAlloca,
+      Attribute::InReg, Attribute::Returned};
+  AttrBuilder Copy;
+  for (auto AK : ABIAttrs) {
+    if (Attrs.hasAttribute(I + 1, AK))
+      Copy.addAttribute(AK);
+  }
+  if (Attrs.hasAttribute(I + 1, Attribute::Alignment))
+    Copy.addAlignmentAttr(Attrs.getParamAlignment(I + 1));
+  return Copy;
+}
+
 void Verifier::verifyMustTailCall(CallInst &CI) {
   Assert1(!CI.isInlineAsm(), "cannot use musttail call with inline asm", &CI);
 
@@ -1598,20 +1638,11 @@ void Verifier::verifyMustTailCall(CallInst &CI) {
 
   // - All ABI-impacting function attributes, such as sret, byval, inreg,
   //   returned, and inalloca, must match.
-  static const Attribute::AttrKind ABIAttrs[] = {
-      Attribute::Alignment, Attribute::StructRet, Attribute::ByVal,
-      Attribute::InAlloca,  Attribute::InReg,     Attribute::Returned};
   AttributeSet CallerAttrs = F->getAttributes();
   AttributeSet CalleeAttrs = CI.getAttributes();
   for (int I = 0, E = CallerTy->getNumParams(); I != E; ++I) {
-    AttrBuilder CallerABIAttrs;
-    AttrBuilder CalleeABIAttrs;
-    for (auto AK : ABIAttrs) {
-      if (CallerAttrs.hasAttribute(I + 1, AK))
-        CallerABIAttrs.addAttribute(AK);
-      if (CalleeAttrs.hasAttribute(I + 1, AK))
-        CalleeABIAttrs.addAttribute(AK);
-    }
+    AttrBuilder CallerABIAttrs = getParameterABIAttributes(I, CallerAttrs);
+    AttrBuilder CalleeABIAttrs = getParameterABIAttributes(I, CalleeAttrs);
     Assert2(CallerABIAttrs == CalleeABIAttrs,
             "cannot guarantee tail call due to mismatched ABI impacting "
             "function attributes", &CI, CI.getOperand(I));
@@ -2058,8 +2089,7 @@ void Verifier::visitLandingPadInst(LandingPadInst &LPI) {
   Assert1(isa<Constant>(PersonalityFn), "Personality function is not constant!",
           &LPI);
   for (unsigned i = 0, e = LPI.getNumClauses(); i < e; ++i) {
-    Value *Clause = LPI.getClause(i);
-    Assert1(isa<Constant>(Clause), "Clause is not constant!", &LPI);
+    Constant *Clause = LPI.getClause(i);
     if (LPI.isCatch(i)) {
       Assert1(isa<PointerType>(Clause->getType()),
               "Catch operand does not have pointer type!", &LPI);

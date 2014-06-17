@@ -721,7 +721,7 @@ bool ModuleLinker::linkAppendingVarProto(GlobalVariable *DstGV,
     return emitError(
         "Appending variables with different unnamed_addr need to be linked!");
 
-  if (DstGV->getSection() != SrcGV->getSection())
+  if (StringRef(DstGV->getSection()) != SrcGV->getSection())
     return emitError(
           "Appending variables with different section name need to be linked!");
 
@@ -893,6 +893,7 @@ bool ModuleLinker::linkFunctionProto(Function *SF) {
 bool ModuleLinker::linkAliasProto(GlobalAlias *SGA) {
   GlobalValue *DGV = getLinkedToGlobal(SGA);
   llvm::Optional<GlobalValue::VisibilityTypes> NewVisibility;
+  bool HasUnnamedAddr = SGA->hasUnnamedAddr();
 
   if (DGV) {
     GlobalValue::LinkageTypes NewLinkage = GlobalValue::InternalLinkage;
@@ -901,11 +902,13 @@ bool ModuleLinker::linkAliasProto(GlobalAlias *SGA) {
     if (getLinkageResult(DGV, SGA, NewLinkage, NV, LinkFromSrc))
       return true;
     NewVisibility = NV;
+    HasUnnamedAddr = HasUnnamedAddr && DGV->hasUnnamedAddr();
 
     if (!LinkFromSrc) {
       // Set calculated linkage.
       DGV->setLinkage(NewLinkage);
       DGV->setVisibility(*NewVisibility);
+      DGV->setUnnamedAddr(HasUnnamedAddr);
 
       // Make sure to remember this mapping.
       ValueMap[SGA] = ConstantExpr::getBitCast(DGV,TypeMap.get(SGA->getType()));
@@ -919,12 +922,14 @@ bool ModuleLinker::linkAliasProto(GlobalAlias *SGA) {
 
   // If there is no linkage to be performed or we're linking from the source,
   // bring over SGA.
-  GlobalAlias *NewDA = new GlobalAlias(TypeMap.get(SGA->getType()),
-                                       SGA->getLinkage(), SGA->getName(),
-                                       /*aliasee*/nullptr, DstM);
+  auto *PTy = cast<PointerType>(TypeMap.get(SGA->getType()));
+  auto *NewDA =
+      GlobalAlias::create(PTy->getElementType(), PTy->getAddressSpace(),
+                          SGA->getLinkage(), SGA->getName(), DstM);
   copyGVAttributes(NewDA, SGA);
   if (NewVisibility)
     NewDA->setVisibility(*NewVisibility);
+  NewDA->setUnnamedAddr(HasUnnamedAddr);
 
   if (DGV) {
     // Any uses of DGV need to change to NewDA, with cast.
@@ -1024,8 +1029,9 @@ void ModuleLinker::linkAliasBodies() {
       continue;
     if (Constant *Aliasee = I->getAliasee()) {
       GlobalAlias *DA = cast<GlobalAlias>(ValueMap[I]);
-      DA->setAliasee(MapValue(Aliasee, ValueMap, RF_None,
-                              &TypeMap, &ValMaterializer));
+      Constant *Val =
+          MapValue(Aliasee, ValueMap, RF_None, &TypeMap, &ValMaterializer);
+      DA->setAliasee(Val);
     }
   }
 }

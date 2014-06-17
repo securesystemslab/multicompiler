@@ -38,10 +38,10 @@
 #include "llvm/Support/PrettyStackTrace.h"
 #include "llvm/Support/Signals.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/Support/system_error.h"
 #include <algorithm>
 #include <cctype>
 #include <map>
+#include <system_error>
 using namespace llvm;
 
 static cl::opt<std::string>
@@ -480,8 +480,7 @@ static int AnalyzeBitcode() {
   // Read the input file.
   std::unique_ptr<MemoryBuffer> MemBuf;
 
-  if (error_code ec =
-        MemoryBuffer::getFileOrSTDIN(InputFilename, MemBuf))
+  if (std::error_code ec = MemoryBuffer::getFileOrSTDIN(InputFilename, MemBuf))
     return Error("Error reading '" + InputFilename + "': " + ec.message());
 
   if (MemBuf->getBufferSize() & 3)

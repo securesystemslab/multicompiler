@@ -1220,6 +1220,91 @@ Instruction *InstCombiner::visitGetElementPtrInst(GetElementPtrInst &GEP) {
     if (MadeChange) return &GEP;
   }
 
+  // Check to see if the inputs to the PHI node are getelementptr instructions.
+  if (PHINode *PN = dyn_cast<PHINode>(PtrOp)) {
+    GetElementPtrInst *Op1 = dyn_cast<GetElementPtrInst>(PN->getOperand(0));
+    if (!Op1)
+      return nullptr;
+
+    signed DI = -1;
+
+    for (auto I = PN->op_begin()+1, E = PN->op_end(); I !=E; ++I) {
+      GetElementPtrInst *Op2 = dyn_cast<GetElementPtrInst>(*I);
+      if (!Op2 || Op1->getNumOperands() != Op2->getNumOperands())
+        return nullptr;
+
+      // Keep track of the type as we walk the GEP.
+      Type *CurTy = Op1->getOperand(0)->getType()->getScalarType();
+
+      for (unsigned J = 0, F = Op1->getNumOperands(); J != F; ++J) {
+        if (Op1->getOperand(J)->getType() != Op2->getOperand(J)->getType())
+          return nullptr;
+
+        if (Op1->getOperand(J) != Op2->getOperand(J)) {
+          if (DI == -1) {
+            // We have not seen any differences yet in the GEPs feeding the
+            // PHI yet, so we record this one if it is allowed to be a
+            // variable.
+
+            // The first two arguments can vary for any GEP, the rest have to be
+            // static for struct slots
+            if (J > 1 && CurTy->isStructTy())
+              return nullptr;
+
+            DI = J;
+          } else {
+            // The GEP is different by more than one input. While this could be
+            // extended to support GEPs that vary by more than one variable it
+            // doesn't make sense since it greatly increases the complexity and
+            // would result in an R+R+R addressing mode which no backend
+            // directly supports and would need to be broken into several
+            // simpler instructions anyway.
+            return nullptr;
+          }
+        }
+
+        // Sink down a layer of the type for the next iteration.
+        if (J > 0) {
+          if (CompositeType *CT = dyn_cast<CompositeType>(CurTy)) {
+            CurTy = CT->getTypeAtIndex(Op1->getOperand(J));
+          } else {
+            CurTy = nullptr;
+          }
+        }
+      }
+    }
+
+    GetElementPtrInst *NewGEP = cast<GetElementPtrInst>(Op1->clone());
+
+    if (DI == -1) {
+      // All the GEPs feeding the PHI are identical. Clone one down into our
+      // BB so that it can be merged with the current GEP.
+      GEP.getParent()->getInstList().insert(GEP.getParent()->getFirstNonPHI(),
+                                            NewGEP);
+    } else {
+      // All the GEPs feeding the PHI differ at a single offset. Clone a GEP
+      // into the current block so it can be merged, and create a new PHI to
+      // set that index.
+      Instruction *InsertPt = Builder->GetInsertPoint();
+      Builder->SetInsertPoint(PN);
+      PHINode *NewPN = Builder->CreatePHI(Op1->getOperand(DI)->getType(),
+                                          PN->getNumOperands());
+      Builder->SetInsertPoint(InsertPt);
+
+      for (auto &I : PN->operands())
+        NewPN->addIncoming(cast<GEPOperator>(I)->getOperand(DI),
+                           PN->getIncomingBlock(I));
+
+      NewGEP->setOperand(DI, NewPN);
+      GEP.getParent()->getInstList().insert(GEP.getParent()->getFirstNonPHI(),
+                                            NewGEP);
+      NewGEP->setOperand(DI, NewPN);
+    }
+
+    GEP.setOperand(0, NewGEP);
+    PtrOp = NewGEP;
+  }
+
   // Combine Indices - If the source pointer to this getelementptr instruction
   // is a getelementptr instruction, combine the indices of the two
   // getelementptr instructions into a single instruction.
@@ -2014,7 +2099,7 @@ Instruction *InstCombiner::visitLandingPadInst(LandingPadInst &LI) {
   // Simplify the list of clauses, eg by removing repeated catch clauses
   // (these are often created by inlining).
   bool MakeNewInstruction = false; // If true, recreate using the following:
-  SmallVector<Value *, 16> NewClauses; // - Clauses for the new instruction;
+  SmallVector<Constant *, 16> NewClauses; // - Clauses for the new instruction;
   bool CleanupFlag = LI.isCleanup();   // - The new instruction is a cleanup.
 
   SmallPtrSet<Value *, 16> AlreadyCaught; // Typeinfos known caught already.
@@ -2022,8 +2107,8 @@ Instruction *InstCombiner::visitLandingPadInst(LandingPadInst &LI) {
     bool isLastClause = i + 1 == e;
     if (LI.isCatch(i)) {
       // A catch clause.
-      Value *CatchClause = LI.getClause(i);
-      Constant *TypeInfo = cast<Constant>(CatchClause->stripPointerCasts());
+      Constant *CatchClause = LI.getClause(i);
+      Constant *TypeInfo = CatchClause->stripPointerCasts();
 
       // If we already saw this clause, there is no point in having a second
       // copy of it.
@@ -2052,7 +2137,7 @@ Instruction *InstCombiner::visitLandingPadInst(LandingPadInst &LI) {
       // equal (for example if one represents a C++ class, and the other some
       // class derived from it).
       assert(LI.isFilter(i) && "Unsupported landingpad clause!");
-      Value *FilterClause = LI.getClause(i);
+      Constant *FilterClause = LI.getClause(i);
       ArrayType *FilterType = cast<ArrayType>(FilterClause->getType());
       unsigned NumTypeInfos = FilterType->getNumElements();
 
@@ -2096,8 +2181,8 @@ Instruction *InstCombiner::visitLandingPadInst(LandingPadInst &LI) {
         // catch-alls.  If so, the filter can be discarded.
         bool SawCatchAll = false;
         for (unsigned j = 0; j != NumTypeInfos; ++j) {
-          Value *Elt = Filter->getOperand(j);
-          Constant *TypeInfo = cast<Constant>(Elt->stripPointerCasts());
+          Constant *Elt = Filter->getOperand(j);
+          Constant *TypeInfo = Elt->stripPointerCasts();
           if (isCatchAll(Personality, TypeInfo)) {
             // This element is a catch-all.  Bail out, noting this fact.
             SawCatchAll = true;
@@ -2202,7 +2287,7 @@ Instruction *InstCombiner::visitLandingPadInst(LandingPadInst &LI) {
         continue;
       // If Filter is a subset of LFilter, i.e. every element of Filter is also
       // an element of LFilter, then discard LFilter.
-      SmallVectorImpl<Value *>::iterator J = NewClauses.begin() + j;
+      SmallVectorImpl<Constant *>::iterator J = NewClauses.begin() + j;
       // If Filter is empty then it is a subset of LFilter.
       if (!FElts) {
         // Discard LFilter.

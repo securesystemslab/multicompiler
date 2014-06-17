@@ -25,9 +25,9 @@
 #include "llvm/Support/PrettyStackTrace.h"
 #include "llvm/Support/Signals.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/Support/system_error.h"
 #include <algorithm>
 #include <string>
+#include <system_error>
 using namespace llvm;
 using namespace object;
 
@@ -68,7 +68,7 @@ static cl::list<std::string>
 static std::string ToolName;
 
 ///  @brief If ec is not success, print the error and return true.
-static bool error(error_code ec) {
+static bool error(std::error_code ec) {
   if (!ec) return false;
 
   outs() << ToolName << ": error reading file: " << ec.message() << ".\n";
@@ -235,7 +235,7 @@ static void PrintFileSectionSizes(StringRef file) {
 
   // Attempt to open the binary.
   ErrorOr<Binary *> BinaryOrErr = createBinary(file);
-  if (error_code EC = BinaryOrErr.getError()) {
+  if (std::error_code EC = BinaryOrErr.getError()) {
     errs() << ToolName << ": " << file << ": " << EC.message() << ".\n";
     return;
   }
@@ -245,12 +245,12 @@ static void PrintFileSectionSizes(StringRef file) {
     // This is an archive. Iterate over each member and display its sizes.
     for (object::Archive::child_iterator i = a->child_begin(),
                                          e = a->child_end(); i != e; ++i) {
-      std::unique_ptr<Binary> child;
-      if (error_code ec = i->getAsBinary(child)) {
-        errs() << ToolName << ": " << file << ": " << ec.message() << ".\n";
+      ErrorOr<std::unique_ptr<Binary>> ChildOrErr = i->getAsBinary();
+      if (std::error_code EC = ChildOrErr.getError()) {
+        errs() << ToolName << ": " << file << ": " << EC.message() << ".\n";
         continue;
       }
-      if (ObjectFile *o = dyn_cast<ObjectFile>(child.get())) {
+      if (ObjectFile *o = dyn_cast<ObjectFile>(&*ChildOrErr.get())) {
         if (OutputFormat == sysv)
           outs() << o->getFileName() << "   (ex " << a->getFileName()
                   << "):\n";

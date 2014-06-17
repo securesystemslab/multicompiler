@@ -17,7 +17,6 @@
 #include "llvm/IR/Function.h"
 #include "llvm/IR/IRPrintingPasses.h"
 #include "llvm/IR/LegacyPassNameParser.h"
-#include "llvm/IR/LLVMContext.h"
 #include "llvm/PassRegistry.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
@@ -200,14 +199,6 @@ Pass *Pass::createPass(AnalysisID ID) {
   return PI->createPass();
 }
 
-Pass *PassInfo::createPass() const {
-  assert((!isAnalysisGroup() || NormalCtor) &&
-         "No default implementation found for analysis group!");
-  assert(NormalCtor &&
-         "Cannot call createPass on PassInfo without default ctor!");
-  return NormalCtor();
-}
-
 //===----------------------------------------------------------------------===//
 //                  Analysis Group Implementation Code
 //===----------------------------------------------------------------------===//
@@ -225,17 +216,6 @@ RegisterAGBase::RegisterAGBase(const char *Name, const void *InterfaceID,
 // PassRegistrationListener implementation
 //
 
-// PassRegistrationListener ctor - Add the current object to the list of
-// PassRegistrationListeners...
-PassRegistrationListener::PassRegistrationListener() {
-  PassRegistry::getPassRegistry()->addRegistrationListener(this);
-}
-
-// dtor - Remove object from list of listeners...
-PassRegistrationListener::~PassRegistrationListener() {
-  PassRegistry::getPassRegistry()->removeRegistrationListener(this);
-}
-
 // enumeratePasses - Iterate over the registered passes, calling the
 // passEnumerate callback on each PassInfo object.
 //
@@ -243,19 +223,16 @@ void PassRegistrationListener::enumeratePasses() {
   PassRegistry::getPassRegistry()->enumerateWith(this);
 }
 
-//===----------------------------------------------------------------------===//
-// PassRunListener implementation
-//
-
-// PassRunListener ctor - Add the current object to the list of
-// PassRunListeners...
-PassRunListener::PassRunListener(LLVMContext *C) {
-  C->addRunListener(this);
+PassNameParser::PassNameParser()
+    : Opt(nullptr) {
+  PassRegistry::getPassRegistry()->addRegistrationListener(this);
 }
 
-PassRunListener::~PassRunListener() {}
-
-PassNameParser::~PassNameParser() {}
+PassNameParser::~PassNameParser() {
+  // This only gets called during static destruction, in which case the
+  // PassRegistry will have already been destroyed by llvm_shutdown().  So
+  // attempting to remove the registration listener is an error.
+}
 
 //===----------------------------------------------------------------------===//
 //   AnalysisUsage Class Implementation

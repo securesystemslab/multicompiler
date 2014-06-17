@@ -371,7 +371,9 @@ namespace bitc {
     ATTR_KIND_BUILTIN = 35,
     ATTR_KIND_COLD = 36,
     ATTR_KIND_OPTIMIZE_NONE = 37,
-    ATTR_KIND_IN_ALLOCA = 38
+    ATTR_KIND_IN_ALLOCA = 38,
+    ATTR_KIND_NON_NULL = 39,
+    ATTR_KIND_JUMP_TABLE = 40
   };
 
 } // End bitc namespace

@@ -67,10 +67,10 @@ public:
                                     MachineModuleInfo *MMI) const override;
 
   void InitializeELF(bool UseInitArray_);
-  const MCSection *
-    getStaticCtorSection(unsigned Priority = 65535) const override;
-  const MCSection *
-    getStaticDtorSection(unsigned Priority = 65535) const override;
+  const MCSection *getStaticCtorSection(unsigned Priority,
+                                        const MCSymbol *KeySym) const override;
+  const MCSection *getStaticDtorSection(unsigned Priority,
+                                        const MCSymbol *KeySym) const override;
 };
 
 
@@ -140,6 +140,11 @@ public:
   void emitModuleFlags(MCStreamer &Streamer,
                        ArrayRef<Module::ModuleFlagEntry> ModuleFlags,
                        Mangler &Mang, const TargetMachine &TM) const override;
+
+  const MCSection *getStaticCtorSection(unsigned Priority,
+                                        const MCSymbol *KeySym) const override;
+  const MCSection *getStaticDtorSection(unsigned Priority,
+                                        const MCSymbol *KeySym) const override;
 };
 
 } // end namespace llvm

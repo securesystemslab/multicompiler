@@ -817,3 +817,69 @@ define i1 @compare_always_false_ne(i16 %a) {
 ; CHECK-LABEL: @compare_always_false_ne
 ; CHECK-NEXT: ret i1 true
 }
+
+define i1 @compare_dividend(i32 %a) {
+  %div = sdiv i32 2, %a
+  %cmp = icmp eq i32 %div, 3
+  ret i1 %cmp
+
+; CHECK-LABEL: @compare_dividend
+; CHECK-NEXT: ret i1 false
+}
+
+define i1 @lshr_ugt_false(i32 %a) {
+  %shr = lshr i32 1, %a
+  %cmp = icmp ugt i32 %shr, 1
+  ret i1 %cmp
+; CHECK-LABEL: @lshr_ugt_false
+; CHECK-NEXT: ret i1 false
+}
+
+define i1 @exact_lshr_ugt_false(i32 %a) {
+  %shr = lshr exact i32 30, %a
+  %cmp = icmp ult i32 %shr, 15
+  ret i1 %cmp
+; CHECK-LABEL: @exact_lshr_ugt_false
+; CHECK-NEXT: ret i1 false
+}
+
+define i1 @lshr_sgt_false(i32 %a) {
+  %shr = lshr i32 1, %a
+  %cmp = icmp sgt i32 %shr, 1
+  ret i1 %cmp
+; CHECK-LABEL: @lshr_sgt_false
+; CHECK-NEXT: ret i1 false
+}
+
+define i1 @ashr_sgt_false(i32 %a) {
+  %shr = ashr i32 -30, %a
+  %cmp = icmp sgt i32 %shr, -1
+  ret i1 %cmp
+; CHECK-LABEL: @ashr_sgt_false
+; CHECK-NEXT: ret i1 false
+}
+
+define i1 @exact_ashr_sgt_false(i32 %a) {
+  %shr = ashr exact i32 -30, %a
+  %cmp = icmp sgt i32 %shr, -15
+  ret i1 %cmp
+; CHECK-LABEL: @exact_ashr_sgt_false
+; CHECK-NEXT: ret i1 false
+}
+
+define i1 @nonnull_arg(i32* nonnull %i) {
+  %cmp = icmp eq i32* %i, null
+  ret i1 %cmp
+; CHECK-LABEL: @nonnull_arg
+; CHECK: ret i1 false
+}
+
+declare nonnull i32* @returns_nonnull_helper()
+define i1 @returns_nonnull() {
+  %call = call nonnull i32* @returns_nonnull_helper()
+  %cmp = icmp eq i32* %call, null
+  ret i1 %cmp
+; CHECK-LABEL: @returns_nonnull
+; CHECK: ret i1 false
+}
+

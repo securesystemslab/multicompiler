@@ -162,21 +162,6 @@ public:
   bool requiresStructuredCFG() const { return RequireStructuredCFG; }
   void setRequiresStructuredCFG(bool Value) { RequireStructuredCFG = Value; }
 
-  /// hasMCRelaxAll - Check whether all machine code instructions should be
-  /// relaxed.
-  bool hasMCRelaxAll() const { return Options.MCOptions.MCRelaxAll; }
-
-  /// hasMCSaveTempLabels - Check whether temporary labels will be preserved
-  /// (i.e., not treated as temporary).
-  bool hasMCSaveTempLabels() const { return Options.MCOptions.MCSaveTempLabels; }
-
-  /// hasMCNoExecStack - Check whether an executable stack is not needed.
-  bool hasMCNoExecStack() const { return Options.MCOptions.MCNoExecStack; }
-
-  /// hasMCUseDwarfDirectory - Check whether we should use .file directives with
-  /// explicit directories.
-  bool hasMCUseDwarfDirectory() const { return Options.MCOptions.MCUseDwarfDirectory; }
-
   /// getRelocationModel - Returns the code generation relocation model. The
   /// choices are static, PIC, and dynamic-no-pic, and target default.
   Reloc::Model getRelocationModel() const;
@@ -202,26 +187,26 @@ public:
 
   /// getAsmVerbosityDefault - Returns the default value of asm verbosity.
   ///
-  static bool getAsmVerbosityDefault();
+  bool getAsmVerbosityDefault() const ;
 
   /// setAsmVerbosityDefault - Set the default value of asm verbosity. Default
   /// is false.
-  static void setAsmVerbosityDefault(bool);
+  void setAsmVerbosityDefault(bool);
 
   /// getDataSections - Return true if data objects should be emitted into their
   /// own section, corresponds to -fdata-sections.
-  static bool getDataSections();
+  bool getDataSections() const;
 
   /// getFunctionSections - Return true if functions should be emitted into
   /// their own section, corresponding to -ffunction-sections.
-  static bool getFunctionSections();
+  bool getFunctionSections() const;
 
   /// setDataSections - Set if the data are emit into separate sections.
-  static void setDataSections(bool);
+  void setDataSections(bool);
 
   /// setFunctionSections - Set if the functions are emit into separate
   /// sections.
-  static void setFunctionSections(bool);
+  void setFunctionSections(bool);
 
   /// \brief Register analysis passes for this target with a pass manager.
   virtual void addAnalysisPasses(PassManagerBase &) {}

@@ -114,6 +114,9 @@ static bool UpgradeIntrinsicFunction1(Function *F, Function *&NewFn) {
         Name == "x86.avx.movnt.pd.256" ||
         Name == "x86.avx.movnt.ps.256" ||
         Name == "x86.sse42.crc32.64.8" ||
+        Name == "x86.avx.vbroadcast.ss" ||
+        Name == "x86.avx.vbroadcast.ss.256" ||
+        Name == "x86.avx.vbroadcast.sd.256" ||
         (Name.startswith("x86.xop.vpcom") && F->arg_size() == 2)) {
       NewFn = nullptr;
       return true;
@@ -170,7 +173,62 @@ bool llvm::UpgradeIntrinsicFunction(Function *F, Function *&NewFn) {
   return Upgraded;
 }
 
+static bool UpgradeGlobalStructors(GlobalVariable *GV) {
+  ArrayType *ATy = dyn_cast<ArrayType>(GV->getType()->getElementType());
+  StructType *OldTy =
+      ATy ? dyn_cast<StructType>(ATy->getElementType()) : nullptr;
+
+  // Only upgrade an array of a two field struct with the appropriate field
+  // types.
+  if (!OldTy || OldTy->getNumElements() != 2)
+    return false;
+
+  // Get the upgraded 3 element type.
+  PointerType *VoidPtrTy = Type::getInt8Ty(GV->getContext())->getPointerTo();
+  Type *Tys[3] = {
+    OldTy->getElementType(0),
+    OldTy->getElementType(1),
+    VoidPtrTy
+  };
+  StructType *NewTy =
+      StructType::get(GV->getContext(), Tys, /*isPacked=*/false);
+
+  // Build new constants with a null third field filled in.
+  Constant *OldInitC = GV->getInitializer();
+  ConstantArray *OldInit = dyn_cast<ConstantArray>(OldInitC);
+  if (!OldInit && !isa<ConstantAggregateZero>(OldInitC))
+    return false;
+  std::vector<Constant *> Initializers;
+  if (OldInit) {
+    for (Use &U : OldInit->operands()) {
+      ConstantStruct *Init = cast<ConstantStruct>(&U);
+      Constant *NewInit =
+        ConstantStruct::get(NewTy, Init->getOperand(0), Init->getOperand(1),
+                            Constant::getNullValue(VoidPtrTy), nullptr);
+      Initializers.push_back(NewInit);
+    }
+  }
+  assert(Initializers.size() == ATy->getNumElements());
+
+  // Replace the old GV with a new one.
+  ATy = ArrayType::get(NewTy, Initializers.size());
+  Constant *NewInit = ConstantArray::get(ATy, Initializers);
+  GlobalVariable *NewGV = new GlobalVariable(
+      *GV->getParent(), ATy, GV->isConstant(), GV->getLinkage(), NewInit, "",
+      GV, GV->getThreadLocalMode(), GV->getType()->getAddressSpace(),
+      GV->isExternallyInitialized());
+  NewGV->copyAttributesFrom(GV);
+  NewGV->takeName(GV);
+  assert(GV->use_empty() && "program cannot use initializer list");
+  GV->eraseFromParent();
+  return true;
+}
+
 bool llvm::UpgradeGlobalVariable(GlobalVariable *GV) {
+  if (GV->getName() == "llvm.global_ctors" ||
+      GV->getName() == "llvm.global_dtors")
+    return UpgradeGlobalStructors(GV);
+
   // Nothing to do yet.
   return false;
 }
@@ -280,6 +338,19 @@ void llvm::UpgradeIntrinsicCall(CallInst *CI, Function *NewFn) {
       Value *Trunc0 = Builder.CreateTrunc(CI->getArgOperand(0), Type::getInt32Ty(C));
       Rep = Builder.CreateCall2(CRC32, Trunc0, CI->getArgOperand(1));
       Rep = Builder.CreateZExt(Rep, CI->getType(), "");
+    } else if (Name.startswith("llvm.x86.avx.vbroadcast")) {
+      // Replace broadcasts with a series of insertelements.
+      Type *VecTy = CI->getType();
+      Type *EltTy = VecTy->getVectorElementType();
+      unsigned EltNum = VecTy->getVectorNumElements();
+      Value *Cast = Builder.CreateBitCast(CI->getArgOperand(0),
+                                          EltTy->getPointerTo());
+      Value *Load = Builder.CreateLoad(Cast);
+      Type *I32Ty = Type::getInt32Ty(C);
+      Rep = UndefValue::get(VecTy);
+      for (unsigned I = 0; I < EltNum; ++I)
+        Rep = Builder.CreateInsertElement(Rep, Load,
+                                          ConstantInt::get(I32Ty, I));
     } else {
       bool PD128 = false, PD256 = false, PS128 = false, PS256 = false;
       if (Name == "llvm.x86.avx.vpermil.pd.256")

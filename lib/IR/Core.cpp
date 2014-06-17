@@ -17,9 +17,9 @@
 #include "llvm/IR/Attributes.h"
 #include "llvm/IR/CallSite.h"
 #include "llvm/IR/Constants.h"
+#include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/DiagnosticInfo.h"
 #include "llvm/IR/DiagnosticPrinter.h"
-#include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/GlobalAlias.h"
 #include "llvm/IR/GlobalVariable.h"
 #include "llvm/IR/IRBuilder.h"
@@ -27,7 +27,6 @@
 #include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Module.h"
-#include "llvm/Pass.h"
 #include "llvm/PassManager.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
@@ -36,29 +35,14 @@
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/Threading.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/Support/system_error.h"
 #include <cassert>
 #include <cstdlib>
 #include <cstring>
+#include <system_error>
 
 using namespace llvm;
 
 #define DEBUG_TYPE "ir"
-
-namespace {
-struct LLVMPassRunListener : PassRunListener {
-  LLVMPassRunListenerHandlerTy Callback;
-
-  LLVMPassRunListener(LLVMContext *Context, LLVMPassRunListenerHandlerTy Fn)
-    : PassRunListener(Context), Callback(Fn) {}
-  void passRun(LLVMContext *C, Pass *P, Module *M, Function *F,
-               BasicBlock *BB) override {
-    Callback(wrap(C), wrap(P), wrap(M), wrap(F), wrap(BB));
-  }
-};
-// Create wrappers for C Binding types (see CBindingWrapping.h).
-DEFINE_SIMPLE_CONVERSION_FUNCTIONS(LLVMPassRunListener, LLVMPassRunListenerRef)
-} // end anonymous namespace
 
 void llvm::initializeCore(PassRegistry &Registry) {
   initializeDominatorTreeWrapperPassPass(Registry);
@@ -103,6 +87,13 @@ void LLVMContextSetDiagnosticHandler(LLVMContextRef C,
   unwrap(C)->setDiagnosticHandler(
       LLVM_EXTENSION reinterpret_cast<LLVMContext::DiagnosticHandlerTy>(Handler),
       DiagnosticContext);
+}
+
+void LLVMContextSetYieldCallback(LLVMContextRef C, LLVMYieldCallback Callback,
+                                 void *OpaqueHandle) {
+  auto YieldCallback =
+    LLVM_EXTENSION reinterpret_cast<LLVMContext::YieldCallbackTy>(Callback);
+  unwrap(C)->setYieldCallback(YieldCallback, OpaqueHandle);
 }
 
 void LLVMContextDispose(LLVMContextRef C) {
@@ -150,15 +141,7 @@ LLVMDiagnosticSeverity LLVMGetDiagInfoSeverity(LLVMDiagnosticInfoRef DI){
     return severity;
 }
 
-LLVMPassRunListenerRef LLVMAddPassRunListener(LLVMContextRef Context,
-                                              LLVMPassRunListenerHandlerTy Fn) {
-  return wrap(new LLVMPassRunListener(unwrap(Context), Fn));
-}
 
-void LLVMRemovePassRunListener(LLVMContextRef Context,
-                               LLVMPassRunListenerRef Listener) {
-  unwrap(Context)->removeRunListener(unwrap(Listener));
-}
 
 
 /*===-- Operations on modules ---------------------------------------------===*/
@@ -298,6 +281,7 @@ char *LLVMPrintTypeToString(LLVMTypeRef Ty) {
   std::string buf;
   raw_string_ostream os(buf);
 
+  assert(unwrap(Ty) != nullptr && "Expecting non-null Type");
   unwrap(Ty)->print(os);
   os.flush();
 
@@ -548,6 +532,7 @@ char* LLVMPrintValueToString(LLVMValueRef Val) {
   std::string buf;
   raw_string_ostream os(buf);
 
+  assert(unwrap(Val) != nullptr && "Expecting non-null Value");
   unwrap(Val)->print(os);
   os.flush();
 
@@ -1303,7 +1288,7 @@ void LLVMSetLinkage(LLVMValueRef Global, LLVMLinkage Linkage) {
 }
 
 const char *LLVMGetSection(LLVMValueRef Global) {
-  return unwrap<GlobalValue>(Global)->getSection().c_str();
+  return unwrap<GlobalValue>(Global)->getSection();
 }
 
 void LLVMSetSection(LLVMValueRef Global, const char *Section) {
@@ -1505,8 +1490,10 @@ void LLVMSetExternallyInitialized(LLVMValueRef GlobalVar, LLVMBool IsExtInit) {
 
 LLVMValueRef LLVMAddAlias(LLVMModuleRef M, LLVMTypeRef Ty, LLVMValueRef Aliasee,
                           const char *Name) {
-  return wrap(new GlobalAlias(unwrap(Ty), GlobalValue::ExternalLinkage, Name,
-                              unwrap<Constant>(Aliasee), unwrap (M)));
+  auto *PTy = cast<PointerType>(unwrap(Ty));
+  return wrap(GlobalAlias::create(PTy->getElementType(), PTy->getAddressSpace(),
+                                  GlobalValue::ExternalLinkage, Name,
+                                  unwrap<GlobalObject>(Aliasee), unwrap(M)));
 }
 
 /*--.. Operations on functions .............................................--*/
@@ -2614,7 +2601,7 @@ LLVMBool LLVMCreateMemoryBufferWithContentsOfFile(
     char **OutMessage) {
 
   std::unique_ptr<MemoryBuffer> MB;
-  error_code ec;
+  std::error_code ec;
   if (!(ec = MemoryBuffer::getFile(Path, MB))) {
     *OutMemBuf = wrap(MB.release());
     return 0;
@@ -2627,7 +2614,7 @@ LLVMBool LLVMCreateMemoryBufferWithContentsOfFile(
 LLVMBool LLVMCreateMemoryBufferWithSTDIN(LLVMMemoryBufferRef *OutMemBuf,
                                          char **OutMessage) {
   std::unique_ptr<MemoryBuffer> MB;
-  error_code ec;
+  std::error_code ec;
   if (!(ec = MemoryBuffer::getSTDIN(MB))) {
     *OutMemBuf = wrap(MB.release());
     return 0;
@@ -2669,12 +2656,6 @@ size_t LLVMGetBufferSize(LLVMMemoryBufferRef MemBuf) {
 
 void LLVMDisposeMemoryBuffer(LLVMMemoryBufferRef MemBuf) {
   delete unwrap(MemBuf);
-}
-
-/*===-- Pass  -------------------------------------------------------------===*/
-
-const char *LLVMGetPassName(LLVMPassRef P) {
-  return unwrap(P)->getPassName();
 }
 
 /*===-- Pass Registry -----------------------------------------------------===*/

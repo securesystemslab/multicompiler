@@ -197,6 +197,9 @@ namespace llvm {
 
     bool ParseTLSModel(GlobalVariable::ThreadLocalMode &TLM);
     bool ParseOptionalThreadLocal(GlobalVariable::ThreadLocalMode &TLM);
+    bool parseOptionalUnnamedAddr(bool &UnnamedAddr) {
+      return ParseOptionalToken(lltok::kw_unnamed_addr, UnnamedAddr);
+    }
     bool ParseOptionalAddrSpace(unsigned &AddrSpace);
     bool ParseOptionalParamAttrs(AttrBuilder &B);
     bool ParseOptionalReturnAttrs(AttrBuilder &B);
@@ -239,9 +242,11 @@ namespace llvm {
     bool ParseNamedGlobal();
     bool ParseGlobal(const std::string &Name, LocTy Loc, unsigned Linkage,
                      bool HasLinkage, unsigned Visibility,
-                     unsigned DLLStorageClass);
+                     unsigned DLLStorageClass,
+                     GlobalVariable::ThreadLocalMode TLM, bool UnnamedAddr);
     bool ParseAlias(const std::string &Name, LocTy Loc, unsigned Visibility,
-                    unsigned DLLStorageClass);
+                    unsigned DLLStorageClass,
+                    GlobalVariable::ThreadLocalMode TLM, bool UnnamedAddr);
     bool ParseStandaloneMetadata();
     bool ParseNamedMetadata();
     bool ParseMDString(MDString *&Result);

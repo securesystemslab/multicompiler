@@ -177,10 +177,7 @@ public:
 
     T* getPtr() const { return Obj; }
 
-    typedef T* (IntrusiveRefCntPtr::*unspecified_bool_type) () const;
-    operator unspecified_bool_type() const {
-      return Obj ? &IntrusiveRefCntPtr::getPtr : nullptr;
-    }
+    LLVM_EXPLICIT operator bool() const { return Obj; }
 
     void swap(IntrusiveRefCntPtr& other) {
       T* tmp = other.Obj;
@@ -242,6 +239,26 @@ public:
                          const IntrusiveRefCntPtr<U>& B)
   {
     return A != B.getPtr();
+  }
+
+  template <class T>
+  bool operator==(std::nullptr_t A, const IntrusiveRefCntPtr<T> &B) {
+    return !B;
+  }
+
+  template <class T>
+  bool operator==(const IntrusiveRefCntPtr<T> &A, std::nullptr_t B) {
+    return B == A;
+  }
+
+  template <class T>
+  bool operator!=(std::nullptr_t A, const IntrusiveRefCntPtr<T> &B) {
+    return !(A == B);
+  }
+
+  template <class T>
+  bool operator!=(const IntrusiveRefCntPtr<T> &A, std::nullptr_t B) {
+    return !(A == B);
   }
 
 //===----------------------------------------------------------------------===//

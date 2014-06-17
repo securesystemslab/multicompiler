@@ -381,7 +381,7 @@ bool Module::Materialize(GlobalValue *GV, std::string *ErrInfo) {
   if (!Materializer)
     return false;
 
-  error_code EC = Materializer->Materialize(GV);
+  std::error_code EC = Materializer->Materialize(GV);
   if (!EC)
     return false;
   if (ErrInfo)
@@ -394,18 +394,18 @@ void Module::Dematerialize(GlobalValue *GV) {
     return Materializer->Dematerialize(GV);
 }
 
-error_code Module::materializeAll() {
+std::error_code Module::materializeAll() {
   if (!Materializer)
-    return error_code::success();
+    return std::error_code();
   return Materializer->MaterializeModule(this);
 }
 
-error_code Module::materializeAllPermanently() {
-  if (error_code EC = materializeAll())
+std::error_code Module::materializeAllPermanently() {
+  if (std::error_code EC = materializeAll())
     return EC;
 
   Materializer.reset();
-  return error_code::success();
+  return std::error_code();
 }
 
 //===----------------------------------------------------------------------===//

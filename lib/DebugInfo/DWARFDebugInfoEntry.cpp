@@ -18,6 +18,7 @@
 #include "llvm/Support/raw_ostream.h"
 using namespace llvm;
 using namespace dwarf;
+typedef DILineInfoSpecifier::FunctionNameKind FunctionNameKind;
 
 void DWARFDebugInfoEntryMinimal::dump(raw_ostream &OS, const DWARFUnit *u,
                                       unsigned recurseDepth,
@@ -209,6 +210,16 @@ uint64_t DWARFDebugInfoEntryMinimal::getAttributeValueAsSectionOffset(
   return Result.hasValue() ? Result.getValue() : FailValue;
 }
 
+uint64_t
+DWARFDebugInfoEntryMinimal::getRangesBaseAttribute(const DWARFUnit *U,
+                                                   uint64_t FailValue) const {
+  uint64_t Result =
+      getAttributeValueAsSectionOffset(U, DW_AT_ranges_base, -1ULL);
+  if (Result != -1ULL)
+    return Result;
+  return getAttributeValueAsSectionOffset(U, DW_AT_GNU_ranges_base, FailValue);
+}
+
 bool DWARFDebugInfoEntryMinimal::getLowAndHighPC(const DWARFUnit *U,
                                                  uint64_t &LowPC,
                                                  uint64_t &HighPC) const {
@@ -272,16 +283,19 @@ bool DWARFDebugInfoEntryMinimal::addressRangeContainsAddress(
 }
 
 const char *
-DWARFDebugInfoEntryMinimal::getSubroutineName(const DWARFUnit *U) const {
-  if (!isSubroutineDIE())
+DWARFDebugInfoEntryMinimal::getSubroutineName(const DWARFUnit *U,
+                                              FunctionNameKind Kind) const {
+  if (!isSubroutineDIE() || Kind == FunctionNameKind::None)
     return nullptr;
-  // Try to get mangled name if possible.
-  if (const char *name =
-      getAttributeValueAsString(U, DW_AT_MIPS_linkage_name, nullptr))
-    return name;
-  if (const char *name = getAttributeValueAsString(U, DW_AT_linkage_name,
-                                                   nullptr))
-    return name;
+  // Try to get mangled name only if it was asked for.
+  if (Kind == FunctionNameKind::LinkageName) {
+    if (const char *name =
+            getAttributeValueAsString(U, DW_AT_MIPS_linkage_name, nullptr))
+      return name;
+    if (const char *name =
+            getAttributeValueAsString(U, DW_AT_linkage_name, nullptr))
+      return name;
+  }
   if (const char *name = getAttributeValueAsString(U, DW_AT_name, nullptr))
     return name;
   // Try to get name from specification DIE.
@@ -290,7 +304,7 @@ DWARFDebugInfoEntryMinimal::getSubroutineName(const DWARFUnit *U) const {
   if (spec_ref != -1U) {
     DWARFDebugInfoEntryMinimal spec_die;
     if (spec_die.extractFast(U, &spec_ref)) {
-      if (const char *name = spec_die.getSubroutineName(U))
+      if (const char *name = spec_die.getSubroutineName(U, Kind))
         return name;
     }
   }
@@ -300,7 +314,7 @@ DWARFDebugInfoEntryMinimal::getSubroutineName(const DWARFUnit *U) const {
   if (abs_origin_ref != -1U) {
     DWARFDebugInfoEntryMinimal abs_origin_die;
     if (abs_origin_die.extractFast(U, &abs_origin_ref)) {
-      if (const char *name = abs_origin_die.getSubroutineName(U))
+      if (const char *name = abs_origin_die.getSubroutineName(U, Kind))
         return name;
     }
   }

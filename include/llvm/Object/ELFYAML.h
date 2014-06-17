@@ -44,6 +44,7 @@ LLVM_YAML_STRONG_TYPEDEF(uint8_t, ELF_REL)
 // Just use 64, since it can hold 32-bit values too.
 LLVM_YAML_STRONG_TYPEDEF(uint64_t, ELF_SHF)
 LLVM_YAML_STRONG_TYPEDEF(uint8_t, ELF_STT)
+LLVM_YAML_STRONG_TYPEDEF(uint8_t, ELF_STV)
 
 // For now, hardcode 64 bits everywhere that 32 or 64 would be needed
 // since 64-bit can hold 32-bit values too.
@@ -62,6 +63,7 @@ struct Symbol {
   StringRef Section;
   llvm::yaml::Hex64 Value;
   llvm::yaml::Hex64 Size;
+  ELF_STV Visibility;
 };
 struct LocalGlobalWeakSymbols {
   std::vector<Symbol> Local;
@@ -76,25 +78,26 @@ struct Section {
   ELF_SHF Flags;
   llvm::yaml::Hex64 Address;
   StringRef Link;
-  StringRef Info;
   llvm::yaml::Hex64 AddressAlign;
   Section(SectionKind Kind) : Kind(Kind) {}
   virtual ~Section();
 };
 struct RawContentSection : Section {
   object::yaml::BinaryRef Content;
+  llvm::yaml::Hex64 Size;
   RawContentSection() : Section(SectionKind::RawContent) {}
   static bool classof(const Section *S) {
     return S->Kind == SectionKind::RawContent;
   }
 };
 struct Relocation {
-  uint32_t Offset;
-  uint32_t Addend;
+  llvm::yaml::Hex64 Offset;
+  int64_t Addend;
   ELF_REL Type;
   StringRef Symbol;
 };
 struct RelocationSection : Section {
+  StringRef Info;
   std::vector<Relocation> Relocations;
   RelocationSection() : Section(SectionKind::Relocation) {}
   static bool classof(const Section *S) {
@@ -167,6 +170,11 @@ struct ScalarEnumerationTraits<ELFYAML::ELF_STT> {
 };
 
 template <>
+struct ScalarEnumerationTraits<ELFYAML::ELF_STV> {
+  static void enumeration(IO &IO, ELFYAML::ELF_STV &Value);
+};
+
+template <>
 struct ScalarEnumerationTraits<ELFYAML::ELF_REL> {
   static void enumeration(IO &IO, ELFYAML::ELF_REL &Value);
 };
@@ -193,6 +201,7 @@ template <> struct MappingTraits<ELFYAML::Relocation> {
 template <>
 struct MappingTraits<std::unique_ptr<ELFYAML::Section>> {
   static void mapping(IO &IO, std::unique_ptr<ELFYAML::Section> &Section);
+  static StringRef validate(IO &io, std::unique_ptr<ELFYAML::Section> &Section);
 };
 
 template <>

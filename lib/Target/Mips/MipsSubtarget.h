@@ -158,13 +158,21 @@ public:
   bool hasMips3() const { return MipsArchVersion >= Mips3; }
   bool hasMips4_32() const { return HasMips4_32; }
   bool hasMips4_32r2() const { return HasMips4_32r2; }
-  bool hasMips32() const { return MipsArchVersion >= Mips32; }
-  bool hasMips32r2() const { return MipsArchVersion == Mips32r2 ||
-                                   MipsArchVersion == Mips64r2; }
-  bool hasMips32r6() const { return MipsArchVersion == Mips32r6 ||
-                                   MipsArchVersion == Mips64r6; }
+  bool hasMips32() const {
+    return MipsArchVersion >= Mips32 && MipsArchVersion != Mips3 &&
+           MipsArchVersion != Mips4 && MipsArchVersion != Mips5;
+  }
+  bool hasMips32r2() const {
+    return MipsArchVersion == Mips32r2 || MipsArchVersion == Mips32r6 ||
+           MipsArchVersion == Mips64r2 || MipsArchVersion == Mips64r6;
+  }
+  bool hasMips32r6() const {
+    return MipsArchVersion == Mips32r6 || MipsArchVersion == Mips64r6;
+  }
   bool hasMips64() const { return MipsArchVersion >= Mips64; }
-  bool hasMips64r2() const { return MipsArchVersion == Mips64r2; }
+  bool hasMips64r2() const {
+    return MipsArchVersion == Mips64r2 || MipsArchVersion == Mips64r6;
+  }
   bool hasMips64r6() const { return MipsArchVersion == Mips64r6; }
 
   bool hasCnMips() const { return HasCnMips; }
@@ -234,7 +242,12 @@ public:
   /// \brief Reset the subtarget for the Mips target.
   void resetSubtarget(MachineFunction *MF);
 
-
+  /// Does the system support unaligned memory access.
+  ///
+  /// MIPS32r6/MIPS64r6 require full unaligned access support but does not
+  /// specify which component of the system provides it. Hardware, software, and
+  /// hybrid implementations are all valid.
+  bool systemSupportsUnalignedAccess() const { return hasMips32r6(); }
 };
 } // End llvm namespace
 

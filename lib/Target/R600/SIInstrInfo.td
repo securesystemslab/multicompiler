@@ -7,6 +7,13 @@
 //
 //===----------------------------------------------------------------------===//
 
+// Execpt for the NONE field, this must be kept in sync with the SISubtarget enum
+// in AMDGPUMCInstLower.h
+def SISubtarget {
+  int NONE = -1;
+  int SI = 0;
+}
+
 //===----------------------------------------------------------------------===//
 // SI DAG Nodes
 //===----------------------------------------------------------------------===//
@@ -180,6 +187,12 @@ class SOP1_64 <bits<8> op, string opName, list<dag> pattern> : SOP1 <
   opName#" $dst, $src0", pattern
 >;
 
+// 64-bit input, 32-bit output.
+class SOP1_32_64 <bits<8> op, string opName, list<dag> pattern> : SOP1 <
+  op, (outs SReg_32:$dst), (ins SSrc_64:$src0),
+  opName#" $dst, $src0", pattern
+>;
+
 class SOP2_32 <bits<7> op, string opName, list<dag> pattern> : SOP2 <
   op, (outs SReg_32:$dst), (ins SSrc_32:$src0, SSrc_32:$src1),
   opName#" $dst, $src0, $src1", pattern
@@ -243,6 +256,23 @@ class VOP <string opName> {
 class VOP2_REV <string revOp, bit isOrig> {
   string RevOp = revOp;
   bit IsOrig = isOrig;
+}
+
+class SIMCInstr <string pseudo, int subtarget> {
+  string PseudoInstr = pseudo;
+  int Subtarget = subtarget;
+}
+
+multiclass VOP3_m <bits<9> op, dag outs, dag ins, string asm, list<dag> pattern,
+                   string opName> {
+
+  def "" : InstSI <outs, ins, "", pattern>, VOP <opName>,
+           SIMCInstr<OpName, SISubtarget.NONE> {
+    let isPseudo = 1;
+  }
+
+  def _si : VOP3 <op, outs, ins, asm, []>, SIMCInstr<opName, SISubtarget.SI>;
+
 }
 
 // This must always be right before the operand being input modified.
@@ -364,15 +394,15 @@ multiclass VOPC_64 <bits<8> op, string opName,
   ValueType vt = untyped, PatLeaf cond = COND_NULL>
   : VOPC_Helper <op, VReg_64, VSrc_64, opName, vt, cond>;
 
-class VOP3_32 <bits<9> op, string opName, list<dag> pattern> : VOP3 <
+multiclass VOP3_32 <bits<9> op, string opName, list<dag> pattern> : VOP3_m <
   op, (outs VReg_32:$dst),
   (ins InputMods: $src0_modifiers, VSrc_32:$src0, InputMods:$src1_modifiers,
    VSrc_32:$src1, InputMods:$src2_modifiers, VSrc_32:$src2,
    InstFlag:$clamp, InstFlag:$omod),
-  opName#" $dst, $src0_modifiers, $src1, $src2, $clamp, $omod", pattern
->, VOP <opName>;
+  opName#" $dst, $src0_modifiers, $src1, $src2, $clamp, $omod", pattern, opName
+>;
 
-class VOP3_64_Shift <bits <9> op, string opName, list<dag> pattern> : VOP3 <
+class VOP3_64_32 <bits <9> op, string opName, list<dag> pattern> : VOP3 <
   op, (outs VReg_64:$dst),
   (ins VSrc_64:$src0, VSrc_32:$src1),
   opName#" $dst, $src0, $src1", pattern
@@ -451,11 +481,47 @@ class DS_Store2_Helper <bits<8> op, string asm, RegisterClass regClass> : DS_1A 
   let vdst = 0;
 }
 
+// 1 address, 1 data.
 class DS_1A1D_RET <bits<8> op, string asm, RegisterClass rc> : DS_1A <
   op,
   (outs rc:$vdst),
-  (ins i1imm:$gds, VReg_32:$addr, VReg_32:$data0, u16imm:$offset),
+  (ins i1imm:$gds, VReg_32:$addr, rc:$data0, u16imm:$offset),
   asm#" $vdst, $addr, $data0, $offset, [M0]",
+  []> {
+
+  let data1 = 0;
+  let mayStore = 1;
+  let mayLoad = 1;
+}
+
+// 1 address, 2 data.
+class DS_1A2D_RET <bits<8> op, string asm, RegisterClass rc> : DS_1A <
+  op,
+  (outs rc:$vdst),
+  (ins i1imm:$gds, VReg_32:$addr, rc:$data0, rc:$data1, u16imm:$offset),
+  asm#" $vdst, $addr, $data0, $data1, $offset, [M0]",
+  []> {
+  let mayStore = 1;
+  let mayLoad = 1;
+}
+
+// 1 address, 2 data.
+class DS_1A2D_NORET <bits<8> op, string asm, RegisterClass rc> : DS_1A <
+  op,
+  (outs),
+  (ins i1imm:$gds, VReg_32:$addr, rc:$data0, rc:$data1, u16imm:$offset),
+  asm#" $addr, $data0, $data1, $offset, [M0]",
+  []> {
+  let mayStore = 1;
+  let mayLoad = 1;
+}
+
+// 1 address, 1 data.
+class DS_1A1D_NORET <bits<8> op, string asm, RegisterClass rc> : DS_1A <
+  op,
+  (outs),
+  (ins i1imm:$gds, VReg_32:$addr, rc:$data0, u16imm:$offset),
+  asm#" $addr, $data0, $offset, [M0]",
   []> {
 
   let data1 = 0;
@@ -679,6 +745,14 @@ def isDS : InstrMapping {
   let ColFields = ["Size"];
   let KeyCol = ["8"];
   let ValueCols = [["8"]];
+}
+
+def getMCOpcode : InstrMapping {
+  let FilterClass = "SIMCInstr";
+  let RowFields = ["PseudoInstr"];
+  let ColFields = ["Subtarget"];
+  let KeyCol = [!cast<string>(SISubtarget.NONE)];
+  let ValueCols = [[!cast<string>(SISubtarget.SI)]];
 }
 
 include "SIInstructions.td"

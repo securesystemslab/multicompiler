@@ -19,6 +19,7 @@
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/Compression.h"
 #include "llvm/Support/DataExtractor.h"
+#include "llvm/Support/Errc.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/Path.h"
@@ -28,20 +29,18 @@
 namespace llvm {
 namespace symbolize {
 
-static bool error(error_code ec) {
+static bool error(std::error_code ec) {
   if (!ec)
     return false;
   errs() << "LLVMSymbolizer: error reading file: " << ec.message() << ".\n";
   return true;
 }
 
-static uint32_t
-getDILineInfoSpecifierFlags(const LLVMSymbolizer::Options &Opts) {
-  uint32_t Flags = llvm::DILineInfoSpecifier::FileLineInfo |
-                   llvm::DILineInfoSpecifier::AbsoluteFilePath;
-  if (Opts.PrintFunctions)
-    Flags |= llvm::DILineInfoSpecifier::FunctionName;
-  return Flags;
+static DILineInfoSpecifier
+getDILineInfoSpecifier(const LLVMSymbolizer::Options &Opts) {
+  return DILineInfoSpecifier(
+      DILineInfoSpecifier::FileLineInfoKind::AbsoluteFilePath,
+      Opts.PrintFunctions);
 }
 
 ModuleInfo::ModuleInfo(ObjectFile *Obj, DIContext *DICtx)
@@ -115,10 +114,10 @@ DILineInfo ModuleInfo::symbolizeCode(
   DILineInfo LineInfo;
   if (DebugInfoContext) {
     LineInfo = DebugInfoContext->getLineInfoForAddress(
-        ModuleOffset, getDILineInfoSpecifierFlags(Opts));
+        ModuleOffset, getDILineInfoSpecifier(Opts));
   }
   // Override function name from symbol table if necessary.
-  if (Opts.PrintFunctions && Opts.UseSymbolTable) {
+  if (Opts.PrintFunctions != FunctionNameKind::None && Opts.UseSymbolTable) {
     std::string FunctionName;
     uint64_t Start, Size;
     if (getNameFromSymbolTable(SymbolRef::ST_Function, ModuleOffset,
@@ -134,14 +133,14 @@ DIInliningInfo ModuleInfo::symbolizeInlinedCode(
   DIInliningInfo InlinedContext;
   if (DebugInfoContext) {
     InlinedContext = DebugInfoContext->getInliningInfoForAddress(
-        ModuleOffset, getDILineInfoSpecifierFlags(Opts));
+        ModuleOffset, getDILineInfoSpecifier(Opts));
   }
   // Make sure there is at least one frame in context.
   if (InlinedContext.getNumberOfFrames() == 0) {
     InlinedContext.addFrame(DILineInfo());
   }
   // Override the function name in lower frame with name from symbol table.
-  if (Opts.PrintFunctions && Opts.UseSymbolTable) {
+  if (Opts.PrintFunctions != FunctionNameKind::None && Opts.UseSymbolTable) {
     DIInliningInfo PatchedInlinedContext;
     for (uint32_t i = 0, n = InlinedContext.getNumberOfFrames(); i < n; i++) {
       DILineInfo LineInfo = InlinedContext.getFrame(i);
@@ -312,7 +311,7 @@ LLVMSymbolizer::getOrCreateBinary(const std::string &Path) {
       const std::string &ResourcePath =
           getDarwinDWARFResourceForPath(Path);
       BinaryOrErr = createBinary(ResourcePath);
-      error_code EC = BinaryOrErr.getError();
+      std::error_code EC = BinaryOrErr.getError();
       if (EC != errc::no_such_file_or_directory && !error(EC)) {
         DbgBin = BinaryOrErr.get();
         ParsedBinariesAndObjects.push_back(std::unique_ptr<Binary>(DbgBin));
@@ -399,7 +398,7 @@ std::string LLVMSymbolizer::printDILineInfo(DILineInfo LineInfo) const {
   // cannot fetch. We replace it to "??" to make our output closer to addr2line.
   static const std::string kDILineInfoBadString = "<invalid>";
   std::stringstream Result;
-  if (Opts.PrintFunctions) {
+  if (Opts.PrintFunctions != FunctionNameKind::None) {
     std::string FunctionName = LineInfo.FunctionName;
     if (FunctionName == kDILineInfoBadString)
       FunctionName = kBadString;

@@ -42,12 +42,15 @@
 #include "llvm/CodeGen/FastISel.h"
 #include "llvm/ADT/Optional.h"
 #include "llvm/ADT/Statistic.h"
+#include "llvm/Analysis/BranchProbabilityInfo.h"
 #include "llvm/Analysis/Loads.h"
 #include "llvm/CodeGen/Analysis.h"
 #include "llvm/CodeGen/FunctionLoweringInfo.h"
+#include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineModuleInfo.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
+#include "llvm/CodeGen/StackMaps.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/DebugInfo.h"
 #include "llvm/IR/Function.h"
@@ -558,6 +561,36 @@ bool FastISel::SelectGetElementPtr(const User *I) {
   return true;
 }
 
+/// \brief Add a stack map intrinsic call's live variable operands to a stackmap
+/// or patchpoint machine instruction.
+///
+bool FastISel::addStackMapLiveVars(SmallVectorImpl<MachineOperand> &Ops,
+                                   const CallInst *CI, unsigned StartIdx) {
+  for (unsigned i = StartIdx, e = CI->getNumArgOperands(); i != e; ++i) {
+    Value *Val = CI->getArgOperand(i);
+    if (auto *C = dyn_cast<ConstantInt>(Val)) {
+      Ops.push_back(MachineOperand::CreateImm(StackMaps::ConstantOp));
+      Ops.push_back(MachineOperand::CreateImm(C->getSExtValue()));
+    } else if (isa<ConstantPointerNull>(Val)) {
+      Ops.push_back(MachineOperand::CreateImm(StackMaps::ConstantOp));
+      Ops.push_back(MachineOperand::CreateImm(0));
+    } else if (auto *AI = dyn_cast<AllocaInst>(Val)) {
+      auto SI = FuncInfo.StaticAllocaMap.find(AI);
+      if (SI != FuncInfo.StaticAllocaMap.end())
+        Ops.push_back(MachineOperand::CreateFI(SI->second));
+      else
+        return false;
+    } else {
+      unsigned Reg = getRegForValue(Val);
+      if (Reg == 0)
+        return false;
+      Ops.push_back(MachineOperand::CreateReg(Reg, /*IsDef=*/false));
+    }
+  }
+
+  return true;
+}
+
 bool FastISel::SelectCall(const User *I) {
   const CallInst *Call = cast<CallInst>(I);
 
@@ -711,6 +744,76 @@ bool FastISel::SelectCall(const User *I) {
     if (ResultReg == 0)
       return false;
     UpdateValueMap(Call, ResultReg);
+    return true;
+  }
+  case Intrinsic::experimental_stackmap: {
+    // void @llvm.experimental.stackmap(i64 <id>, i32 <numShadowBytes>,
+    //                                  [live variables...])
+
+    assert(Call->getCalledFunction()->getReturnType()->isVoidTy() &&
+           "Stackmap cannot return a value.");
+
+    // The stackmap intrinsic only records the live variables (the arguments
+    // passed to it) and emits NOPS (if requested). Unlike the patchpoint
+    // intrinsic, this won't be lowered to a function call. This means we don't
+    // have to worry about calling conventions and target-specific lowering
+    // code. Instead we perform the call lowering right here.
+    //
+    // CALLSEQ_START(0)
+    // STACKMAP(id, nbytes, ...)
+    // CALLSEQ_END(0, 0)
+    //
+
+    SmallVector<MachineOperand, 32> Ops;
+
+    // Add the <id> and <numBytes> constants.
+    assert(isa<ConstantInt>(Call->getOperand(PatchPointOpers::IDPos)) &&
+           "Expected a constant integer.");
+    auto IDVal = cast<ConstantInt>(Call->getOperand(PatchPointOpers::IDPos));
+    Ops.push_back(MachineOperand::CreateImm(IDVal->getZExtValue()));
+
+    assert(isa<ConstantInt>(Call->getOperand(PatchPointOpers::NBytesPos)) &&
+           "Expected a constant integer.");
+    auto NBytesVal =
+      cast<ConstantInt>(Call->getOperand(PatchPointOpers::NBytesPos));
+    Ops.push_back(MachineOperand::CreateImm(NBytesVal->getZExtValue()));
+
+    // Push live variables for the stack map.
+    if (!addStackMapLiveVars(Ops, Call, 2))
+      return false;
+
+    // We are not adding any register mask info here, because the stackmap
+    // doesn't clobber anything.
+
+    // Add scratch registers as implicit def and early clobber.
+    CallingConv::ID CC = Call->getCallingConv();
+    const MCPhysReg *ScratchRegs = TLI.getScratchRegisters(CC);
+    for (unsigned i = 0; ScratchRegs[i]; ++i)
+      Ops.push_back(MachineOperand::CreateReg(
+        ScratchRegs[i], /*IsDef=*/true, /*IsImp=*/true, /*IsKill=*/false,
+        /*IsDead=*/false, /*IsUndef=*/false, /*IsEarlyClobber=*/true));
+
+    // Issue CALLSEQ_START
+    unsigned AdjStackDown = TII.getCallFrameSetupOpcode();
+    BuildMI(*FuncInfo.MBB, FuncInfo.InsertPt, DbgLoc, TII.get(AdjStackDown))
+      .addImm(0);
+
+    // Issue STACKMAP.
+    MachineInstrBuilder MIB;
+    MIB = BuildMI(*FuncInfo.MBB, FuncInfo.InsertPt, DbgLoc,
+                  TII.get(TargetOpcode::STACKMAP));
+
+    for (auto const &MO : Ops)
+      MIB.addOperand(MO);
+
+    // Issue CALLSEQ_END
+    unsigned AdjStackUp = TII.getCallFrameDestroyOpcode();
+    BuildMI(*FuncInfo.MBB, FuncInfo.InsertPt, DbgLoc, TII.get(AdjStackUp))
+      .addImm(0).addImm(0);
+
+    // Inform the Frame Information that we have a stackmap in this function.
+    FuncInfo.MF->getFrameInfo()->setHasStackMap();
+
     return true;
   }
   }
@@ -879,7 +982,6 @@ FastISel::SelectInstruction(const Instruction *I) {
 /// the CFG.
 void
 FastISel::FastEmitBranch(MachineBasicBlock *MSucc, DebugLoc DbgLoc) {
-
   if (FuncInfo.MBB->getBasicBlock()->size() > 1 &&
       FuncInfo.MBB->isLayoutSuccessor(MSucc)) {
     // For more accurate line information if this is the only instruction
@@ -890,7 +992,11 @@ FastISel::FastEmitBranch(MachineBasicBlock *MSucc, DebugLoc DbgLoc) {
     TII.InsertBranch(*FuncInfo.MBB, MSucc, nullptr,
                      SmallVector<MachineOperand, 0>(), DbgLoc);
   }
-  FuncInfo.MBB->addSuccessor(MSucc);
+  uint32_t BranchWeight = 0;
+  if (FuncInfo.BPI)
+    BranchWeight = FuncInfo.BPI->getEdgeWeight(FuncInfo.MBB->getBasicBlock(),
+                                               MSucc->getBasicBlock());
+  FuncInfo.MBB->addSuccessor(MSucc, BranchWeight);
 }
 
 /// SelectFNeg - Emit an FNeg operation.
@@ -1635,3 +1741,47 @@ bool FastISel::canFoldAddIntoGEP(const User *GEP, const Value *Add) {
   return isa<ConstantInt>(cast<AddOperator>(Add)->getOperand(1));
 }
 
+MachineMemOperand *
+FastISel::createMachineMemOperandFor(const Instruction *I) const {
+  const Value *Ptr;
+  Type *ValTy;
+  unsigned Alignment;
+  unsigned Flags;
+  bool IsVolatile;
+
+  if (const auto *LI = dyn_cast<LoadInst>(I)) {
+    Alignment = LI->getAlignment();
+    IsVolatile = LI->isVolatile();
+    Flags = MachineMemOperand::MOLoad;
+    Ptr = LI->getPointerOperand();
+    ValTy = LI->getType();
+  } else if (const auto *SI = dyn_cast<StoreInst>(I)) {
+    Alignment = SI->getAlignment();
+    IsVolatile = SI->isVolatile();
+    Flags = MachineMemOperand::MOStore;
+    Ptr = SI->getPointerOperand();
+    ValTy = SI->getValueOperand()->getType();
+  } else {
+    return nullptr;
+  }
+
+  bool IsNonTemporal = I->getMetadata("nontemporal") != nullptr;
+  bool IsInvariant = I->getMetadata("invariant.load") != nullptr;
+  const MDNode *TBAAInfo = I->getMetadata(LLVMContext::MD_tbaa);
+  const MDNode *Ranges = I->getMetadata(LLVMContext::MD_range);
+
+  if (Alignment == 0)  // Ensure that codegen never sees alignment 0.
+    Alignment = DL.getABITypeAlignment(ValTy);
+
+  unsigned Size = TM.getDataLayout()->getTypeStoreSize(ValTy);
+
+  if (IsVolatile)
+    Flags |= MachineMemOperand::MOVolatile;
+  if (IsNonTemporal)
+    Flags |= MachineMemOperand::MONonTemporal;
+  if (IsInvariant)
+    Flags |= MachineMemOperand::MOInvariant;
+
+  return FuncInfo.MF->getMachineMemOperand(MachinePointerInfo(Ptr), Flags, Size,
+                                           Alignment, TBAAInfo, Ranges);
+}

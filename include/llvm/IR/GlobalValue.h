@@ -63,7 +63,8 @@ protected:
               LinkageTypes Linkage, const Twine &Name)
       : Constant(Ty, VTy, Ops, NumOps), Linkage(Linkage),
         Visibility(DefaultVisibility), UnnamedAddr(0),
-        DllStorageClass(DefaultStorageClass), Parent(nullptr) {
+        DllStorageClass(DefaultStorageClass),
+        ThreadLocal(NotThreadLocal), Parent(nullptr) {
     setName(Name);
   }
 
@@ -74,21 +75,32 @@ protected:
   unsigned UnnamedAddr : 1;   // This value's address is not significant
   unsigned DllStorageClass : 2; // DLL storage class
 
+  unsigned ThreadLocal : 3; // Is this symbol "Thread Local", if so, what is
+                            // the desired model?
+
 private:
   // Give subclasses access to what otherwise would be wasted padding.
-  // (22 + 2 + 1 + 2 + 5) == 32.
-  unsigned SubClassData : 22;
+  // (19 + 3 + 2 + 1 + 2 + 5) == 32.
+  unsigned SubClassData : 19;
 protected:
   unsigned getGlobalValueSubClassData() const {
     return SubClassData;
   }
   void setGlobalValueSubClassData(unsigned V) {
-    assert(V < (1 << 22) && "It will not fit");
+    assert(V < (1 << 19) && "It will not fit");
     SubClassData = V;
   }
 
   Module *Parent;             // The containing module.
 public:
+  enum ThreadLocalMode {
+    NotThreadLocal = 0,
+    GeneralDynamicTLSModel,
+    LocalDynamicTLSModel,
+    InitialExecTLSModel,
+    LocalExecTLSModel
+  };
+
   ~GlobalValue() {
     removeDeadConstantUsers();   // remove any dead constants using this.
   }
@@ -110,6 +122,19 @@ public:
     Visibility = V;
   }
 
+  /// If the value is "Thread Local", its value isn't shared by the threads.
+  bool isThreadLocal() const { return getThreadLocalMode() != NotThreadLocal; }
+  void setThreadLocal(bool Val) {
+    setThreadLocalMode(Val ? GeneralDynamicTLSModel : NotThreadLocal);
+  }
+  void setThreadLocalMode(ThreadLocalMode Val) {
+    assert(Val == NotThreadLocal || getValueID() != Value::FunctionVal);
+    ThreadLocal = Val;
+  }
+  ThreadLocalMode getThreadLocalMode() const {
+    return static_cast<ThreadLocalMode>(ThreadLocal);
+  }
+
   DLLStorageClassTypes getDLLStorageClass() const {
     return DLLStorageClassTypes(DllStorageClass);
   }
@@ -121,8 +146,14 @@ public:
   }
   void setDLLStorageClass(DLLStorageClassTypes C) { DllStorageClass = C; }
 
-  bool hasSection() const { return !getSection().empty(); }
-  const std::string &getSection() const;
+  bool hasSection() const { return !StringRef(getSection()).empty(); }
+  // It is unfortunate that we have to use "char *" in here since this is
+  // always non NULL, but:
+  // * The C API expects a null terminated string, so we cannot use StringRef.
+  // * The C API expects us to own it, so we cannot use a std:string.
+  // * For GlobalAliases we can fail to find the section and we have to
+  //   return "", so we cannot use a "const std::string &".
+  const char *getSection() const;
 
   /// Global values are always pointers.
   inline PointerType *getType() const {
@@ -222,8 +253,8 @@ public:
   bool hasCommonLinkage() const { return isCommonLinkage(Linkage); }
 
   void setLinkage(LinkageTypes LT) {
-    assert((!isLocalLinkage(LT) || hasDefaultVisibility()) &&
-           "local linkage requires default visibility");
+    if (isLocalLinkage(LT))
+      Visibility = DefaultVisibility;
     Linkage = LT;
   }
   LinkageTypes getLinkage() const { return Linkage; }

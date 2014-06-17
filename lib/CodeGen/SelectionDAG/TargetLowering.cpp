@@ -103,12 +103,11 @@ TargetLowering::makeLibCall(SelectionDAG &DAG,
   SDValue Callee = DAG.getExternalSymbol(getLibcallName(LC), getPointerTy());
 
   Type *RetTy = RetVT.getTypeForEVT(*DAG.getContext());
-  TargetLowering::
-  CallLoweringInfo CLI(DAG.getEntryNode(), RetTy, isSigned, !isSigned, false,
-                    false, 0, getLibcallCallingConv(LC),
-                    /*isTailCall=*/false,
-                    doesNotReturn, isReturnValueUsed, Callee, Args,
-                    DAG, dl);
+  TargetLowering::CallLoweringInfo CLI(DAG);
+  CLI.setDebugLoc(dl).setChain(DAG.getEntryNode())
+    .setCallee(getLibcallCallingConv(LC), RetTy, Callee, &Args, 0)
+    .setNoReturn(doesNotReturn).setDiscardResult(!isReturnValueUsed)
+    .setSExtResult(isSigned).setZExtResult(!isSigned);
   return LowerCallTo(CLI);
 }
 
@@ -327,6 +326,10 @@ TargetLowering::TargetLoweringOpt::ShrinkDemandedOp(SDValue Op,
          "ShrinkDemandedOp only supports binary operators!");
   assert(Op.getNode()->getNumValues() == 1 &&
          "ShrinkDemandedOp only supports nodes with one result!");
+
+  // Early return, as this function cannot handle vector types.
+  if (Op.getValueType().isVector())
+    return false;
 
   // Don't do this if the node has another user, which may require the
   // full value.
@@ -2614,7 +2617,8 @@ SDValue TargetLowering::BuildExactSDIV(SDValue Op1, SDValue Op2, SDLoc dl,
   if (ShAmt) {
     // TODO: For UDIV use SRL instead of SRA.
     SDValue Amt = DAG.getConstant(ShAmt, getShiftAmountTy(Op1.getValueType()));
-    Op1 = DAG.getNode(ISD::SRA, dl, Op1.getValueType(), Op1, Amt);
+    Op1 = DAG.getNode(ISD::SRA, dl, Op1.getValueType(), Op1, Amt, false, false,
+                      true);
     d = d.ashr(ShAmt);
   }
 

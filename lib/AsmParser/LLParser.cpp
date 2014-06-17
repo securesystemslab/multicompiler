@@ -257,32 +257,30 @@ bool LLParser::ParseTopLevelEntities() {
     case lltok::kw_appending:           // OptionalLinkage
     case lltok::kw_common:              // OptionalLinkage
     case lltok::kw_extern_weak:         // OptionalLinkage
-    case lltok::kw_external: {          // OptionalLinkage
+    case lltok::kw_external:            // OptionalLinkage
+    case lltok::kw_default:             // OptionalVisibility
+    case lltok::kw_hidden:              // OptionalVisibility
+    case lltok::kw_protected:           // OptionalVisibility
+    case lltok::kw_dllimport:           // OptionalDLLStorageClass
+    case lltok::kw_dllexport:           // OptionalDLLStorageClass
+    case lltok::kw_thread_local:        // OptionalThreadLocal
+    case lltok::kw_addrspace:           // OptionalAddrSpace
+    case lltok::kw_constant:            // GlobalType
+    case lltok::kw_global: {            // GlobalType
       unsigned Linkage, Visibility, DLLStorageClass;
-      if (ParseOptionalLinkage(Linkage) ||
+      bool UnnamedAddr;
+      GlobalVariable::ThreadLocalMode TLM;
+      bool HasLinkage;
+      if (ParseOptionalLinkage(Linkage, HasLinkage) ||
           ParseOptionalVisibility(Visibility) ||
           ParseOptionalDLLStorageClass(DLLStorageClass) ||
-          ParseGlobal("", SMLoc(), Linkage, true, Visibility, DLLStorageClass))
+          ParseOptionalThreadLocal(TLM) ||
+          parseOptionalUnnamedAddr(UnnamedAddr) ||
+          ParseGlobal("", SMLoc(), Linkage, HasLinkage, Visibility,
+                      DLLStorageClass, TLM, UnnamedAddr))
         return true;
       break;
     }
-    case lltok::kw_default:       // OptionalVisibility
-    case lltok::kw_hidden:        // OptionalVisibility
-    case lltok::kw_protected: {   // OptionalVisibility
-      unsigned Visibility, DLLStorageClass;
-      if (ParseOptionalVisibility(Visibility) ||
-          ParseOptionalDLLStorageClass(DLLStorageClass) ||
-          ParseGlobal("", SMLoc(), 0, false, Visibility, DLLStorageClass))
-        return true;
-      break;
-    }
-
-    case lltok::kw_thread_local:  // OptionalThreadLocal
-    case lltok::kw_addrspace:     // OptionalAddrSpace
-    case lltok::kw_constant:      // GlobalType
-    case lltok::kw_global:        // GlobalType
-      if (ParseGlobal("", SMLoc(), 0, false, 0, 0)) return true;
-      break;
 
     case lltok::kw_attributes: if (ParseUnnamedAttrGrp()) return true; break;
     }
@@ -470,15 +468,20 @@ bool LLParser::ParseUnnamedGlobal() {
 
   bool HasLinkage;
   unsigned Linkage, Visibility, DLLStorageClass;
+  GlobalVariable::ThreadLocalMode TLM;
+  bool UnnamedAddr;
   if (ParseOptionalLinkage(Linkage, HasLinkage) ||
       ParseOptionalVisibility(Visibility) ||
-      ParseOptionalDLLStorageClass(DLLStorageClass))
+      ParseOptionalDLLStorageClass(DLLStorageClass) ||
+      ParseOptionalThreadLocal(TLM) ||
+      parseOptionalUnnamedAddr(UnnamedAddr))
     return true;
 
   if (HasLinkage || Lex.getKind() != lltok::kw_alias)
     return ParseGlobal(Name, NameLoc, Linkage, HasLinkage, Visibility,
-                       DLLStorageClass);
-  return ParseAlias(Name, NameLoc, Visibility, DLLStorageClass);
+                       DLLStorageClass, TLM, UnnamedAddr);
+  return ParseAlias(Name, NameLoc, Visibility, DLLStorageClass, TLM,
+                    UnnamedAddr);
 }
 
 /// ParseNamedGlobal:
@@ -493,16 +496,21 @@ bool LLParser::ParseNamedGlobal() {
 
   bool HasLinkage;
   unsigned Linkage, Visibility, DLLStorageClass;
+  GlobalVariable::ThreadLocalMode TLM;
+  bool UnnamedAddr;
   if (ParseToken(lltok::equal, "expected '=' in global variable") ||
       ParseOptionalLinkage(Linkage, HasLinkage) ||
       ParseOptionalVisibility(Visibility) ||
-      ParseOptionalDLLStorageClass(DLLStorageClass))
+      ParseOptionalDLLStorageClass(DLLStorageClass) ||
+      ParseOptionalThreadLocal(TLM) ||
+      parseOptionalUnnamedAddr(UnnamedAddr))
     return true;
 
   if (HasLinkage || Lex.getKind() != lltok::kw_alias)
     return ParseGlobal(Name, NameLoc, Linkage, HasLinkage, Visibility,
-                       DLLStorageClass);
-  return ParseAlias(Name, NameLoc, Visibility, DLLStorageClass);
+                       DLLStorageClass, TLM, UnnamedAddr);
+  return ParseAlias(Name, NameLoc, Visibility, DLLStorageClass, TLM,
+                    UnnamedAddr);
 }
 
 // MDString:
@@ -628,17 +636,19 @@ static bool isValidVisibilityForLinkage(unsigned V, unsigned L) {
 }
 
 /// ParseAlias:
-///   ::= GlobalVar '=' OptionalVisibility OptionalDLLStorageClass 'alias'
+///   ::= GlobalVar '=' OptionalVisibility OptionalDLLStorageClass
+///                     OptionalThreadLocal OptionalUnNammedAddr 'alias'
 ///                     OptionalLinkage Aliasee
+///
 /// Aliasee
 ///   ::= TypeAndValue
-///   ::= 'bitcast' '(' TypeAndValue 'to' Type ')'
-///   ::= 'getelementptr' 'inbounds'? '(' ... ')'
 ///
-/// Everything through DLL storage class has already been parsed.
+/// Everything through OptionalUnNammedAddr has already been parsed.
 ///
 bool LLParser::ParseAlias(const std::string &Name, LocTy NameLoc,
-                          unsigned Visibility, unsigned DLLStorageClass) {
+                          unsigned Visibility, unsigned DLLStorageClass,
+                          GlobalVariable::ThreadLocalMode TLM,
+                          bool UnnamedAddr) {
   assert(Lex.getKind() == lltok::kw_alias);
   Lex.Lex();
   LocTy LinkageLoc = Lex.getLoc();
@@ -658,25 +668,36 @@ bool LLParser::ParseAlias(const std::string &Name, LocTy NameLoc,
   Constant *Aliasee;
   LocTy AliaseeLoc = Lex.getLoc();
   if (Lex.getKind() != lltok::kw_bitcast &&
-      Lex.getKind() != lltok::kw_getelementptr) {
-    if (ParseGlobalTypeAndValue(Aliasee)) return true;
+      Lex.getKind() != lltok::kw_getelementptr &&
+      Lex.getKind() != lltok::kw_addrspacecast &&
+      Lex.getKind() != lltok::kw_inttoptr) {
+    if (ParseGlobalTypeAndValue(Aliasee))
+      return true;
   } else {
     // The bitcast dest type is not present, it is implied by the dest type.
     ValID ID;
-    if (ParseValID(ID)) return true;
+    if (ParseValID(ID))
+      return true;
     if (ID.Kind != ValID::t_Constant)
       return Error(AliaseeLoc, "invalid aliasee");
     Aliasee = ID.ConstantVal;
   }
 
-  if (!Aliasee->getType()->isPointerTy())
-    return Error(AliaseeLoc, "alias must have pointer type");
+  Type *AliaseeType = Aliasee->getType();
+  auto *PTy = dyn_cast<PointerType>(AliaseeType);
+  if (!PTy)
+    return Error(AliaseeLoc, "An alias must have pointer type");
+  Type *Ty = PTy->getElementType();
+  unsigned AddrSpace = PTy->getAddressSpace();
 
   // Okay, create the alias but do not insert it into the module yet.
-  std::unique_ptr<GlobalAlias> GA(new GlobalAlias(
-      Aliasee->getType(), (GlobalValue::LinkageTypes)Linkage, Name, Aliasee));
+  std::unique_ptr<GlobalAlias> GA(
+      GlobalAlias::create(Ty, AddrSpace, (GlobalValue::LinkageTypes)Linkage,
+                          Name, Aliasee, /*Parent*/ nullptr));
+  GA->setThreadLocalMode(TLM);
   GA->setVisibility((GlobalValue::VisibilityTypes)Visibility);
   GA->setDLLStorageClass((GlobalValue::DLLStorageClassTypes)DLLStorageClass);
+  GA->setUnnamedAddr(UnnamedAddr);
 
   // See if this value already exists in the symbol table.  If so, it is either
   // a redefinition or a definition of a forward reference.
@@ -713,34 +734,31 @@ bool LLParser::ParseAlias(const std::string &Name, LocTy NameLoc,
 
 /// ParseGlobal
 ///   ::= GlobalVar '=' OptionalLinkage OptionalVisibility OptionalDLLStorageClass
-///       OptionalThreadLocal OptionalAddrSpace OptionalUnNammedAddr
+///       OptionalThreadLocal OptionalUnNammedAddr OptionalAddrSpace
 ///       OptionalExternallyInitialized GlobalType Type Const
 ///   ::= OptionalLinkage OptionalVisibility OptionalDLLStorageClass
-///       OptionalThreadLocal OptionalAddrSpace OptionalUnNammedAddr
+///       OptionalThreadLocal OptionalUnNammedAddr OptionalAddrSpace
 ///       OptionalExternallyInitialized GlobalType Type Const
 ///
-/// Everything up to and including OptionalDLLStorageClass has been parsed
+/// Everything up to and including OptionalUnNammedAddr has been parsed
 /// already.
 ///
 bool LLParser::ParseGlobal(const std::string &Name, LocTy NameLoc,
                            unsigned Linkage, bool HasLinkage,
-                           unsigned Visibility, unsigned DLLStorageClass) {
+                           unsigned Visibility, unsigned DLLStorageClass,
+                           GlobalVariable::ThreadLocalMode TLM,
+                           bool UnnamedAddr) {
   if (!isValidVisibilityForLinkage(Visibility, Linkage))
     return Error(NameLoc,
                  "symbol with local linkage must have default visibility");
 
   unsigned AddrSpace;
-  bool IsConstant, UnnamedAddr, IsExternallyInitialized;
-  GlobalVariable::ThreadLocalMode TLM;
-  LocTy UnnamedAddrLoc;
+  bool IsConstant, IsExternallyInitialized;
   LocTy IsExternallyInitializedLoc;
   LocTy TyLoc;
 
   Type *Ty = nullptr;
-  if (ParseOptionalThreadLocal(TLM) ||
-      ParseOptionalAddrSpace(AddrSpace) ||
-      ParseOptionalToken(lltok::kw_unnamed_addr, UnnamedAddr,
-                         &UnnamedAddrLoc) ||
+  if (ParseOptionalAddrSpace(AddrSpace) ||
       ParseOptionalToken(lltok::kw_externally_initialized,
                          IsExternallyInitialized,
                          &IsExternallyInitializedLoc) ||
@@ -938,6 +956,7 @@ bool LLParser::ParseFnAttributeValuePairs(AttrBuilder &B,
     case lltok::kw_builtin:           B.addAttribute(Attribute::Builtin); break;
     case lltok::kw_cold:              B.addAttribute(Attribute::Cold); break;
     case lltok::kw_inlinehint:        B.addAttribute(Attribute::InlineHint); break;
+    case lltok::kw_jumptable:         B.addAttribute(Attribute::JumpTable); break;
     case lltok::kw_minsize:           B.addAttribute(Attribute::MinSize); break;
     case lltok::kw_naked:             B.addAttribute(Attribute::Naked); break;
     case lltok::kw_nobuiltin:         B.addAttribute(Attribute::NoBuiltin); break;
@@ -974,6 +993,7 @@ bool LLParser::ParseFnAttributeValuePairs(AttrBuilder &B,
     case lltok::kw_nest:
     case lltok::kw_noalias:
     case lltok::kw_nocapture:
+    case lltok::kw_nonnull:
     case lltok::kw_returned:
     case lltok::kw_sret:
       HaveError |=
@@ -1188,6 +1208,7 @@ bool LLParser::ParseOptionalParamAttrs(AttrBuilder &B) {
     case lltok::kw_nest:            B.addAttribute(Attribute::Nest); break;
     case lltok::kw_noalias:         B.addAttribute(Attribute::NoAlias); break;
     case lltok::kw_nocapture:       B.addAttribute(Attribute::NoCapture); break;
+    case lltok::kw_nonnull:         B.addAttribute(Attribute::NonNull); break;
     case lltok::kw_readnone:        B.addAttribute(Attribute::ReadNone); break;
     case lltok::kw_readonly:        B.addAttribute(Attribute::ReadOnly); break;
     case lltok::kw_returned:        B.addAttribute(Attribute::Returned); break;
@@ -1199,6 +1220,7 @@ bool LLParser::ParseOptionalParamAttrs(AttrBuilder &B) {
     case lltok::kw_alwaysinline:
     case lltok::kw_builtin:
     case lltok::kw_inlinehint:
+    case lltok::kw_jumptable:
     case lltok::kw_minsize:
     case lltok::kw_naked:
     case lltok::kw_nobuiltin:
@@ -1240,6 +1262,7 @@ bool LLParser::ParseOptionalReturnAttrs(AttrBuilder &B) {
       return HaveError;
     case lltok::kw_inreg:           B.addAttribute(Attribute::InReg); break;
     case lltok::kw_noalias:         B.addAttribute(Attribute::NoAlias); break;
+    case lltok::kw_nonnull:         B.addAttribute(Attribute::NonNull); break;
     case lltok::kw_signext:         B.addAttribute(Attribute::SExt); break;
     case lltok::kw_zeroext:         B.addAttribute(Attribute::ZExt); break;
 
@@ -1259,6 +1282,7 @@ bool LLParser::ParseOptionalReturnAttrs(AttrBuilder &B) {
     case lltok::kw_builtin:
     case lltok::kw_cold:
     case lltok::kw_inlinehint:
+    case lltok::kw_jumptable:
     case lltok::kw_minsize:
     case lltok::kw_naked:
     case lltok::kw_nobuiltin:
@@ -3979,7 +4003,8 @@ bool LLParser::ParseLandingPad(Instruction *&Inst, PerFunctionState &PFS) {
     else
       return TokError("expected 'catch' or 'filter' clause type");
 
-    Value *V; LocTy VLoc;
+    Value *V;
+    LocTy VLoc;
     if (ParseTypeAndValue(V, VLoc, PFS)) {
       delete LP;
       return true;
@@ -3995,7 +4020,7 @@ bool LLParser::ParseLandingPad(Instruction *&Inst, PerFunctionState &PFS) {
         Error(VLoc, "'filter' clause has an invalid type");
     }
 
-    LP->addClause(V);
+    LP->addClause(cast<Constant>(V));
   }
 
   Inst = LP;
@@ -4231,8 +4256,8 @@ int LLParser::ParseStore(Instruction *&Inst, PerFunctionState &PFS) {
 }
 
 /// ParseCmpXchg
-///   ::= 'cmpxchg' 'volatile'? TypeAndValue ',' TypeAndValue ',' TypeAndValue
-///       'singlethread'? AtomicOrdering AtomicOrdering
+///   ::= 'cmpxchg' 'weak'? 'volatile'? TypeAndValue ',' TypeAndValue ','
+///       TypeAndValue 'singlethread'? AtomicOrdering AtomicOrdering
 int LLParser::ParseCmpXchg(Instruction *&Inst, PerFunctionState &PFS) {
   Value *Ptr, *Cmp, *New; LocTy PtrLoc, CmpLoc, NewLoc;
   bool AteExtraComma = false;
@@ -4240,6 +4265,10 @@ int LLParser::ParseCmpXchg(Instruction *&Inst, PerFunctionState &PFS) {
   AtomicOrdering FailureOrdering = NotAtomic;
   SynchronizationScope Scope = CrossThread;
   bool isVolatile = false;
+  bool isWeak = false;
+
+  if (EatIfPresent(lltok::kw_weak))
+    isWeak = true;
 
   if (EatIfPresent(lltok::kw_volatile))
     isVolatile = true;
@@ -4272,9 +4301,10 @@ int LLParser::ParseCmpXchg(Instruction *&Inst, PerFunctionState &PFS) {
     return Error(NewLoc, "cmpxchg operand must be power-of-two byte-sized"
                          " integer");
 
-  AtomicCmpXchgInst *CXI = new AtomicCmpXchgInst(Ptr, Cmp, New, SuccessOrdering,
-                                                 FailureOrdering, Scope);
+  AtomicCmpXchgInst *CXI = new AtomicCmpXchgInst(
+      Ptr, Cmp, New, SuccessOrdering, FailureOrdering, Scope);
   CXI->setVolatile(isVolatile);
+  CXI->setWeak(isWeak);
   Inst = CXI;
   return AteExtraComma ? InstExtraComma : InstNormal;
 }

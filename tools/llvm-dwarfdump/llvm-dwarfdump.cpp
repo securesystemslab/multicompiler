@@ -25,11 +25,11 @@
 #include "llvm/Support/PrettyStackTrace.h"
 #include "llvm/Support/Signals.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/Support/system_error.h"
 #include <algorithm>
 #include <cstring>
 #include <list>
 #include <string>
+#include <system_error>
 
 using namespace llvm;
 using namespace object;
@@ -37,19 +37,6 @@ using namespace object;
 static cl::list<std::string>
 InputFilenames(cl::Positional, cl::desc("<input object files>"),
                cl::ZeroOrMore);
-
-static cl::opt<unsigned long long>
-Address("address", cl::init(-1ULL),
-        cl::desc("Print line information for a given address"));
-
-static cl::opt<bool>
-PrintFunctions("functions", cl::init(false),
-               cl::desc("Print function names as well as line information "
-                        "for a given address"));
-
-static cl::opt<bool>
-PrintInlining("inlining", cl::init(false),
-              cl::desc("Print all inlined frames for a given address"));
 
 static cl::opt<DIDumpType>
 DumpType("debug-dump", cl::init(DIDT_All),
@@ -78,22 +65,16 @@ DumpType("debug-dump", cl::init(DIDT_All),
         clEnumValN(DIDT_StrOffsetsDwo, "str_offsets.dwo", ".debug_str_offsets.dwo"),
         clEnumValEnd));
 
-static void PrintDILineInfo(DILineInfo dli) {
-  if (PrintFunctions)
-    outs() << dli.FunctionName << "\n";
-  outs() << dli.FileName << ':' << dli.Line << ':' << dli.Column << '\n';
-}
-
 static void DumpInput(const StringRef &Filename) {
   std::unique_ptr<MemoryBuffer> Buff;
 
-  if (error_code ec = MemoryBuffer::getFileOrSTDIN(Filename, Buff)) {
+  if (std::error_code ec = MemoryBuffer::getFileOrSTDIN(Filename, Buff)) {
     errs() << Filename << ": " << ec.message() << "\n";
     return;
   }
 
   ErrorOr<ObjectFile*> ObjOrErr(ObjectFile::createObjectFile(Buff.release()));
-  if (error_code EC = ObjOrErr.getError()) {
+  if (std::error_code EC = ObjOrErr.getError()) {
     errs() << Filename << ": " << EC.message() << '\n';
     return;
   }
@@ -101,35 +82,10 @@ static void DumpInput(const StringRef &Filename) {
 
   std::unique_ptr<DIContext> DICtx(DIContext::getDWARFContext(Obj.get()));
 
-  if (Address == -1ULL) {
-    outs() << Filename
-           << ":\tfile format " << Obj->getFileFormatName() << "\n\n";
-    // Dump the complete DWARF structure.
-    DICtx->dump(outs(), DumpType);
-  } else {
-    // Print line info for the specified address.
-    int SpecFlags = DILineInfoSpecifier::FileLineInfo |
-                    DILineInfoSpecifier::AbsoluteFilePath;
-    if (PrintFunctions)
-      SpecFlags |= DILineInfoSpecifier::FunctionName;
-    if (PrintInlining) {
-      DIInliningInfo InliningInfo =
-        DICtx->getInliningInfoForAddress(Address, SpecFlags);
-      uint32_t n = InliningInfo.getNumberOfFrames();
-      if (n == 0) {
-        // Print one empty debug line info in any case.
-        PrintDILineInfo(DILineInfo());
-      } else {
-        for (uint32_t i = 0; i < n; i++) {
-          DILineInfo dli = InliningInfo.getFrame(i);
-          PrintDILineInfo(dli);
-        }
-      }
-    } else {
-      DILineInfo dli = DICtx->getLineInfoForAddress(Address, SpecFlags);
-      PrintDILineInfo(dli);
-    }
-  }
+  outs() << Filename
+         << ":\tfile format " << Obj->getFileFormatName() << "\n\n";
+  // Dump the complete DWARF structure.
+  DICtx->dump(outs(), DumpType);
 }
 
 int main(int argc, char **argv) {

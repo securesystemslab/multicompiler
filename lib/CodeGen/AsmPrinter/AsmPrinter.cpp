@@ -18,6 +18,7 @@
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/Analysis/ConstantFolding.h"
+#include "llvm/Analysis/JumpInstrTableInfo.h"
 #include "llvm/CodeGen/GCMetadataPrinter.h"
 #include "llvm/CodeGen/MachineConstantPool.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
@@ -232,23 +233,23 @@ bool AsmPrinter::doInitialization(Module &M) {
     }
   }
 
-  DwarfException *DE = nullptr;
+  EHStreamer *ES = nullptr;
   switch (MAI->getExceptionHandlingType()) {
   case ExceptionHandling::None:
     break;
   case ExceptionHandling::SjLj:
   case ExceptionHandling::DwarfCFI:
-    DE = new DwarfCFIException(this);
+    ES = new DwarfCFIException(this);
     break;
   case ExceptionHandling::ARM:
-    DE = new ARMException(this);
+    ES = new ARMException(this);
     break;
   case ExceptionHandling::Win64:
-    DE = new Win64Exception(this);
+    ES = new Win64Exception(this);
     break;
   }
-  if (DE)
-    Handlers.push_back(HandlerInfo(DE, EHTimerName, DWARFGroupName));
+  if (ES)
+    Handlers.push_back(HandlerInfo(ES, EHTimerName, DWARFGroupName));
   return false;
 }
 
@@ -870,6 +871,8 @@ void AsmPrinter::EmitFunctionBody() {
   OutStreamer.AddBlankLine();
 }
 
+static const MCExpr *lowerConstant(const Constant *CV, AsmPrinter &AP);
+
 bool AsmPrinter::doFinalization(Module &M) {
   // Emit global variables.
   for (const auto &G : M.globals())
@@ -885,6 +888,54 @@ bool AsmPrinter::doFinalization(Module &M) {
 
     MCSymbol *Name = getSymbol(&F);
     EmitVisibility(Name, V, false);
+  }
+
+  // Get information about jump-instruction tables to print.
+  JumpInstrTableInfo *JITI = getAnalysisIfAvailable<JumpInstrTableInfo>();
+
+  if (JITI && !JITI->getTables().empty()) {
+    unsigned Arch = Triple(getTargetTriple()).getArch();
+    bool IsThumb = (Arch == Triple::thumb || Arch == Triple::thumbeb);
+    MCInst TrapInst;
+    TM.getInstrInfo()->getTrap(TrapInst);
+    for (const auto &KV : JITI->getTables()) {
+      uint64_t Count = 0;
+      for (const auto &FunPair : KV.second) {
+        // Emit the function labels to make this be a function entry point.
+        MCSymbol *FunSym =
+          OutContext.GetOrCreateSymbol(FunPair.second->getName());
+        OutStreamer.EmitSymbolAttribute(FunSym, MCSA_Global);
+        // FIXME: JumpTableInstrInfo should store information about the required
+        // alignment of table entries and the size of the padding instruction.
+        EmitAlignment(3);
+        if (IsThumb)
+          OutStreamer.EmitThumbFunc(FunSym);
+        if (MAI->hasDotTypeDotSizeDirective())
+          OutStreamer.EmitSymbolAttribute(FunSym, MCSA_ELF_TypeFunction);
+        OutStreamer.EmitLabel(FunSym);
+
+        // Emit the jump instruction to transfer control to the original
+        // function.
+        MCInst JumpToFun;
+        MCSymbol *TargetSymbol =
+          OutContext.GetOrCreateSymbol(FunPair.first->getName());
+        const MCSymbolRefExpr *TargetSymRef =
+          MCSymbolRefExpr::Create(TargetSymbol, MCSymbolRefExpr::VK_PLT,
+                                  OutContext);
+        TM.getInstrInfo()->getUnconditionalBranch(JumpToFun, TargetSymRef);
+        OutStreamer.EmitInstruction(JumpToFun, getSubtargetInfo());
+        ++Count;
+      }
+
+      // Emit enough padding instructions to fill up to the next power of two.
+      // This assumes that the trap instruction takes 8 bytes or fewer.
+      uint64_t Remaining = NextPowerOf2(Count) - Count;
+      for (uint64_t C = 0; C < Remaining; ++C) {
+        EmitAlignment(3);
+        OutStreamer.EmitInstruction(TrapInst, getSubtargetInfo());
+      }
+
+    }
   }
 
   // Emit module flags.
@@ -932,10 +983,6 @@ bool AsmPrinter::doFinalization(Module &M) {
     for (const auto &Alias : M.aliases()) {
       MCSymbol *Name = getSymbol(&Alias);
 
-      const GlobalValue *GV = Alias.getAliasedGlobal();
-      assert(!GV->isDeclaration());
-      MCSymbol *Target = getSymbol(GV);
-
       if (Alias.hasExternalLinkage() || !MAI->getWeakRefDirective())
         OutStreamer.EmitSymbolAttribute(Name, MCSA_Global);
       else if (Alias.hasWeakLinkage() || Alias.hasLinkOnceLinkage())
@@ -947,7 +994,7 @@ bool AsmPrinter::doFinalization(Module &M) {
 
       // Emit the directives as assignments aka .set:
       OutStreamer.EmitAssignment(Name,
-                                 MCSymbolRefExpr::Create(Target, OutContext));
+                                 lowerConstant(Alias.getAliasee(), *this));
     }
   }
 
@@ -1248,7 +1295,7 @@ bool AsmPrinter::EmitSpecialLLVMGlobal(const GlobalVariable *GV) {
   }
 
   // Ignore debug and non-emitted data.  This handles llvm.compiler.used.
-  if (GV->getSection() == "llvm.metadata" ||
+  if (StringRef(GV->getSection()) == "llvm.metadata" ||
       GV->hasAvailableExternallyLinkage())
     return true;
 
@@ -1296,6 +1343,15 @@ void AsmPrinter::EmitLLVMUsedList(const ConstantArray *InitList) {
   }
 }
 
+namespace {
+struct Structor {
+  Structor() : Priority(0), Func(nullptr), ComdatKey(nullptr) {}
+  int Priority;
+  llvm::Constant *Func;
+  llvm::GlobalValue *ComdatKey;
+};
+} // end namespace
+
 /// EmitXXStructorList - Emit the ctor or dtor list taking into account the init
 /// priority.
 void AsmPrinter::EmitXXStructorList(const Constant *List, bool isCtor) {
@@ -1307,37 +1363,55 @@ void AsmPrinter::EmitXXStructorList(const Constant *List, bool isCtor) {
   const ConstantArray *InitList = dyn_cast<ConstantArray>(List);
   if (!InitList) return; // Not an array!
   StructType *ETy = dyn_cast<StructType>(InitList->getType()->getElementType());
-  if (!ETy || ETy->getNumElements() != 2) return; // Not an array of pairs!
+  // FIXME: Only allow the 3-field form in LLVM 4.0.
+  if (!ETy || ETy->getNumElements() < 2 || ETy->getNumElements() > 3)
+    return; // Not an array of two or three elements!
   if (!isa<IntegerType>(ETy->getTypeAtIndex(0U)) ||
       !isa<PointerType>(ETy->getTypeAtIndex(1U))) return; // Not (int, ptr).
+  if (ETy->getNumElements() == 3 && !isa<PointerType>(ETy->getTypeAtIndex(2U)))
+    return; // Not (int, ptr, ptr).
 
   // Gather the structors in a form that's convenient for sorting by priority.
-  typedef std::pair<unsigned, Constant *> Structor;
   SmallVector<Structor, 8> Structors;
-  for (unsigned i = 0, e = InitList->getNumOperands(); i != e; ++i) {
-    ConstantStruct *CS = dyn_cast<ConstantStruct>(InitList->getOperand(i));
+  for (Value *O : InitList->operands()) {
+    ConstantStruct *CS = dyn_cast<ConstantStruct>(O);
     if (!CS) continue; // Malformed.
     if (CS->getOperand(1)->isNullValue())
       break;  // Found a null terminator, skip the rest.
     ConstantInt *Priority = dyn_cast<ConstantInt>(CS->getOperand(0));
     if (!Priority) continue; // Malformed.
-    Structors.push_back(std::make_pair(Priority->getLimitedValue(65535),
-                                       CS->getOperand(1)));
+    Structors.push_back(Structor());
+    Structor &S = Structors.back();
+    S.Priority = Priority->getLimitedValue(65535);
+    S.Func = CS->getOperand(1);
+    if (ETy->getNumElements() == 3 && !CS->getOperand(2)->isNullValue())
+      S.ComdatKey = dyn_cast<GlobalValue>(CS->getOperand(2)->stripPointerCasts());
   }
 
   // Emit the function pointers in the target-specific order
   const DataLayout *DL = TM.getDataLayout();
   unsigned Align = Log2_32(DL->getPointerPrefAlignment());
-  std::stable_sort(Structors.begin(), Structors.end(), less_first());
-  for (unsigned i = 0, e = Structors.size(); i != e; ++i) {
+  std::stable_sort(Structors.begin(), Structors.end(),
+                   [](const Structor &L,
+                      const Structor &R) { return L.Priority < R.Priority; });
+  for (Structor &S : Structors) {
+    const TargetLoweringObjectFile &Obj = getObjFileLowering();
+    const MCSymbol *KeySym = nullptr;
+    if (GlobalValue *GV = S.ComdatKey) {
+      if (GV->hasAvailableExternallyLinkage())
+        // If the associated variable is available_externally, some other TU
+        // will provide its dynamic initializer.
+        continue;
+
+      KeySym = getSymbol(GV);
+    }
     const MCSection *OutputSection =
-      (isCtor ?
-       getObjFileLowering().getStaticCtorSection(Structors[i].first) :
-       getObjFileLowering().getStaticDtorSection(Structors[i].first));
+        (isCtor ? Obj.getStaticCtorSection(S.Priority, KeySym)
+                : Obj.getStaticDtorSection(S.Priority, KeySym));
     OutStreamer.SwitchSection(OutputSection);
     if (OutStreamer.getCurrentSection() != OutStreamer.getPreviousSection())
       EmitAlignment(Align);
-    EmitXXStructor(Structors[i].second);
+    EmitXXStructor(S.Func);
   }
 }
 
@@ -1793,6 +1867,7 @@ static void emitGlobalConstantFP(const ConstantFP *CFP, AsmPrinter &AP) {
     SmallString<8> StrVal;
     CFP->getValueAPF().toString(StrVal);
 
+    assert(CFP->getType() != nullptr && "Expecting non-null Type");
     CFP->getType()->print(AP.OutStreamer.GetCommentOS());
     AP.OutStreamer.GetCommentOS() << ' ' << StrVal << '\n';
   }

@@ -415,7 +415,7 @@ int main(int argc, char **argv, char * const *envp) {
 
   // If not jitting lazily, load the whole bitcode file eagerly too.
   if (NoLazyCompilation) {
-    if (error_code EC = Mod->materializeAllPermanently()) {
+    if (std::error_code EC = Mod->materializeAllPermanently()) {
       errs() << argv[0] << ": bitcode didn't read correctly.\n";
       errs() << "Reason: " << EC.message() << "\n";
       exit(1);
@@ -539,7 +539,7 @@ int main(int argc, char **argv, char * const *envp) {
 
   for (unsigned i = 0, e = ExtraArchives.size(); i != e; ++i) {
     std::unique_ptr<MemoryBuffer> ArBuf;
-    error_code ec;
+    std::error_code ec;
     ec = MemoryBuffer::getFileOrSTDIN(ExtraArchives[i], ArBuf);
     if (ec) {
       Err.print(argv[0], errs());

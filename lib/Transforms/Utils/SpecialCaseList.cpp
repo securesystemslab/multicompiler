@@ -26,8 +26,8 @@
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/Regex.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/Support/system_error.h"
 #include <string>
+#include <system_error>
 #include <utility>
 
 namespace llvm {
@@ -55,7 +55,7 @@ SpecialCaseList *SpecialCaseList::create(
   if (Path.empty())
     return new SpecialCaseList();
   std::unique_ptr<MemoryBuffer> File;
-  if (error_code EC = MemoryBuffer::getFile(Path, File)) {
+  if (std::error_code EC = MemoryBuffer::getFile(Path, File)) {
     Error = (Twine("Can't open file '") + Path + "': " + EC.message()).str();
     return nullptr;
   }

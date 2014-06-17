@@ -28,10 +28,9 @@ using namespace llvm;
 #define GET_INSTRINFO_CTOR_DTOR
 #include "AMDGPUGenDFAPacketizer.inc"
 
-R600InstrInfo::R600InstrInfo(AMDGPUTargetMachine &tm)
-  : AMDGPUInstrInfo(tm),
-    RI(tm),
-    ST(tm.getSubtarget<AMDGPUSubtarget>())
+R600InstrInfo::R600InstrInfo(const AMDGPUSubtarget &st)
+  : AMDGPUInstrInfo(st),
+    RI(st)
   { }
 
 const R600RegisterInfo &R600InstrInfo::getRegisterInfo() const {
@@ -768,16 +767,6 @@ R600InstrInfo::AnalyzeBranch(MachineBasicBlock &MBB,
   return true;
 }
 
-int R600InstrInfo::getBranchInstr(const MachineOperand &op) const {
-  const MachineInstr *MI = op.getParent();
-
-  switch (MI->getDesc().OpInfo->RegClass) {
-  default: // FIXME: fallthrough??
-  case AMDGPU::GPRI32RegClassID: return AMDGPU::BRANCH_COND_i32;
-  case AMDGPU::GPRF32RegClassID: return AMDGPU::BRANCH_COND_f32;
-  };
-}
-
 static
 MachineBasicBlock::iterator FindLastAluClause(MachineBasicBlock &MBB) {
   for (MachineBasicBlock::reverse_iterator It = MBB.rbegin(), E = MBB.rend();
@@ -1067,7 +1056,8 @@ unsigned int R600InstrInfo::getInstrLatency(const InstrItineraryData *ItinData,
 void  R600InstrInfo::reserveIndirectRegisters(BitVector &Reserved,
                                              const MachineFunction &MF) const {
   const AMDGPUFrameLowering *TFL =
-                 static_cast<const AMDGPUFrameLowering*>(TM.getFrameLowering());
+    static_cast<const AMDGPUFrameLowering*>(
+    MF.getTarget().getFrameLowering());
 
   unsigned StackWidth = TFL->getStackWidth(MF);
   int End = getIndirectIndexEnd(MF);
@@ -1220,7 +1210,6 @@ MachineInstr *R600InstrInfo::buildSlotOfVectorInstruction(
     const {
   assert (MI->getOpcode() == AMDGPU::DOT_4 && "Not Implemented");
   unsigned Opcode;
-  const AMDGPUSubtarget &ST = TM.getSubtarget<AMDGPUSubtarget>();
   if (ST.getGeneration() <= AMDGPUSubtarget::R700)
     Opcode = AMDGPU::DOT4_r600;
   else

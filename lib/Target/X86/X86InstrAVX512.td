@@ -517,10 +517,12 @@ def rr : AVX512XS8I<opc, MRMDestReg, (outs DstRC:$dst), (ins KRC:$src),
                   []>, EVEX;
 }
 
+let Predicates = [HasCDI] in {
 defm VPBROADCASTMW2D : avx512_mask_broadcast<0x3A, "vpbroadcastmw2d", VR512,
                                              VK16, v16i32, v16i1>, EVEX_V512;
 defm VPBROADCASTMB2Q : avx512_mask_broadcast<0x2A, "vpbroadcastmb2q", VR512,
                                             VK8, v8i64, v8i1>, EVEX_V512, VEX_W;
+}
 
 //===----------------------------------------------------------------------===//
 // AVX-512 - VPERM
@@ -1786,6 +1788,17 @@ def : Pat<(v16i32 (X86Vinsert undef, GR32:$src2, (iPTR 0))),
 
 def : Pat<(v8i64 (X86Vinsert undef, GR64:$src2, (iPTR 0))),
         (SUBREG_TO_REG (i32 0), (VMOV64toPQIZrr GR64:$src2), sub_xmm)>;
+
+//===----------------------------------------------------------------------===//
+// AVX-512 - Non-temporals
+//===----------------------------------------------------------------------===//
+
+def VMOVNTDQAZrm : AVX5128I<0x2A, MRMSrcMem, (outs VR512:$dst),
+                            (ins i512mem:$src),
+                            "vmovntdqa\t{$src, $dst|$dst, $src}",
+                            [(set VR512:$dst,
+                              (int_x86_avx512_movntdqa addr:$src))]>,
+                   EVEX, EVEX_V512;
 
 //===----------------------------------------------------------------------===//
 // AVX-512 - Integer arithmetic
@@ -4342,6 +4355,37 @@ def : Pat<(int_x86_avx512_mask_conflict_q_512 VR512:$src2, VR512:$src1,
                                               GR8:$mask),
           (VPCONFLICTQrrk VR512:$src1,
            (v8i1 (COPY_TO_REGCLASS GR8:$mask, VK8WM)), VR512:$src2)>;
+
+let Predicates = [HasCDI] in {
+defm VPLZCNTD : avx512_conflict<0x44, "vplzcntd", VR512, VK16WM,
+                    i512mem, i32mem, "{1to16}">,
+                    EVEX_V512, EVEX_CD8<32, CD8VF>;
+
+
+defm VPLZCNTQ : avx512_conflict<0x44, "vplzcntq", VR512, VK8WM,
+                    i512mem, i64mem, "{1to8}">,
+                    EVEX_V512, VEX_W, EVEX_CD8<64, CD8VF>;
+
+}
+
+def : Pat<(int_x86_avx512_mask_lzcnt_d_512 VR512:$src2, VR512:$src1,
+                                              GR16:$mask),
+          (VPLZCNTDrrk VR512:$src1,
+           (v16i1 (COPY_TO_REGCLASS GR16:$mask, VK16WM)), VR512:$src2)>;
+
+def : Pat<(int_x86_avx512_mask_lzcnt_q_512 VR512:$src2, VR512:$src1,
+                                              GR8:$mask),
+          (VPLZCNTQrrk VR512:$src1,
+           (v8i1 (COPY_TO_REGCLASS GR8:$mask, VK8WM)), VR512:$src2)>;
+
+def : Pat<(v16i32 (ctlz (memopv16i32 addr:$src))),
+          (VPLZCNTDrm addr:$src)>;
+def : Pat<(v16i32 (ctlz (v16i32 VR512:$src))),
+          (VPLZCNTDrr VR512:$src)>;
+def : Pat<(v8i64 (ctlz (memopv8i64 addr:$src))),
+          (VPLZCNTQrm addr:$src)>;
+def : Pat<(v8i64 (ctlz (v8i64 VR512:$src))),
+          (VPLZCNTQrr VR512:$src)>;
 
 def : Pat<(store (i1 -1), addr:$dst), (MOV8mi addr:$dst, (i8 1))>;
 def : Pat<(store (i1  1), addr:$dst), (MOV8mi addr:$dst, (i8 1))>;

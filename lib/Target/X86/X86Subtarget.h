@@ -14,6 +14,11 @@
 #ifndef X86SUBTARGET_H
 #define X86SUBTARGET_H
 
+#include "X86FrameLowering.h"
+#include "X86ISelLowering.h"
+#include "X86InstrInfo.h"
+#include "X86JITInfo.h"
+#include "X86SelectionDAGInfo.h"
 #include "llvm/ADT/Triple.h"
 #include "llvm/IR/CallingConv.h"
 #include "llvm/Target/TargetSubtargetInfo.h"
@@ -40,6 +45,7 @@ enum Style {
 }
 
 class X86Subtarget final : public X86GenSubtargetInfo {
+
 protected:
   enum X86SSEEnum {
     NoMMXSSE, MMX, SSE1, SSE2, SSE3, SSSE3, SSE41, SSE42, AVX, AVX2, AVX512F
@@ -178,6 +184,12 @@ protected:
   ///             address generation (AG) time.
   bool LEAUsesAG;
 
+  /// SlowLEA - True if the LEA instruction with certain arguments is slow
+  bool SlowLEA;
+
+  /// SlowIncDec - True if INC and DEC instructions are slow when writing to flags
+  bool SlowIncDec;
+
   /// Processor has AVX-512 PreFetch Instructions
   bool HasPFI;
   
@@ -214,13 +226,30 @@ private:
   /// In16BitMode - True if compiling for 16-bit, false for 32-bit or 64-bit.
   bool In16BitMode;
 
+  // Calculates type size & alignment
+  const DataLayout DL;
+  X86SelectionDAGInfo TSInfo;
+  // Ordering here is important. X86InstrInfo initializes X86RegisterInfo which
+  // X86TargetLowering needs.
+  X86InstrInfo InstrInfo;
+  X86TargetLowering TLInfo;
+  X86FrameLowering FrameLowering;
+  X86JITInfo JITInfo;
+
 public:
   /// This constructor initializes the data members to match that
   /// of the specified triple.
   ///
   X86Subtarget(const std::string &TT, const std::string &CPU,
-               const std::string &FS,
+               const std::string &FS, X86TargetMachine &TM,
                unsigned StackAlignOverride);
+
+  const X86TargetLowering *getTargetLowering() const { return &TLInfo; }
+  const X86InstrInfo *getInstrInfo() const { return &InstrInfo; }
+  const DataLayout *getDataLayout() const { return &DL; }
+  const X86FrameLowering *getFrameLowering() const { return &FrameLowering; }
+  const X86SelectionDAGInfo *getSelectionDAGInfo() const { return &TSInfo; }
+  X86JITInfo *getJITInfo() { return &JITInfo; }
 
   /// getStackAlignment - Returns the minimum alignment known to hold of the
   /// stack frame on entry to the function and which must be maintained by every
@@ -238,6 +267,9 @@ public:
   /// \brief Reset the features for the X86 target.
   void resetSubtargetFeatures(const MachineFunction *MF) override;
 private:
+  /// \brief Initialize the full set of dependencies so we can use an initializer
+  /// list for X86Subtarget.
+  X86Subtarget &initializeSubtargetDependencies(StringRef CPU, StringRef FS);
   void initializeEnvironment();
   void resetSubtargetFeatures(StringRef CPU, StringRef FS);
 public:
@@ -315,11 +347,14 @@ public:
   bool padShortFunctions() const { return PadShortFunctions; }
   bool callRegIndirect() const { return CallRegIndirect; }
   bool LEAusesAG() const { return LEAUsesAG; }
+  bool slowLEA() const { return SlowLEA; }
+  bool slowIncDec() const { return SlowIncDec; }
   bool hasCDI() const { return HasCDI; }
   bool hasPFI() const { return HasPFI; }
   bool hasERI() const { return HasERI; }
 
   bool isAtom() const { return X86ProcFamily == IntelAtom; }
+  bool isSLM() const { return X86ProcFamily == IntelSLM; }
 
   const Triple &getTargetTriple() const { return TargetTriple; }
 
@@ -424,6 +459,8 @@ public:
                              RegClassVector& CriticalPathRCs) const override;
 
   bool postRAScheduler() const { return PostRAScheduler; }
+
+  bool enableEarlyIfConversion() const override;
 
   /// getInstrItins = Return the instruction itineraries based on the
   /// subtarget selection.

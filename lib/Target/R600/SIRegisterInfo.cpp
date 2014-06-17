@@ -14,21 +14,20 @@
 
 
 #include "SIRegisterInfo.h"
-#include "AMDGPUTargetMachine.h"
+#include "AMDGPUSubtarget.h"
 #include "SIInstrInfo.h"
 
 using namespace llvm;
 
-SIRegisterInfo::SIRegisterInfo(AMDGPUTargetMachine &tm)
-: AMDGPURegisterInfo(tm),
-  TM(tm)
+SIRegisterInfo::SIRegisterInfo(const AMDGPUSubtarget &st)
+: AMDGPURegisterInfo(st)
   { }
 
 BitVector SIRegisterInfo::getReservedRegs(const MachineFunction &MF) const {
   BitVector Reserved(getNumRegs());
   Reserved.set(AMDGPU::EXEC);
   Reserved.set(AMDGPU::INDIRECT_BASE_ADDR);
-  const SIInstrInfo *TII = static_cast<const SIInstrInfo*>(TM.getInstrInfo());
+  const SIInstrInfo *TII = static_cast<const SIInstrInfo*>(ST.getInstrInfo());
   TII->reserveIndirectRegisters(Reserved, MF);
   return Reserved;
 }
@@ -36,15 +35,6 @@ BitVector SIRegisterInfo::getReservedRegs(const MachineFunction &MF) const {
 unsigned SIRegisterInfo::getRegPressureLimit(const TargetRegisterClass *RC,
                                              MachineFunction &MF) const {
   return RC->getNumRegs();
-}
-
-const TargetRegisterClass *
-SIRegisterInfo::getISARegClass(const TargetRegisterClass * rc) const {
-  switch (rc->getID()) {
-  case AMDGPU::GPRF32RegClassID:
-    return &AMDGPU::VReg_32RegClass;
-  default: return rc;
-  }
 }
 
 const TargetRegisterClass * SIRegisterInfo::getCFGStructurizerRegClass(

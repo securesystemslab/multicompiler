@@ -9,6 +9,7 @@
 #include "llvm/Support/LockFileManager.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringExtras.h"
+#include "llvm/Support/Errc.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/Path.h"
@@ -71,7 +72,7 @@ bool LockFileManager::processStillExecuting(StringRef Hostname, int PID) {
 LockFileManager::LockFileManager(StringRef FileName)
 {
   this->FileName = FileName;
-  if (error_code EC = sys::fs::make_absolute(this->FileName)) {
+  if (std::error_code EC = sys::fs::make_absolute(this->FileName)) {
     Error = EC;
     return;
   }
@@ -87,10 +88,8 @@ LockFileManager::LockFileManager(StringRef FileName)
   UniqueLockFileName = LockFileName;
   UniqueLockFileName += "-%%%%%%%%";
   int UniqueLockFileID;
-  if (error_code EC
-        = sys::fs::createUniqueFile(UniqueLockFileName.str(),
-                                    UniqueLockFileID,
-                                    UniqueLockFileName)) {
+  if (std::error_code EC = sys::fs::createUniqueFile(
+          UniqueLockFileName.str(), UniqueLockFileID, UniqueLockFileName)) {
     Error = EC;
     return;
   }
@@ -122,9 +121,9 @@ LockFileManager::LockFileManager(StringRef FileName)
 
   while (1) {
     // Create a link from the lock file name. If this succeeds, we're done.
-    error_code EC =
+    std::error_code EC =
         sys::fs::create_link(UniqueLockFileName.str(), LockFileName.str());
-    if (EC == errc::success)
+    if (!EC)
       return;
 
     if (EC != errc::file_exists) {

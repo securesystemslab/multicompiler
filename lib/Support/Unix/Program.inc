@@ -48,6 +48,7 @@
 #endif
 
 namespace llvm {
+
 using namespace sys;
 
 ProcessInfo::ProcessInfo() : Pid(0), ReturnCode(0) {}
@@ -425,14 +426,14 @@ ProcessInfo sys::Wait(const ProcessInfo &PI, unsigned SecondsToWait,
   return WaitResult;
 }
 
-error_code sys::ChangeStdinToBinary(){
+  std::error_code sys::ChangeStdinToBinary(){
   // Do nothing, as Unix doesn't differentiate between text and binary.
-  return make_error_code(errc::success);
+    return std::error_code();
 }
 
-error_code sys::ChangeStdoutToBinary(){
+  std::error_code sys::ChangeStdoutToBinary(){
   // Do nothing, as Unix doesn't differentiate between text and binary.
-  return make_error_code(errc::success);
+    return std::error_code();
 }
 
 bool llvm::sys::argumentsFitWithinSystemLimits(ArrayRef<const char*> Args) {

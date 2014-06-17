@@ -33,24 +33,11 @@ cl::opt<bool> RelaxAll("mc-relax-all",
                        cl::desc("When used with filetype=obj, "
                                 "relax all fixups in the emitted object file"));
 
-cl::opt<bool> EnableDwarfDirectory(
-    "enable-dwarf-directory", cl::Hidden,
-    cl::desc("Use .file directives with an explicit directory."));
-
-cl::opt<bool> NoExecStack("mc-no-exec-stack",
-                          cl::desc("File doesn't need an exec stack"));
-
-static cl::opt<bool>
-SaveTempLabels("L", cl::desc("Don't discard temporary labels"));
-
 static inline MCTargetOptions InitMCTargetOptionsFromFlags() {
   MCTargetOptions Options;
   Options.SanitizeAddress =
       (AsmInstrumentation == MCTargetOptions::AsmInstrumentationAddress);
   Options.MCRelaxAll = RelaxAll;
-  Options.MCUseDwarfDirectory = EnableDwarfDirectory;
-  Options.MCNoExecStack = NoExecStack;
-  Options.MCSaveTempLabels = SaveTempLabels;
   return Options;
 }
 

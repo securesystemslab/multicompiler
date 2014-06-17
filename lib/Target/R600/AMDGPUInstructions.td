@@ -49,6 +49,11 @@ def u8imm : Operand<i8> {
   let PrintMethod = "printU8ImmOperand";
 }
 
+//===--------------------------------------------------------------------===//
+// Custom Operands
+//===--------------------------------------------------------------------===//
+def brtarget   : Operand<OtherVT>;
+
 //===----------------------------------------------------------------------===//
 // PatLeafs for floating-point comparisons
 //===----------------------------------------------------------------------===//
@@ -126,6 +131,21 @@ def COND_NULL : PatLeaf <
 //===----------------------------------------------------------------------===//
 // Load/Store Pattern Fragments
 //===----------------------------------------------------------------------===//
+
+def global_store : PatFrag<(ops node:$val, node:$ptr),
+    (store node:$val, node:$ptr), [{
+        return isGlobalStore(dyn_cast<StoreSDNode>(N));
+}]>;
+
+// Global address space loads
+def global_load : PatFrag<(ops node:$ptr), (load node:$ptr), [{
+    return isGlobalLoad(dyn_cast<LoadSDNode>(N));
+}]>;
+
+// Constant address space loads
+def constant_load : PatFrag<(ops node:$ptr), (load node:$ptr), [{
+    return isConstantLoad(dyn_cast<LoadSDNode>(N), -1);
+}]>;
 
 def az_extload : PatFrag<(ops node:$ptr), (unindexedload node:$ptr), [{
   LoadSDNode *L = cast<LoadSDNode>(N);
@@ -232,26 +252,55 @@ def local_load : PatFrag<(ops node:$ptr), (load node:$ptr), [{
     return isLocalLoad(dyn_cast<LoadSDNode>(N));
 }]>;
 
-def atomic_load_add_local : PatFrag<(ops node:$ptr, node:$value),
-                                    (atomic_load_add node:$ptr, node:$value), [{
-  return dyn_cast<MemSDNode>(N)->getAddressSpace() == AMDGPUAS::LOCAL_ADDRESS;
+
+class local_binary_atomic_op<SDNode atomic_op> :
+  PatFrag<(ops node:$ptr, node:$value),
+    (atomic_op node:$ptr, node:$value), [{
+  return cast<MemSDNode>(N)->getAddressSpace() == AMDGPUAS::LOCAL_ADDRESS;
 }]>;
 
-def atomic_load_sub_local : PatFrag<(ops node:$ptr, node:$value),
-                                    (atomic_load_sub node:$ptr, node:$value), [{
-  return dyn_cast<MemSDNode>(N)->getAddressSpace() == AMDGPUAS::LOCAL_ADDRESS;
-}]>;
+
+def atomic_swap_local : local_binary_atomic_op<atomic_swap>;
+def atomic_load_add_local : local_binary_atomic_op<atomic_load_add>;
+def atomic_load_sub_local : local_binary_atomic_op<atomic_load_sub>;
+def atomic_load_and_local : local_binary_atomic_op<atomic_load_and>;
+def atomic_load_or_local : local_binary_atomic_op<atomic_load_or>;
+def atomic_load_xor_local : local_binary_atomic_op<atomic_load_xor>;
+def atomic_load_nand_local : local_binary_atomic_op<atomic_load_nand>;
+def atomic_load_min_local : local_binary_atomic_op<atomic_load_min>;
+def atomic_load_max_local : local_binary_atomic_op<atomic_load_max>;
+def atomic_load_umin_local : local_binary_atomic_op<atomic_load_umin>;
+def atomic_load_umax_local : local_binary_atomic_op<atomic_load_umax>;
 
 def mskor_global : PatFrag<(ops node:$val, node:$ptr),
                             (AMDGPUstore_mskor node:$val, node:$ptr), [{
   return dyn_cast<MemSDNode>(N)->getAddressSpace() == AMDGPUAS::GLOBAL_ADDRESS;
 }]>;
 
+def atomic_cmp_swap_32_local :
+  PatFrag<(ops node:$ptr, node:$cmp, node:$swap),
+          (atomic_cmp_swap node:$ptr, node:$cmp, node:$swap), [{
+  AtomicSDNode *AN = cast<AtomicSDNode>(N);
+  return AN->getMemoryVT() == MVT::i32 &&
+         AN->getAddressSpace() == AMDGPUAS::LOCAL_ADDRESS;
+}]>;
+
+def atomic_cmp_swap_64_local :
+  PatFrag<(ops node:$ptr, node:$cmp, node:$swap),
+          (atomic_cmp_swap node:$ptr, node:$cmp, node:$swap), [{
+  AtomicSDNode *AN = cast<AtomicSDNode>(N);
+  return AN->getMemoryVT() == MVT::i64 &&
+         AN->getAddressSpace() == AMDGPUAS::LOCAL_ADDRESS;
+}]>;
+
+
 class Constants {
 int TWO_PI = 0x40c90fdb;
 int PI = 0x40490fdb;
 int TWO_PI_INV = 0x3e22f983;
 int FP_UINT_MAX_PLUS_1 = 0x4f800000;    // 1 << 32 in floating point encoding
+int FP32_NEG_ONE = 0xbf800000;
+int FP32_ONE = 0x3f800000;
 }
 def CONST : Constants;
 
@@ -273,7 +322,7 @@ class CLAMP <RegisterClass rc> : AMDGPUShaderInst <
   (outs rc:$dst),
   (ins rc:$src0),
   "CLAMP $dst, $src0",
-  [(set f32:$dst, (int_AMDIL_clamp f32:$src0, (f32 FP_ZERO), (f32 FP_ONE)))]
+  [(set f32:$dst, (AMDGPUclamp f32:$src0, (f32 FP_ZERO), (f32 FP_ONE)))]
 >;
 
 class FABS <RegisterClass rc> : AMDGPUShaderInst <
@@ -363,7 +412,7 @@ class DwordAddrPat<ValueType vt, RegisterClass rc> : Pat <
 
 // BFI_INT patterns
 
-multiclass BFIPatterns <Instruction BFI_INT> {
+multiclass BFIPatterns <Instruction BFI_INT, Instruction LoadImm32> {
 
   // Definition from ISA doc:
   // (y & x) | (z & ~x)
@@ -379,6 +428,19 @@ multiclass BFIPatterns <Instruction BFI_INT> {
     (BFI_INT $x, $y, $z)
   >;
 
+  def : Pat <
+    (fcopysign f32:$src0, f32:$src1),
+    (BFI_INT (LoadImm32 0x7fffffff), $src0, $src1)
+  >;
+
+  def : Pat <
+    (f64 (fcopysign f64:$src0, f64:$src1)),
+      (INSERT_SUBREG (INSERT_SUBREG (f64 (IMPLICIT_DEF)),
+      (i32 (EXTRACT_SUBREG $src0, sub0)), sub0),
+      (BFI_INT (LoadImm32 0x7fffffff),
+               (i32 (EXTRACT_SUBREG $src0, sub1)),
+               (i32 (EXTRACT_SUBREG $src1, sub1))), sub1)
+  >;
 }
 
 // SHA-256 Ma patterns
@@ -422,6 +484,40 @@ class UMUL24Pattern <Instruction UMUL24> : Pat <
   (UMUL24 $x, $y)
 >;
 */
+
+class IMad24Pat<Instruction Inst> : Pat <
+  (add (AMDGPUmul_i24 i32:$src0, i32:$src1), i32:$src2),
+  (Inst $src0, $src1, $src2)
+>;
+
+class UMad24Pat<Instruction Inst> : Pat <
+  (add (AMDGPUmul_u24 i32:$src0, i32:$src1), i32:$src2),
+  (Inst $src0, $src1, $src2)
+>;
+
+multiclass Expand24IBitOps<Instruction MulInst, Instruction AddInst> {
+  def _expand_imad24 : Pat <
+    (AMDGPUmad_i24 i32:$src0, i32:$src1, i32:$src2),
+    (AddInst (MulInst $src0, $src1), $src2)
+  >;
+
+  def _expand_imul24 : Pat <
+    (AMDGPUmul_i24 i32:$src0, i32:$src1),
+    (MulInst $src0, $src1)
+  >;
+}
+
+multiclass Expand24UBitOps<Instruction MulInst, Instruction AddInst> {
+  def _expand_umad24 : Pat <
+    (AMDGPUmad_u24 i32:$src0, i32:$src1, i32:$src2),
+    (AddInst (MulInst $src0, $src1), $src2)
+  >;
+
+  def _expand_umul24 : Pat <
+    (AMDGPUmul_u24 i32:$src0, i32:$src1),
+    (MulInst $src0, $src1)
+  >;
+}
 
 include "R600Instructions.td"
 include "R700Instructions.td"

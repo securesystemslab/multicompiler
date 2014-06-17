@@ -32,9 +32,7 @@ namespace llvm {
   class R600InstrInfo : public AMDGPUInstrInfo {
   private:
   const R600RegisterInfo RI;
-  const AMDGPUSubtarget &ST;
 
-  int getBranchInstr(const MachineOperand &op) const;
   std::vector<std::pair<int, unsigned> >
   ExtractSrcs(MachineInstr *MI, const DenseMap<unsigned, unsigned> &PV, unsigned &ConstCount) const;
 
@@ -48,7 +46,7 @@ namespace llvm {
     ALU_VEC_210
   };
 
-  explicit R600InstrInfo(AMDGPUTargetMachine &tm);
+  explicit R600InstrInfo(const AMDGPUSubtarget &st);
 
   const R600RegisterInfo &getRegisterInfo() const override;
   void copyPhysReg(MachineBasicBlock &MBB,

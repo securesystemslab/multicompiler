@@ -17,6 +17,7 @@
 #include "llvm/Object/Archive.h"
 #include "llvm/Object/ObjectFile.h"
 #include "llvm/Support/CommandLine.h"
+#include "llvm/Support/Errc.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Format.h"
 #include "llvm/Support/ManagedStatic.h"
@@ -53,7 +54,7 @@ LLVM_ATTRIBUTE_NORETURN static void fail(Twine Error) {
   exit(1);
 }
 
-static void failIfError(error_code EC, Twine Context = "") {
+static void failIfError(std::error_code EC, Twine Context = "") {
   if (!EC)
     return;
 
@@ -368,8 +369,9 @@ static void performReadOperation(ArchiveOperation Operation,
   for (object::Archive::child_iterator I = OldArchive->child_begin(),
                                        E = OldArchive->child_end();
        I != E; ++I) {
-    StringRef Name;
-    failIfError(I->getName(Name));
+    ErrorOr<StringRef> NameOrErr = I->getName();
+    failIfError(NameOrErr.getError());
+    StringRef Name = NameOrErr.get();
 
     if (!Members.empty() &&
         std::find(Members.begin(), Members.end(), Name) == Members.end())
@@ -453,8 +455,7 @@ int NewArchiveIterator::getFD() const {
   // Linux cannot open directories with open(2), although
   // cygwin and *bsd can.
   if (NewStatus.type() == sys::fs::file_type::directory_file)
-    failIfError(error_code(errc::is_a_directory, posix_category()),
-                NewFilename);
+    failIfError(make_error_code(errc::is_a_directory), NewFilename);
 
   return NewFD;
 }
@@ -516,7 +517,7 @@ computeInsertAction(ArchiveOperation Operation,
     // We could try to optimize this to a fstat, but it is not a common
     // operation.
     sys::fs::file_status Status;
-    failIfError(sys::fs::status(*MI, Status));
+    failIfError(sys::fs::status(*MI, Status), *MI);
     if (Status.getLastModificationTime() < I->getLastModified()) {
       if (PosName.empty())
         return IA_AddOldMember;
@@ -544,8 +545,9 @@ computeNewArchiveMembers(ArchiveOperation Operation,
                                          E = OldArchive->child_end();
          I != E; ++I) {
       int Pos = Ret.size();
-      StringRef Name;
-      failIfError(I->getName(Name));
+      ErrorOr<StringRef> NameOrErr = I->getName();
+      failIfError(NameOrErr.getError());
+      StringRef Name = NameOrErr.get();
       if (Name == PosName) {
         assert(AddAfter || AddBefore);
         if (AddBefore)
@@ -783,7 +785,10 @@ static void performWriteOperation(ArchiveOperation Operation,
 
     } else {
       object::Archive::child_iterator OldMember = Member.getOld();
-      failIfError(OldMember->getMemoryBuffer(MemberBuffer));
+      ErrorOr<std::unique_ptr<MemoryBuffer>> MemberBufferOrErr =
+          OldMember->getMemoryBuffer();
+      failIfError(MemberBufferOrErr.getError());
+      MemberBuffer = std::move(MemberBufferOrErr.get());
     }
     MemberBuffers[I] = MemberBuffer.release();
   }
@@ -939,8 +944,8 @@ int ar_main(char **argv) {
 static int performOperation(ArchiveOperation Operation) {
   // Create or open the archive object.
   std::unique_ptr<MemoryBuffer> Buf;
-  error_code EC = MemoryBuffer::getFile(ArchiveName, Buf, -1, false);
-  if (EC && EC != llvm::errc::no_such_file_or_directory) {
+  std::error_code EC = MemoryBuffer::getFile(ArchiveName, Buf, -1, false);
+  if (EC && EC != errc::no_such_file_or_directory) {
     errs() << ToolName << ": error opening '" << ArchiveName
            << "': " << EC.message() << "!\n";
     return 1;
@@ -958,7 +963,7 @@ static int performOperation(ArchiveOperation Operation) {
     return 0;
   }
 
-  assert(EC == llvm::errc::no_such_file_or_directory);
+  assert(EC == errc::no_such_file_or_directory);
 
   if (!shouldCreateArchive(Operation)) {
     failIfError(EC, Twine("error loading '") + ArchiveName + "'");

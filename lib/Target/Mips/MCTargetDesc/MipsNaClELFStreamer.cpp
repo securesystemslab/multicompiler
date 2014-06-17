@@ -64,6 +64,7 @@ private:
       return false;
 
     case Mips::JAL:
+    case Mips::BAL:
     case Mips::BAL_BR:
     case Mips::BLTZAL:
     case Mips::BGEZAL:
@@ -137,18 +138,17 @@ public:
                                                     &IsStore);
     bool IsSPFirstOperand = isStackPointerFirstOperand(Inst);
     if (IsMemAccess || IsSPFirstOperand) {
-      if (PendingCall)
-        report_fatal_error("Dangerous instruction in branch delay slot!");
-
       bool MaskBefore = (IsMemAccess
                          && baseRegNeedsLoadStoreMask(Inst.getOperand(AddrIdx)
                                                           .getReg()));
       bool MaskAfter = IsSPFirstOperand && !IsStore;
-      if (MaskBefore || MaskAfter)
+      if (MaskBefore || MaskAfter) {
+        if (PendingCall)
+          report_fatal_error("Dangerous instruction in branch delay slot!");
         sandboxLoadStoreStackChange(Inst, AddrIdx, STI, MaskBefore, MaskAfter);
-      else
-        MipsELFStreamer::EmitInstruction(Inst, STI);
-      return;
+        return;
+      }
+      // fallthrough
     }
 
     // Sandbox calls by aligning call and branch delay to the bundle end.
@@ -203,6 +203,7 @@ bool isBasePlusOffsetMemoryAccess(unsigned Opcode, unsigned *AddrIdx,
   case Mips::LWC1:
   case Mips::LDC1:
   case Mips::LL:
+  case Mips::LL_R6:
   case Mips::LWL:
   case Mips::LWR:
     *AddrIdx = 1;
@@ -223,6 +224,7 @@ bool isBasePlusOffsetMemoryAccess(unsigned Opcode, unsigned *AddrIdx,
 
   // Store instructions with base address register in position 2.
   case Mips::SC:
+  case Mips::SC_R6:
     *AddrIdx = 2;
     if (IsStore)
       *IsStore = true;

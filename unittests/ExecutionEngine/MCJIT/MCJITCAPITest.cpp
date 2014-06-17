@@ -28,7 +28,7 @@ using namespace llvm;
 
 static bool didCallAllocateCodeSection;
 static bool didAllocateCompactUnwindSection;
-static bool didCallPassRunListener;
+static bool didCallYield;
 
 static uint8_t *roundTripAllocateCodeSection(void *object, uintptr_t size,
                                              unsigned alignment,
@@ -65,10 +65,8 @@ static void roundTripDestroy(void *object) {
   delete static_cast<SectionMemoryManager*>(object);
 }
 
-static void passRunListenerCallback(LLVMContextRef C, LLVMPassRef P,
-                                    LLVMModuleRef M, LLVMValueRef F,
-                                    LLVMBasicBlockRef BB) {
-  didCallPassRunListener = true;
+static void yield(LLVMContextRef, void *) {
+  didCallYield = true;
 }
 
 namespace {
@@ -149,11 +147,11 @@ protected:
   virtual void SetUp() {
     didCallAllocateCodeSection = false;
     didAllocateCompactUnwindSection = false;
-    didCallPassRunListener = false;
-    Module = 0;
-    Function = 0;
-    Engine = 0;
-    Error = 0;
+    didCallYield = false;
+    Module = nullptr;
+    Function = nullptr;
+    Engine = nullptr;
+    Error = nullptr;
   }
   
   virtual void TearDown() {
@@ -168,8 +166,8 @@ protected:
     
     LLVMSetTarget(Module, HostTriple.c_str());
     
-    Function = LLVMAddFunction(
-      Module, "simple_function", LLVMFunctionType(LLVMInt32Type(), 0, 0, 0));
+    Function = LLVMAddFunction(Module, "simple_function",
+                               LLVMFunctionType(LLVMInt32Type(), nullptr,0, 0));
     LLVMSetFunctionCallConv(Function, LLVMCCallConv);
     
     LLVMBasicBlockRef entry = LLVMAppendBasicBlock(Function, "entry");
@@ -194,8 +192,8 @@ protected:
       LLVMFunctionType(LLVMVoidType(), stackmapParamTypes, 2, 1));
     LLVMSetLinkage(stackmap, LLVMExternalLinkage);
     
-    Function = LLVMAddFunction(
-      Module, "simple_function", LLVMFunctionType(LLVMInt32Type(), 0, 0, 0));
+    Function = LLVMAddFunction(Module, "simple_function",
+                              LLVMFunctionType(LLVMInt32Type(), nullptr, 0, 0));
     
     LLVMBasicBlockRef entry = LLVMAppendBasicBlock(Function, "entry");
     LLVMBuilderRef builder = LLVMCreateBuilder();
@@ -223,8 +221,8 @@ protected:
     LLVMSetInitializer(GlobalVar, LLVMConstInt(LLVMInt32Type(), 42, 0));
     
     {
-        Function = LLVMAddFunction(
-          Module, "getGlobal", LLVMFunctionType(LLVMInt32Type(), 0, 0, 0));
+        Function = LLVMAddFunction(Module, "getGlobal",
+                              LLVMFunctionType(LLVMInt32Type(), nullptr, 0, 0));
         LLVMSetFunctionCallConv(Function, LLVMCCallConv);
         
         LLVMBasicBlockRef Entry = LLVMAppendBasicBlock(Function, "entry");
@@ -438,14 +436,14 @@ TEST_F(MCJITCAPITest, reserve_allocation_space) {
   EXPECT_TRUE(MM->UsedDataSizeRW > 0);
 }
 
-TEST_F(MCJITCAPITest, pass_run_listener) {
+TEST_F(MCJITCAPITest, yield) {
   SKIP_UNSUPPORTED_PLATFORM;
 
   buildSimpleFunction();
   buildMCJITOptions();
   buildMCJITEngine();
   LLVMContextRef C = LLVMGetGlobalContext();
-  LLVMAddPassRunListener(C, passRunListenerCallback);
+  LLVMContextSetYieldCallback(C, yield, nullptr);
   buildAndRunPasses();
 
   union {
@@ -455,5 +453,6 @@ TEST_F(MCJITCAPITest, pass_run_listener) {
   functionPointer.raw = LLVMGetPointerToGlobal(Engine, Function);
 
   EXPECT_EQ(42, functionPointer.usable());
-  EXPECT_TRUE(didCallPassRunListener);
+  EXPECT_TRUE(didCallYield);
 }
+

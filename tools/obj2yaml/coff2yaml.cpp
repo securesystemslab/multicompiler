@@ -31,7 +31,7 @@ public:
 
 }
 
-static void check(error_code ec) {
+static void check(std::error_code ec) {
   if (ec)
     report_fatal_error(ec.message());
 }
@@ -210,7 +210,7 @@ COFFYAML::Object &COFFDumper::getYAMLObj() {
   return YAMLObj;
 }
 
-error_code coff2yaml(raw_ostream &Out, const object::COFFObjectFile &Obj) {
+std::error_code coff2yaml(raw_ostream &Out, const object::COFFObjectFile &Obj) {
   COFFDumper Dumper(Obj);
 
   yaml::Output Yout(Out);

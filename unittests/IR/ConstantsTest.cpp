@@ -268,6 +268,7 @@ TEST(ConstantsTest, ReplaceWithConstantTest) {
   EXPECT_DEATH(Global->replaceAllUsesWith(GEP),
                "this->replaceAllUsesWith\\(expr\\(this\\)\\) is NOT valid!");
 }
+
 #endif
 #endif
 

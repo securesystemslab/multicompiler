@@ -20,23 +20,14 @@
 
 namespace llvm {
 
-class AMDGPUTargetMachine;
-
 struct SIRegisterInfo : public AMDGPURegisterInfo {
-  AMDGPUTargetMachine &TM;
 
-  SIRegisterInfo(AMDGPUTargetMachine &tm);
+  SIRegisterInfo(const AMDGPUSubtarget &st);
 
   BitVector getReservedRegs(const MachineFunction &MF) const override;
 
   unsigned getRegPressureLimit(const TargetRegisterClass *RC,
                                MachineFunction &MF) const override;
-
-  /// \param RC is an AMDIL reg class.
-  ///
-  /// \returns the SI register class that is equivalent to \p RC.
-  const TargetRegisterClass *
-    getISARegClass(const TargetRegisterClass *RC) const override;
 
   /// \brief get the register class of the specified type to use in the
   /// CFGStructurizer

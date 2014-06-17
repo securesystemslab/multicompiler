@@ -19,7 +19,7 @@
 #include "llvm/Support/Signals.h"
 #include "llvm/Support/SourceMgr.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/Support/system_error.h"
+#include <system_error>
 using namespace llvm;
 
 static cl::list<std::string>
@@ -136,7 +136,7 @@ MarkupTag MarkupParser::parseTag() {
 
 static void parseMCMarkup(StringRef Filename) {
   std::unique_ptr<MemoryBuffer> BufferPtr;
-  if (error_code ec = MemoryBuffer::getFileOrSTDIN(Filename, BufferPtr)) {
+  if (std::error_code ec = MemoryBuffer::getFileOrSTDIN(Filename, BufferPtr)) {
     errs() << ToolName << ": " << ec.message() << '\n';
     return;
   }

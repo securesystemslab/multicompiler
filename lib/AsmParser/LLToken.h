@@ -42,7 +42,8 @@ namespace lltok {
     kw_linker_private,          // NOTE: deprecated, for parser compatibility
     kw_linker_private_weak,     // NOTE: deprecated, for parser compatibility
     kw_linkonce, kw_linkonce_odr,
-    kw_weak, kw_weak_odr, kw_appending,
+    kw_weak, // Used as a linkage, and a modifier for "cmpxchg".
+    kw_weak_odr, kw_appending,
     kw_dllimport, kw_dllexport, kw_common, kw_available_externally,
     kw_default, kw_hidden, kw_protected,
     kw_unnamed_addr,
@@ -107,6 +108,7 @@ namespace lltok {
     kw_cold,
     kw_inlinehint,
     kw_inreg,
+    kw_jumptable,
     kw_minsize,
     kw_naked,
     kw_nest,
@@ -117,6 +119,7 @@ namespace lltok {
     kw_noimplicitfloat,
     kw_noinline,
     kw_nonlazybind,
+    kw_nonnull,
     kw_noredzone,
     kw_noreturn,
     kw_nounwind,

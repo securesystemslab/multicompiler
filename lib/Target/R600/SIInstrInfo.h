@@ -44,13 +44,19 @@ private:
                          const TargetRegisterClass *RC,
                          const MachineOperand &Op) const;
 
-  void splitScalar64BitOp(SmallVectorImpl<MachineInstr *> & Worklist,
-                          MachineInstr *Inst, unsigned Opcode) const;
+  void splitScalar64BitUnaryOp(SmallVectorImpl<MachineInstr *> &Worklist,
+                               MachineInstr *Inst, unsigned Opcode) const;
+
+  void splitScalar64BitBinaryOp(SmallVectorImpl<MachineInstr *> &Worklist,
+                                MachineInstr *Inst, unsigned Opcode) const;
+
+  void splitScalar64BitBCNT(SmallVectorImpl<MachineInstr *> &Worklist,
+                            MachineInstr *Inst) const;
 
   void addDescImplicitUseDef(const MCInstrDesc &Desc, MachineInstr *MI) const;
 
 public:
-  explicit SIInstrInfo(AMDGPUTargetMachine &tm);
+  explicit SIInstrInfo(const AMDGPUSubtarget &st);
 
   const SIRegisterInfo &getRegisterInfo() const override {
     return RI;
@@ -176,6 +182,7 @@ namespace AMDGPU {
   int getVOPe64(uint16_t Opcode);
   int getCommuteRev(uint16_t Opcode);
   int getCommuteOrig(uint16_t Opcode);
+  int getMCOpcode(uint16_t Opcode, unsigned Gen);
 
   const uint64_t RSRC_DATA_FORMAT = 0xf00000000000LL;
 

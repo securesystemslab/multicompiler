@@ -81,15 +81,16 @@ template <class T> T errorOrDefault(ErrorOr<T> Val, T Default = T()) {
 namespace llvm {
 
 template <class ELFT>
-static error_code createELFDumper(const ELFFile<ELFT> *Obj,
-                                  StreamWriter &Writer,
-                                  std::unique_ptr<ObjDumper> &Result) {
+static std::error_code createELFDumper(const ELFFile<ELFT> *Obj,
+                                       StreamWriter &Writer,
+                                       std::unique_ptr<ObjDumper> &Result) {
   Result.reset(new ELFDumper<ELFT>(Obj, Writer));
   return readobj_error::success;
 }
 
-error_code createELFDumper(const object::ObjectFile *Obj, StreamWriter &Writer,
-                           std::unique_ptr<ObjDumper> &Result) {
+std::error_code createELFDumper(const object::ObjectFile *Obj,
+                                StreamWriter &Writer,
+                                std::unique_ptr<ObjDumper> &Result) {
   // Little-endian 32-bit
   if (const ELF32LEObjectFile *ELFObj = dyn_cast<ELF32LEObjectFile>(Obj))
     return createELFDumper(ELFObj->getELFFile(), Writer, Result);
@@ -110,6 +111,53 @@ error_code createELFDumper(const object::ObjectFile *Obj, StreamWriter &Writer,
 }
 
 } // namespace llvm
+
+template <typename ELFO>
+static std::string getFullSymbolName(const ELFO &Obj,
+                                     typename ELFO::Elf_Sym_Iter Symbol) {
+  StringRef SymbolName = errorOrDefault(Obj.getSymbolName(Symbol));
+  if (!Symbol.isDynamic())
+    return SymbolName;
+
+  std::string FullSymbolName(SymbolName);
+
+  bool IsDefault;
+  ErrorOr<StringRef> Version =
+      Obj.getSymbolVersion(nullptr, &*Symbol, IsDefault);
+  if (Version) {
+    FullSymbolName += (IsDefault ? "@@" : "@");
+    FullSymbolName += *Version;
+  } else
+    error(Version.getError());
+  return FullSymbolName;
+}
+
+template <typename ELFO>
+static void
+getSectionNameIndex(const ELFO &Obj, typename ELFO::Elf_Sym_Iter Symbol,
+                    StringRef &SectionName, unsigned &SectionIndex) {
+  SectionIndex = Symbol->st_shndx;
+  if (SectionIndex == SHN_UNDEF) {
+    SectionName = "Undefined";
+  } else if (SectionIndex >= SHN_LOPROC && SectionIndex <= SHN_HIPROC) {
+    SectionName = "Processor Specific";
+  } else if (SectionIndex >= SHN_LOOS && SectionIndex <= SHN_HIOS) {
+    SectionName = "Operating System Specific";
+  } else if (SectionIndex > SHN_HIOS && SectionIndex < SHN_ABS) {
+    SectionName = "Reserved";
+  } else if (SectionIndex == SHN_ABS) {
+    SectionName = "Absolute";
+  } else if (SectionIndex == SHN_COMMON) {
+    SectionName = "Common";
+  } else {
+    if (SectionIndex == SHN_XINDEX)
+      SectionIndex = Obj.getSymbolTableIndex(&*Symbol);
+    assert(SectionIndex != SHN_XINDEX &&
+           "getSymbolTableIndex should handle this");
+    const typename ELFO::Elf_Shdr *Sec = Obj.getSection(SectionIndex);
+    SectionName = errorOrDefault(Obj.getSectionName(Sec));
+  }
+}
 
 static const EnumEntry<unsigned> ElfClass[] = {
   { "None",   ELF::ELFCLASSNONE },
@@ -455,7 +503,9 @@ static const EnumEntry<unsigned> ElfHeaderMipsFlags[] = {
   LLVM_READOBJ_ENUM_ENT(ELF, EF_MIPS_ARCH_32),
   LLVM_READOBJ_ENUM_ENT(ELF, EF_MIPS_ARCH_64),
   LLVM_READOBJ_ENUM_ENT(ELF, EF_MIPS_ARCH_32R2),
-  LLVM_READOBJ_ENUM_ENT(ELF, EF_MIPS_ARCH_64R2)
+  LLVM_READOBJ_ENUM_ENT(ELF, EF_MIPS_ARCH_64R2),
+  LLVM_READOBJ_ENUM_ENT(ELF, EF_MIPS_ARCH_32R6),
+  LLVM_READOBJ_ENUM_ENT(ELF, EF_MIPS_ARCH_64R6)
 };
 
 template<class ELFT>
@@ -649,42 +699,10 @@ void ELFDumper<ELFT>::printDynamicSymbols() {
 
 template <class ELFT>
 void ELFDumper<ELFT>::printSymbol(typename ELFO::Elf_Sym_Iter Symbol) {
-  StringRef SymbolName = errorOrDefault(Obj->getSymbolName(Symbol));
-
-  unsigned SectionIndex = Symbol->st_shndx;
+  unsigned SectionIndex = 0;
   StringRef SectionName;
-  if (SectionIndex == SHN_UNDEF) {
-    SectionName = "Undefined";
-  } else if (SectionIndex >= SHN_LOPROC && SectionIndex <= SHN_HIPROC) {
-    SectionName = "Processor Specific";
-  } else if (SectionIndex >= SHN_LOOS && SectionIndex <= SHN_HIOS) {
-    SectionName = "Operating System Specific";
-  } else if (SectionIndex > SHN_HIOS && SectionIndex < SHN_ABS) {
-    SectionName = "Reserved";
-  } else if (SectionIndex == SHN_ABS) {
-    SectionName = "Absolute";
-  } else if (SectionIndex == SHN_COMMON) {
-    SectionName = "Common";
-  } else {
-    if (SectionIndex == SHN_XINDEX)
-      SectionIndex = Obj->getSymbolTableIndex(&*Symbol);
-    assert(SectionIndex != SHN_XINDEX &&
-           "getSymbolTableIndex should handle this");
-    const Elf_Shdr *Sec = Obj->getSection(SectionIndex);
-    SectionName = errorOrDefault(Obj->getSectionName(Sec));
-  }
-
-  std::string FullSymbolName(SymbolName);
-  if (Symbol.isDynamic()) {
-    bool IsDefault;
-    ErrorOr<StringRef> Version = Obj->getSymbolVersion(nullptr, &*Symbol,
-                                                       IsDefault);
-    if (Version) {
-      FullSymbolName += (IsDefault ? "@@" : "@");
-      FullSymbolName += *Version;
-    } else
-      error(Version.getError());
-  }
+  getSectionNameIndex(*Obj, Symbol, SectionName, SectionIndex);
+  std::string FullSymbolName = getFullSymbolName(*Obj, Symbol);
 
   DictScope D(W, "Symbol");
   W.printNumber("Name", FullSymbolName, Symbol->st_name);
@@ -900,13 +918,12 @@ void ELFDumper<ELFType<support::little, 2, false> >::printUnwindInfo() {
 
 template<class ELFT>
 void ELFDumper<ELFT>::printDynamicTable() {
-  typedef typename ELFO::Elf_Dyn_Iter EDI;
-  EDI Start = Obj->begin_dynamic_table(), End = Obj->end_dynamic_table(true);
+  auto DynTable = Obj->dynamic_table(true);
 
-  if (Start == End)
+  ptrdiff_t Total = std::distance(DynTable.begin(), DynTable.end());
+  if (Total == 0)
     return;
 
-  ptrdiff_t Total = std::distance(Start, End);
   raw_ostream &OS = W.getOStream();
   W.startLine() << "DynamicSection [ (" << Total << " entries)\n";
 
@@ -915,12 +932,12 @@ void ELFDumper<ELFT>::printDynamicTable() {
   W.startLine()
      << "  Tag" << (Is64 ? "                " : "        ") << "Type"
      << "                 " << "Name/Value\n";
-  for (; Start != End; ++Start) {
+  for (const auto &Entry : DynTable) {
     W.startLine()
        << "  "
-       << format(Is64 ? "0x%016" PRIX64 : "0x%08" PRIX64, Start->getTag())
-       << " " << format("%-21s", getTypeString(Start->getTag()));
-    printValue(Obj, Start->getTag(), Start->getVal(), Is64, OS);
+       << format(Is64 ? "0x%016" PRIX64 : "0x%08" PRIX64, Entry.getTag())
+       << " " << format("%-21s", getTypeString(Entry.getTag()));
+    printValue(Obj, Entry.getTag(), Entry.getVal(), Is64, OS);
     OS << "\n";
   }
 
@@ -934,11 +951,9 @@ void ELFDumper<ELFT>::printNeededLibraries() {
   typedef std::vector<StringRef> LibsTy;
   LibsTy Libs;
 
-  for (typename ELFO::Elf_Dyn_Iter DynI = Obj->begin_dynamic_table(),
-                                   DynE = Obj->end_dynamic_table();
-       DynI != DynE; ++DynI)
-    if (DynI->d_tag == ELF::DT_NEEDED)
-      Libs.push_back(Obj->getDynamicString(DynI->d_un.d_val));
+  for (const auto &Entry : Obj->dynamic_table())
+    if (Entry.d_tag == ELF::DT_NEEDED)
+      Libs.push_back(Obj->getDynamicString(Entry.d_un.d_val));
 
   std::stable_sort(Libs.begin(), Libs.end());
 

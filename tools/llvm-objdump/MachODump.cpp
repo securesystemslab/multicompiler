@@ -37,9 +37,9 @@
 #include "llvm/Support/TargetRegistry.h"
 #include "llvm/Support/TargetSelect.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/Support/system_error.h"
 #include <algorithm>
 #include <cstring>
+#include <system_error>
 using namespace llvm;
 using namespace object;
 
@@ -197,7 +197,7 @@ static void DisassembleInputMachO2(StringRef Filename,
 void llvm::DisassembleInputMachO(StringRef Filename) {
   std::unique_ptr<MemoryBuffer> Buff;
 
-  if (error_code ec = MemoryBuffer::getFileOrSTDIN(Filename, Buff)) {
+  if (std::error_code ec = MemoryBuffer::getFileOrSTDIN(Filename, Buff)) {
     errs() << "llvm-objdump: " << Filename << ": " << ec.message() << "\n";
     return;
   }
@@ -289,7 +289,7 @@ static void DisassembleInputMachO2(StringRef Filename,
     // get the sections and supply it to the section name parsing machinery.
     if (!DSYMFile.empty()) {
       std::unique_ptr<MemoryBuffer> Buf;
-      if (error_code ec = MemoryBuffer::getFileOrSTDIN(DSYMFile, Buf)) {
+      if (std::error_code ec = MemoryBuffer::getFileOrSTDIN(DSYMFile, Buf)) {
         errs() << "llvm-objdump: " << Filename << ": " << ec.message() << '\n';
         return;
       }

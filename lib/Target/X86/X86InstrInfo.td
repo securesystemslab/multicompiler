@@ -795,6 +795,7 @@ def OptForSpeed  : Predicate<"!OptForSize">;
 def FastBTMem    : Predicate<"!Subtarget->isBTMemSlow()">;
 def CallImmAddr  : Predicate<"Subtarget->IsLegalToCallImmediateAddr(TM)">;
 def FavorMemIndirectCall  : Predicate<"!Subtarget->callRegIndirect()">;
+def NotSlowIncDec : Predicate<"!Subtarget->slowIncDec()">;
 
 //===----------------------------------------------------------------------===//
 // X86 Instruction Format Definitions.
@@ -2002,6 +2003,46 @@ let Predicates = [HasLZCNT], Defs = [EFLAGS] in {
                       (implicit EFLAGS)]>, XS;
 }
 
+let Predicates = [HasLZCNT] in {
+  def : Pat<(X86cmov (ctlz GR16:$src), (i16 16), (X86_COND_E),
+              (X86cmp GR16:$src, (i16 0))), 
+            (LZCNT16rr GR16:$src)>;
+  def : Pat<(X86cmov (ctlz GR32:$src), (i32 32), (X86_COND_E),
+              (X86cmp GR32:$src, (i32 0))),
+            (LZCNT32rr GR32:$src)>;
+  def : Pat<(X86cmov (ctlz GR64:$src), (i64 64), (X86_COND_E),
+              (X86cmp GR64:$src, (i64 0))),
+            (LZCNT64rr GR64:$src)>;
+  def : Pat<(X86cmov (i16 16), (ctlz GR16:$src), (X86_COND_E),
+              (X86cmp GR16:$src, (i16 0))),
+            (LZCNT16rr GR16:$src)>;
+  def : Pat<(X86cmov (i32 32), (ctlz GR32:$src), (X86_COND_E),
+              (X86cmp GR32:$src, (i32 0))),
+            (LZCNT32rr GR32:$src)>;
+  def : Pat<(X86cmov (i64 64), (ctlz GR64:$src), (X86_COND_E),
+              (X86cmp GR64:$src, (i64 0))),
+            (LZCNT64rr GR64:$src)>;
+
+  def : Pat<(X86cmov (ctlz (loadi16 addr:$src)), (i16 16), (X86_COND_E),
+              (X86cmp (loadi16 addr:$src), (i16 0))), 
+            (LZCNT16rm addr:$src)>;
+  def : Pat<(X86cmov (ctlz (loadi32 addr:$src)), (i32 32), (X86_COND_E),
+              (X86cmp (loadi32 addr:$src), (i32 0))), 
+            (LZCNT32rm addr:$src)>;
+  def : Pat<(X86cmov (ctlz (loadi64 addr:$src)), (i64 64), (X86_COND_E),
+              (X86cmp (loadi64 addr:$src), (i64 0))), 
+            (LZCNT64rm addr:$src)>;
+  def : Pat<(X86cmov (i16 16), (ctlz (loadi16 addr:$src)), (X86_COND_E),
+              (X86cmp (loadi16 addr:$src), (i16 0))), 
+            (LZCNT16rm addr:$src)>;
+  def : Pat<(X86cmov (i32 32), (ctlz (loadi32 addr:$src)), (X86_COND_E),
+              (X86cmp (loadi32 addr:$src), (i32 0))), 
+            (LZCNT32rm addr:$src)>;
+  def : Pat<(X86cmov (i64 64), (ctlz (loadi64 addr:$src)), (X86_COND_E),
+              (X86cmp (loadi64 addr:$src), (i64 0))), 
+            (LZCNT64rm addr:$src)>;
+}
+
 //===----------------------------------------------------------------------===//
 // BMI Instructions
 //
@@ -2077,6 +2118,47 @@ let Predicates = [HasBMI] in {
   def : Pat<(and GR64:$src, (ineg GR64:$src)),
             (BLSI64rr GR64:$src)>;
 }
+
+let Predicates = [HasBMI] in {
+  def : Pat<(X86cmov (cttz GR16:$src), (i16 16), (X86_COND_E),
+              (X86cmp GR16:$src, (i16 0))),
+            (TZCNT16rr GR16:$src)>;
+  def : Pat<(X86cmov (cttz GR32:$src), (i32 32), (X86_COND_E),
+              (X86cmp GR32:$src, (i32 0))),
+            (TZCNT32rr GR32:$src)>;
+  def : Pat<(X86cmov (cttz GR64:$src), (i64 64), (X86_COND_E),
+              (X86cmp GR64:$src, (i64 0))),
+            (TZCNT64rr GR64:$src)>;
+  def : Pat<(X86cmov (i16 16), (cttz GR16:$src), (X86_COND_E),
+              (X86cmp GR16:$src, (i16 0))),
+            (TZCNT16rr GR16:$src)>;
+  def : Pat<(X86cmov (i32 32), (cttz GR32:$src), (X86_COND_E),
+              (X86cmp GR32:$src, (i32 0))),
+            (TZCNT32rr GR32:$src)>;
+  def : Pat<(X86cmov (i64 64), (cttz GR64:$src), (X86_COND_E),
+              (X86cmp GR64:$src, (i64 0))),
+            (TZCNT64rr GR64:$src)>;
+
+  def : Pat<(X86cmov (cttz (loadi16 addr:$src)), (i16 16), (X86_COND_E),
+              (X86cmp (loadi16 addr:$src), (i16 0))), 
+            (TZCNT16rm addr:$src)>;
+  def : Pat<(X86cmov (cttz (loadi32 addr:$src)), (i32 32), (X86_COND_E),
+              (X86cmp (loadi32 addr:$src), (i32 0))), 
+            (TZCNT32rm addr:$src)>;
+  def : Pat<(X86cmov (cttz (loadi64 addr:$src)), (i64 64), (X86_COND_E),
+              (X86cmp (loadi64 addr:$src), (i64 0))), 
+            (TZCNT64rm addr:$src)>;
+  def : Pat<(X86cmov (i16 16), (cttz (loadi16 addr:$src)), (X86_COND_E),
+              (X86cmp (loadi16 addr:$src), (i16 0))), 
+            (TZCNT16rm addr:$src)>;
+  def : Pat<(X86cmov (i32 32), (cttz (loadi32 addr:$src)), (X86_COND_E),
+              (X86cmp (loadi32 addr:$src), (i32 0))), 
+            (TZCNT32rm addr:$src)>;
+  def : Pat<(X86cmov (i64 64), (cttz (loadi64 addr:$src)), (X86_COND_E),
+              (X86cmp (loadi64 addr:$src), (i64 0))), 
+            (TZCNT64rm addr:$src)>;
+}
+
 
 multiclass bmi_bextr_bzhi<bits<8> opc, string mnemonic, RegisterClass RC,
                           X86MemOperand x86memop, Intrinsic Int,
@@ -2685,11 +2767,11 @@ def : InstAlias<"jmpl $seg, $off",  (FARJMP32i  i32imm:$off, i16imm:$seg)>;
 // Force mov without a suffix with a segment and mem to prefer the 'l' form of
 // the move.  All segment/mem forms are equivalent, this has the shortest
 // encoding.
-def : InstAlias<"mov $mem, $seg", (MOV32sm SEGMENT_REG:$seg, i32mem:$mem)>;
-def : InstAlias<"mov $seg, $mem", (MOV32ms i32mem:$mem, SEGMENT_REG:$seg)>;
+def : InstAlias<"mov $mem, $seg", (MOV32sm SEGMENT_REG:$seg, i32mem:$mem), 0>;
+def : InstAlias<"mov $seg, $mem", (MOV32ms i32mem:$mem, SEGMENT_REG:$seg), 0>;
 
 // Match 'movq <largeimm>, <reg>' as an alias for movabsq.
-def : InstAlias<"movq $imm, $reg", (MOV64ri GR64:$reg, i64imm:$imm)>;
+def : InstAlias<"movq $imm, $reg", (MOV64ri GR64:$reg, i64imm:$imm), 0>;
 
 // Match 'movq GR64, MMX' as an alias for movd.
 def : InstAlias<"movq $src, $dst",

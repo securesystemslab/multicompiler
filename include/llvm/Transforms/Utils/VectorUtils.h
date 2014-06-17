@@ -43,16 +43,31 @@ static inline bool isTriviallyVectorizable(Intrinsic::ID ID) {
   case Intrinsic::rint:
   case Intrinsic::nearbyint:
   case Intrinsic::round:
+  case Intrinsic::bswap:
   case Intrinsic::ctpop:
   case Intrinsic::pow:
   case Intrinsic::fma:
   case Intrinsic::fmuladd:
+  case Intrinsic::ctlz:
+  case Intrinsic::cttz:
+  case Intrinsic::powi:
     return true;
   default:
     return false;
   }
 }
 
+static bool hasVectorInstrinsicScalarOpd(Intrinsic::ID ID,
+                                         unsigned ScalarOpdIdx) {
+  switch (ID) {
+    case Intrinsic::ctlz:
+    case Intrinsic::cttz:
+    case Intrinsic::powi:
+      return (ScalarOpdIdx == 1);
+    default:
+      return false;
+  }
+}
 
 static Intrinsic::ID checkUnaryFloatSignature(const CallInst &I,
                                               Intrinsic::ID ValidIntrinsicID) {
@@ -174,7 +189,6 @@ getIntrinsicIDForCall(CallInst *CI, const TargetLibraryInfo *TLI) {
 
   return Intrinsic::not_intrinsic;
 }
-
 
 } // llvm namespace
 

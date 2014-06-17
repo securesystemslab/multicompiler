@@ -33,7 +33,7 @@
 
 namespace llvm {
 
-class AMDGPUTargetMachine;
+class AMDGPUSubtarget;
 class MachineFunction;
 class MachineInstr;
 class MachineInstrBuilder;
@@ -45,9 +45,9 @@ private:
                           MachineBasicBlock &MBB) const;
   virtual void anchor();
 protected:
-  TargetMachine &TM;
+  const AMDGPUSubtarget &ST;
 public:
-  explicit AMDGPUInstrInfo(TargetMachine &tm);
+  explicit AMDGPUInstrInfo(const AMDGPUSubtarget &st);
 
   virtual const AMDGPURegisterInfo &getRegisterInfo() const = 0;
 
@@ -184,11 +184,6 @@ public:
                                     MachineBasicBlock::iterator I,
                                     unsigned ValueReg, unsigned Address,
                                     unsigned OffsetReg) const = 0;
-
-
-  /// \brief Convert the AMDIL MachineInstr to a supported ISA
-  /// MachineInstr
-  void convertToISA(MachineInstr & MI, MachineFunction &MF, DebugLoc DL) const;
 
   /// \brief Build a MOV instruction.
   virtual MachineInstr *buildMovInstr(MachineBasicBlock *MBB,

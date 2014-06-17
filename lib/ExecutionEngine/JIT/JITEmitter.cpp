@@ -32,6 +32,7 @@
 #include "llvm/IR/DebugInfo.h"
 #include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/Module.h"
+#include "llvm/IR/Operator.h"
 #include "llvm/IR/ValueHandle.h"
 #include "llvm/IR/ValueMap.h"
 #include "llvm/Support/Debug.h"
@@ -684,13 +685,23 @@ void *JITResolver::JITCompilerFn(void *Stub) {
 //===----------------------------------------------------------------------===//
 // JITEmitter code.
 //
+
+static GlobalObject *getSimpleAliasee(Constant *C) {
+  C = C->stripPointerCasts();
+  return dyn_cast<GlobalObject>(C);
+}
+
 void *JITEmitter::getPointerToGlobal(GlobalValue *V, void *Reference,
                                      bool MayNeedFarStub) {
   if (GlobalVariable *GV = dyn_cast<GlobalVariable>(V))
     return TheJIT->getOrEmitGlobalVariable(GV);
 
-  if (GlobalAlias *GA = dyn_cast<GlobalAlias>(V))
-    return TheJIT->getPointerToGlobal(GA->getAliasedGlobal());
+  if (GlobalAlias *GA = dyn_cast<GlobalAlias>(V)) {
+    // We can only handle simple cases.
+    if (GlobalValue *GV = getSimpleAliasee(GA->getAliasee()))
+      return TheJIT->getPointerToGlobal(GV);
+    return nullptr;
+  }
 
   // If we have already compiled the function, return a pointer to its body.
   Function *F = cast<Function>(V);
@@ -1225,7 +1236,7 @@ void *JIT::getPointerToFunctionOrStub(Function *F) {
   return JE->getJITResolver().getLazyFunctionStub(F);
 }
 
-void JIT::updateFunctionStub(Function *F) {
+void JIT::updateFunctionStubUnlocked(Function *F) {
   // Get the empty stub we generated earlier.
   JITEmitter *JE = static_cast<JITEmitter*>(getCodeEmitter());
   void *Stub = JE->getJITResolver().getLazyFunctionStub(F);

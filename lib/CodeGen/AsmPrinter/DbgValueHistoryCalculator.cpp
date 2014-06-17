@@ -8,140 +8,197 @@
 //===----------------------------------------------------------------------===//
 
 #include "DbgValueHistoryCalculator.h"
+#include "llvm/ADT/SmallVector.h"
 #include "llvm/CodeGen/MachineBasicBlock.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Target/TargetRegisterInfo.h"
+#include <algorithm>
+#include <map>
+#include <set>
 
 #define DEBUG_TYPE "dwarfdebug"
 
 namespace llvm {
 
-// Return true if debug value, encoded by DBG_VALUE instruction, is in a
-// defined reg.
-static bool isDbgValueInDefinedReg(const MachineInstr *MI) {
-  assert(MI->isDebugValue() && "Invalid DBG_VALUE machine instruction!");
-  return MI->getNumOperands() == 3 && MI->getOperand(0).isReg() &&
-         MI->getOperand(0).getReg() &&
-         (MI->getOperand(1).isImm() ||
-          (MI->getOperand(1).isReg() && MI->getOperand(1).getReg() == 0U));
+// \brief If @MI is a DBG_VALUE with debug value described by a
+// defined register, returns the number of this register.
+// In the other case, returns 0.
+static unsigned isDescribedByReg(const MachineInstr &MI) {
+  assert(MI.isDebugValue());
+  assert(MI.getNumOperands() == 3);
+  // If location of variable is described using a register (directly or
+  // indirecltly), this register is always a first operand.
+  return MI.getOperand(0).isReg() ? MI.getOperand(0).getReg() : 0;
+}
+
+void DbgValueHistoryMap::startInstrRange(const MDNode *Var,
+                                         const MachineInstr &MI) {
+  // Instruction range should start with a DBG_VALUE instruction for the
+  // variable.
+  assert(MI.isDebugValue() && MI.getDebugVariable() == Var);
+  auto &Ranges = VarInstrRanges[Var];
+  if (!Ranges.empty() && Ranges.back().second == nullptr &&
+      Ranges.back().first->isIdenticalTo(&MI)) {
+    DEBUG(dbgs() << "Coalescing identical DBG_VALUE entries:\n"
+                 << "\t" << Ranges.back().first << "\t" << MI << "\n");
+    return;
+  }
+  Ranges.push_back(std::make_pair(&MI, nullptr));
+}
+
+void DbgValueHistoryMap::endInstrRange(const MDNode *Var,
+                                       const MachineInstr &MI) {
+  auto &Ranges = VarInstrRanges[Var];
+  // Verify that the current instruction range is not yet closed.
+  assert(!Ranges.empty() && Ranges.back().second == nullptr);
+  // For now, instruction ranges are not allowed to cross basic block
+  // boundaries.
+  assert(Ranges.back().first->getParent() == MI.getParent());
+  Ranges.back().second = &MI;
+}
+
+unsigned DbgValueHistoryMap::getRegisterForVar(const MDNode *Var) const {
+  const auto &I = VarInstrRanges.find(Var);
+  if (I == VarInstrRanges.end())
+    return 0;
+  const auto &Ranges = I->second;
+  if (Ranges.empty() || Ranges.back().second != nullptr)
+    return 0;
+  return isDescribedByReg(*Ranges.back().first);
+}
+
+namespace {
+// Maps physreg numbers to the variables they describe.
+typedef std::map<unsigned, SmallVector<const MDNode *, 1>> RegDescribedVarsMap;
+}
+
+// \brief Claim that @Var is not described by @RegNo anymore.
+static void dropRegDescribedVar(RegDescribedVarsMap &RegVars,
+                                unsigned RegNo, const MDNode *Var) {
+  const auto &I = RegVars.find(RegNo);
+  assert(RegNo != 0U && I != RegVars.end());
+  auto &VarSet = I->second;
+  const auto &VarPos = std::find(VarSet.begin(), VarSet.end(), Var);
+  assert(VarPos != VarSet.end());
+  VarSet.erase(VarPos);
+  // Don't keep empty sets in a map to keep it as small as possible.
+  if (VarSet.empty())
+    RegVars.erase(I);
+}
+
+// \brief Claim that @Var is now described by @RegNo.
+static void addRegDescribedVar(RegDescribedVarsMap &RegVars,
+                               unsigned RegNo, const MDNode *Var) {
+  assert(RegNo != 0U);
+  auto &VarSet = RegVars[RegNo];
+  assert(std::find(VarSet.begin(), VarSet.end(), Var) == VarSet.end());
+  VarSet.push_back(Var);
+}
+
+// \brief Terminate the location range for variables described by register
+// @RegNo by inserting @ClobberingInstr to their history.
+static void clobberRegisterUses(RegDescribedVarsMap &RegVars, unsigned RegNo,
+                                DbgValueHistoryMap &HistMap,
+                                const MachineInstr &ClobberingInstr) {
+  const auto &I = RegVars.find(RegNo);
+  if (I == RegVars.end())
+    return;
+  // Iterate over all variables described by this register and add this
+  // instruction to their history, clobbering it.
+  for (const auto &Var : I->second)
+    HistMap.endInstrRange(Var, ClobberingInstr);
+  RegVars.erase(I);
+}
+
+// \brief Collect all registers clobbered by @MI and insert them to @Regs.
+static void collectClobberedRegisters(const MachineInstr &MI,
+                                      const TargetRegisterInfo *TRI,
+                                      std::set<unsigned> &Regs) {
+  for (const MachineOperand &MO : MI.operands()) {
+    if (!MO.isReg() || !MO.isDef() || !MO.getReg())
+      continue;
+    for (MCRegAliasIterator AI(MO.getReg(), TRI, true); AI.isValid(); ++AI)
+      Regs.insert(*AI);
+  }
+}
+
+// \brief Returns the first instruction in @MBB which corresponds to
+// the function epilogue, or nullptr if @MBB doesn't contain an epilogue.
+static const MachineInstr *getFirstEpilogueInst(const MachineBasicBlock &MBB) {
+  auto LastMI = MBB.getLastNonDebugInstr();
+  if (LastMI == MBB.end() || !LastMI->isReturn())
+    return nullptr;
+  // Assume that epilogue starts with instruction having the same debug location
+  // as the return instruction.
+  DebugLoc LastLoc = LastMI->getDebugLoc();
+  auto Res = LastMI;
+  for (MachineBasicBlock::const_reverse_iterator I(std::next(LastMI)); I != MBB.rend();
+       ++I) {
+    if (I->getDebugLoc() != LastLoc)
+      return Res;
+    Res = std::prev(I.base());
+  }
+  // If all instructions have the same debug location, assume whole MBB is
+  // an epilogue.
+  return MBB.begin();
+}
+
+// \brief Collect registers that are modified in the function body (their
+// contents is changed only in the prologue and epilogue).
+static void collectChangingRegs(const MachineFunction *MF,
+                                const TargetRegisterInfo *TRI,
+                                std::set<unsigned> &Regs) {
+  for (const auto &MBB : *MF) {
+    auto FirstEpilogueInst = getFirstEpilogueInst(MBB);
+    bool IsInEpilogue = false;
+    for (const auto &MI : MBB) {
+      IsInEpilogue |= &MI == FirstEpilogueInst;
+      if (!MI.getFlag(MachineInstr::FrameSetup) && !IsInEpilogue)
+        collectClobberedRegisters(MI, TRI, Regs);
+    }
+  }
 }
 
 void calculateDbgValueHistory(const MachineFunction *MF,
                               const TargetRegisterInfo *TRI,
                               DbgValueHistoryMap &Result) {
-  // LiveUserVar - Map physreg numbers to the MDNode they contain.
-  std::vector<const MDNode *> LiveUserVar(TRI->getNumRegs());
+  std::set<unsigned> ChangingRegs;
+  collectChangingRegs(MF, TRI, ChangingRegs);
 
-  for (MachineFunction::const_iterator I = MF->begin(), E = MF->end(); I != E;
-       ++I) {
-    bool AtBlockEntry = true;
-    for (const auto &MI : *I) {
-      if (MI.isDebugValue()) {
-        assert(MI.getNumOperands() > 1 && "Invalid machine instruction!");
-
-        // Keep track of user variables.
-        const MDNode *Var = MI.getDebugVariable();
-
-        // Variable is in a register, we need to check for clobbers.
-        if (isDbgValueInDefinedReg(&MI))
-          LiveUserVar[MI.getOperand(0).getReg()] = Var;
-
-        // Check the history of this variable.
-        SmallVectorImpl<const MachineInstr *> &History = Result[Var];
-        if (!History.empty()) {
-          // We have seen this variable before. Try to coalesce DBG_VALUEs.
-          const MachineInstr *Prev = History.back();
-          if (Prev->isDebugValue()) {
-            // Coalesce identical entries at the end of History.
-            if (History.size() >= 2 &&
-                Prev->isIdenticalTo(History[History.size() - 2])) {
-              DEBUG(dbgs() << "Coalescing identical DBG_VALUE entries:\n"
-                           << "\t" << *Prev << "\t"
-                           << *History[History.size() - 2] << "\n");
-              History.pop_back();
-            }
-
-            // Terminate old register assignments that don't reach MI;
-            MachineFunction::const_iterator PrevMBB = Prev->getParent();
-            if (PrevMBB != I && (!AtBlockEntry || std::next(PrevMBB) != I) &&
-                isDbgValueInDefinedReg(Prev)) {
-              // Previous register assignment needs to terminate at the end of
-              // its basic block.
-              MachineBasicBlock::const_iterator LastMI =
-                  PrevMBB->getLastNonDebugInstr();
-              if (LastMI == PrevMBB->end()) {
-                // Drop DBG_VALUE for empty range.
-                DEBUG(dbgs() << "Dropping DBG_VALUE for empty range:\n"
-                             << "\t" << *Prev << "\n");
-                History.pop_back();
-              } else if (std::next(PrevMBB) != PrevMBB->getParent()->end())
-                // Terminate after LastMI.
-                History.push_back(LastMI);
-            }
-          }
+  RegDescribedVarsMap RegVars;
+  for (const auto &MBB : *MF) {
+    for (const auto &MI : MBB) {
+      if (!MI.isDebugValue()) {
+        // Not a DBG_VALUE instruction. It may clobber registers which describe
+        // some variables.
+        std::set<unsigned> MIClobberedRegs;
+        collectClobberedRegisters(MI, TRI, MIClobberedRegs);
+        for (unsigned RegNo : MIClobberedRegs) {
+          if (ChangingRegs.count(RegNo))
+            clobberRegisterUses(RegVars, RegNo, Result, MI);
         }
-        History.push_back(&MI);
-      } else {
-        // Not a DBG_VALUE instruction.
-        if (!MI.isPosition())
-          AtBlockEntry = false;
-
-        // Check if the instruction clobbers any registers with debug vars.
-        for (const MachineOperand &MO : MI.operands()) {
-          if (!MO.isReg() || !MO.isDef() || !MO.getReg())
-            continue;
-          for (MCRegAliasIterator AI(MO.getReg(), TRI, true); AI.isValid();
-               ++AI) {
-            unsigned Reg = *AI;
-            const MDNode *Var = LiveUserVar[Reg];
-            if (!Var)
-              continue;
-            // Reg is now clobbered.
-            LiveUserVar[Reg] = nullptr;
-
-            // Was MD last defined by a DBG_VALUE referring to Reg?
-            auto HistI = Result.find(Var);
-            if (HistI == Result.end())
-              continue;
-            SmallVectorImpl<const MachineInstr *> &History = HistI->second;
-            if (History.empty())
-              continue;
-            const MachineInstr *Prev = History.back();
-            // Sanity-check: Register assignments are terminated at the end of
-            // their block.
-            if (!Prev->isDebugValue() || Prev->getParent() != MI.getParent())
-              continue;
-            // Is the variable still in Reg?
-            if (!isDbgValueInDefinedReg(Prev) ||
-                Prev->getOperand(0).getReg() != Reg)
-              continue;
-            // Var is clobbered. Make sure the next instruction gets a label.
-            History.push_back(&MI);
-          }
-        }
+        continue;
       }
+
+      assert(MI.getNumOperands() > 1 && "Invalid DBG_VALUE instruction!");
+      const MDNode *Var = MI.getDebugVariable();
+
+      if (unsigned PrevReg = Result.getRegisterForVar(Var))
+        dropRegDescribedVar(RegVars, PrevReg, Var);
+
+      Result.startInstrRange(Var, MI);
+
+      if (unsigned NewReg = isDescribedByReg(MI))
+        addRegDescribedVar(RegVars, NewReg, Var);
     }
-  }
 
-  // Make sure the final register assignments are terminated.
-  for (auto &I : Result) {
-    SmallVectorImpl<const MachineInstr *> &History = I.second;
-    if (History.empty())
-      continue;
-
-    const MachineInstr *Prev = History.back();
-    if (Prev->isDebugValue() && isDbgValueInDefinedReg(Prev)) {
-      const MachineBasicBlock *PrevMBB = Prev->getParent();
-      MachineBasicBlock::const_iterator LastMI =
-          PrevMBB->getLastNonDebugInstr();
-      if (LastMI == PrevMBB->end())
-        // Drop DBG_VALUE for empty range.
-        History.pop_back();
-      else if (PrevMBB != &PrevMBB->getParent()->back()) {
-        // Terminate after LastMI.
-        History.push_back(LastMI);
-      }
+    // Make sure locations for register-described variables are valid only
+    // until the end of the basic block (unless it's the last basic block, in
+    // which case let their liveness run off to the end of the function).
+    if (!MBB.empty() &&  &MBB != &MF->back()) {
+      for (unsigned RegNo : ChangingRegs)
+        clobberRegisterUses(RegVars, RegNo, Result, MBB.back());
     }
   }
 }

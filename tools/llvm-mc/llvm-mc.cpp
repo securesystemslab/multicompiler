@@ -65,6 +65,10 @@ static cl::opt<unsigned>
 OutputAsmVariant("output-asm-variant",
                  cl::desc("Syntax variant to use for output printing"));
 
+static cl::opt<bool>
+PrintImmHex("print-imm-hex", cl::init(false),
+            cl::desc("Prefer hex format for immediate values"));
+
 enum OutputFileType {
   OFT_Null,
   OFT_AssemblyFile,
@@ -156,12 +160,17 @@ static cl::opt<std::string>
 MainFileName("main-file-name",
              cl::desc("Specifies the name we should consider the input file"));
 
+static cl::opt<bool> SaveTempLabels("save-temp-labels",
+                                    cl::desc("Don't discard temporary labels"));
+
+static cl::opt<bool> NoExecStack("no-exec-stack",
+                                 cl::desc("File doesn't need an exec stack"));
+
 enum ActionType {
   AC_AsLex,
   AC_Assemble,
   AC_Disassemble,
   AC_MDisassemble,
-  AC_HDisassemble
 };
 
 static cl::opt<ActionType>
@@ -175,9 +184,6 @@ Action(cl::desc("Action to perform:"),
                              "Disassemble strings of hex bytes"),
                   clEnumValN(AC_MDisassemble, "mdis",
                              "Marked up disassembly of strings of hex bytes"),
-                  clEnumValN(AC_HDisassemble, "hdis",
-                             "Disassemble strings of hex bytes printing "
-                             "immediates as hex"),
                   clEnumValEnd));
 
 static const Target *GetTarget(const char *ProgName) {
@@ -361,7 +367,8 @@ int main(int argc, char **argv) {
     return 1;
 
   std::unique_ptr<MemoryBuffer> BufferPtr;
-  if (error_code ec = MemoryBuffer::getFileOrSTDIN(InputFilename, BufferPtr)) {
+  if (std::error_code ec =
+          MemoryBuffer::getFileOrSTDIN(InputFilename, BufferPtr)) {
     errs() << ProgName << ": " << ec.message() << '\n';
     return 1;
   }
@@ -439,6 +446,11 @@ int main(int argc, char **argv) {
   if (FileType == OFT_AssemblyFile) {
     IP =
       TheTarget->createMCInstPrinter(OutputAsmVariant, *MAI, *MCII, *MRI, *STI);
+
+    // Set the display preference for hex vs. decimal immediates.
+    IP->setPrintImmHex(PrintImmHex);
+
+    // Set up the AsmStreamer.
     MCCodeEmitter *CE = nullptr;
     MCAsmBackend *MAB = nullptr;
     if (ShowEncoding) {
@@ -472,11 +484,6 @@ int main(int argc, char **argv) {
   case AC_MDisassemble:
     assert(IP && "Expected assembly output");
     IP->setUseMarkup(1);
-    disassemble = true;
-    break;
-  case AC_HDisassemble:
-    assert(IP && "Expected assembly output");
-    IP->setPrintImmHex(1);
     disassemble = true;
     break;
   case AC_Disassemble:

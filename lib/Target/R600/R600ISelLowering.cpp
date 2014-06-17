@@ -13,6 +13,9 @@
 //===----------------------------------------------------------------------===//
 
 #include "R600ISelLowering.h"
+#include "AMDILIntrinsicInfo.h"
+#include "AMDGPUFrameLowering.h"
+#include "AMDGPUSubtarget.h"
 #include "R600Defines.h"
 #include "R600InstrInfo.h"
 #include "R600MachineFunctionInfo.h"
@@ -1762,7 +1765,8 @@ SDValue R600TargetLowering::PerformDAGCombine(SDNode *N,
         NewArgs);
   }
   }
-  return SDValue();
+
+  return AMDGPUTargetLowering::PerformDAGCombine(N, DCI);
 }
 
 static bool

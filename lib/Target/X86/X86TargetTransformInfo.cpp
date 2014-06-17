@@ -26,7 +26,7 @@ using namespace llvm;
 #define DEBUG_TYPE "x86tti"
 
 // Declare the pass initialization routine locally as target-specific passes
-// don't havve a target-wide initialization entry point, and so we rely on the
+// don't have a target-wide initialization entry point, and so we rely on the
 // pass constructor initialization.
 namespace llvm {
 void initializeX86TTIPass(PassRegistry &);
@@ -101,6 +101,8 @@ public:
 
   unsigned getReductionCost(unsigned Opcode, Type *Ty,
                             bool IsPairwiseForm) const override;
+
+  unsigned getIntImmCost(int64_t) const;
 
   unsigned getIntImmCost(const APInt &Imm, Type *Ty) const override;
 
@@ -808,6 +810,19 @@ unsigned X86TTI::getReductionCost(unsigned Opcode, Type *ValTy,
   return TargetTransformInfo::getReductionCost(Opcode, ValTy, IsPairwise);
 }
 
+/// \brief Calculate the cost of materializing a 64-bit value. This helper
+/// method might only calculate a fraction of a larger immediate. Therefore it
+/// is valid to return a cost of ZERO.
+unsigned X86TTI::getIntImmCost(int64_t Val) const {
+  if (Val == 0)
+    return TCC_Free;
+
+  if (isInt<32>(Val))
+    return TCC_Basic;
+
+  return 2 * TCC_Basic;
+}
+
 unsigned X86TTI::getIntImmCost(const APInt &Imm, Type *Ty) const {
   assert(Ty->isIntegerTy());
 
@@ -815,14 +830,31 @@ unsigned X86TTI::getIntImmCost(const APInt &Imm, Type *Ty) const {
   if (BitSize == 0)
     return ~0U;
 
+  // Never hoist constants larger than 128bit, because this might lead to
+  // incorrect code generation or assertions in codegen.
+  // Fixme: Create a cost model for types larger than i128 once the codegen
+  // issues have been fixed.
+  if (BitSize > 128)
+    return TCC_Free;
+
   if (Imm == 0)
     return TCC_Free;
 
-  if (Imm.getBitWidth() <= 64 &&
-      (isInt<32>(Imm.getSExtValue()) || isUInt<32>(Imm.getZExtValue())))
-    return TCC_Basic;
-  else
-    return 2 * TCC_Basic;
+  // Sign-extend all constants to a multiple of 64-bit.
+  APInt ImmVal = Imm;
+  if (BitSize & 0x3f)
+    ImmVal = Imm.sext((BitSize + 63) & ~0x3fU);
+
+  // Split the constant into 64-bit chunks and calculate the cost for each
+  // chunk.
+  unsigned Cost = 0;
+  for (unsigned ShiftVal = 0; ShiftVal < BitSize; ShiftVal += 64) {
+    APInt Tmp = ImmVal.ashr(ShiftVal).sextOrTrunc(64);
+    int64_t Val = Tmp.getSExtValue();
+    Cost += getIntImmCost(Val);
+  }
+  // We need at least one instruction to materialze the constant.
+  return std::max(1U, Cost);
 }
 
 unsigned X86TTI::getIntImmCost(unsigned Opcode, unsigned Idx, const APInt &Imm,
@@ -830,8 +862,10 @@ unsigned X86TTI::getIntImmCost(unsigned Opcode, unsigned Idx, const APInt &Imm,
   assert(Ty->isIntegerTy());
 
   unsigned BitSize = Ty->getPrimitiveSizeInBits();
+  // There is no cost model for constants with a bit size of 0. Return TCC_Free
+  // here, so that constant hoisting will ignore this constant.
   if (BitSize == 0)
-    return ~0U;
+    return TCC_Free;
 
   unsigned ImmIdx = ~0U;
   switch (Opcode) {
@@ -880,9 +914,13 @@ unsigned X86TTI::getIntImmCost(unsigned Opcode, unsigned Idx, const APInt &Imm,
     break;
   }
 
-  if ((Idx == ImmIdx) &&
-      Imm.getBitWidth() <= 64 && isInt<32>(Imm.getSExtValue()))
-    return TCC_Free;
+  if (Idx == ImmIdx) {
+    unsigned NumConstants = (BitSize + 63) / 64;
+    unsigned Cost = X86TTI::getIntImmCost(Imm, Ty);
+    return (Cost <= NumConstants * TCC_Basic)
+      ? static_cast<unsigned>(TCC_Free)
+      : Cost;
+  }
 
   return X86TTI::getIntImmCost(Imm, Ty);
 }
@@ -892,8 +930,10 @@ unsigned X86TTI::getIntImmCost(Intrinsic::ID IID, unsigned Idx,
   assert(Ty->isIntegerTy());
 
   unsigned BitSize = Ty->getPrimitiveSizeInBits();
+  // There is no cost model for constants with a bit size of 0. Return TCC_Free
+  // here, so that constant hoisting will ignore this constant.
   if (BitSize == 0)
-    return ~0U;
+    return TCC_Free;
 
   switch (IID) {
   default: return TCC_Free;

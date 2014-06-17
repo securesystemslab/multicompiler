@@ -42,10 +42,25 @@ private:
   SDValue MergeVectorStore(const SDValue &Op, SelectionDAG &DAG) const;
   /// \brief Split a vector store into multiple scalar stores.
   /// \returns The resulting chain.
+
+  SDValue LowerSDIV(SDValue Op, SelectionDAG &DAG) const;
+  SDValue LowerSDIV24(SDValue Op, SelectionDAG &DAG) const;
+  SDValue LowerSDIV32(SDValue Op, SelectionDAG &DAG) const;
+  SDValue LowerSDIV64(SDValue Op, SelectionDAG &DAG) const;
+  SDValue LowerSREM(SDValue Op, SelectionDAG &DAG) const;
+  SDValue LowerSREM32(SDValue Op, SelectionDAG &DAG) const;
+  SDValue LowerSREM64(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerUDIVREM(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerUINT_TO_FP(SDValue Op, SelectionDAG &DAG) const;
 
+  SDValue ExpandSIGN_EXTEND_INREG(SDValue Op,
+                                  unsigned BitsDiff,
+                                  SelectionDAG &DAG) const;
+  SDValue LowerSIGN_EXTEND_INREG(SDValue Op, SelectionDAG &DAG) const;
+
 protected:
+  static EVT getEquivalentMemType(LLVMContext &Context, EVT VT);
+  static EVT getEquivalentLoadRegType(LLVMContext &Context, EVT VT);
 
   /// \brief Helper function that adds Reg to the LiveIn list of the DAG's
   /// MachineFunction.
@@ -91,6 +106,10 @@ public:
   bool isNarrowingProfitable(EVT VT1, EVT VT2) const override;
 
   MVT getVectorIdxTy() const override;
+
+  bool isFPImmLegal(const APFloat &Imm, EVT VT) const override;
+  bool ShouldShrinkFPConstant(EVT VT) const override;
+
   bool isLoadBitCastBeneficial(EVT, EVT) const override;
   SDValue LowerReturn(SDValue Chain, CallingConv::ID CallConv,
                       bool isVarArg,
@@ -101,6 +120,7 @@ public:
                     SmallVectorImpl<SDValue> &InVals) const override;
 
   SDValue LowerOperation(SDValue Op, SelectionDAG &DAG) const override;
+  SDValue PerformDAGCombine(SDNode *N, DAGCombinerInfo &DCI) const override;
   void ReplaceNodeResults(SDNode * N,
                           SmallVectorImpl<SDValue> &Results,
                           SelectionDAG &DAG) const override;
@@ -124,38 +144,15 @@ public:
                                      const SelectionDAG &DAG,
                                      unsigned Depth = 0) const override;
 
-// Functions defined in AMDILISelLowering.cpp
-public:
-  bool getTgtMemIntrinsic(IntrinsicInfo &Info,
-                          const CallInst &I, unsigned Intrinsic) const override;
-
-  /// We want to mark f32/f64 floating point values as legal.
-  bool isFPImmLegal(const APFloat &Imm, EVT VT) const override;
-
-  /// We don't want to shrink f64/f32 constants.
-  bool ShouldShrinkFPConstant(EVT VT) const override;
-
-  SDValue PerformDAGCombine(SDNode *N, DAGCombinerInfo &DCI) const override;
+  virtual unsigned ComputeNumSignBitsForTargetNode(
+    SDValue Op,
+    const SelectionDAG &DAG,
+    unsigned Depth = 0) const override;
 
 private:
+  // Functions defined in AMDILISelLowering.cpp
   void InitAMDILLowering();
-  SDValue LowerSREM(SDValue Op, SelectionDAG &DAG) const;
-  SDValue LowerSREM8(SDValue Op, SelectionDAG &DAG) const;
-  SDValue LowerSREM16(SDValue Op, SelectionDAG &DAG) const;
-  SDValue LowerSREM32(SDValue Op, SelectionDAG &DAG) const;
-  SDValue LowerSREM64(SDValue Op, SelectionDAG &DAG) const;
-  SDValue LowerSDIV(SDValue Op, SelectionDAG &DAG) const;
-  SDValue LowerSDIV24(SDValue Op, SelectionDAG &DAG) const;
-  SDValue LowerSDIV32(SDValue Op, SelectionDAG &DAG) const;
-  SDValue LowerSDIV64(SDValue Op, SelectionDAG &DAG) const;
-
-  SDValue ExpandSIGN_EXTEND_INREG(SDValue Op,
-                                  unsigned BitsDiff,
-                                  SelectionDAG &DAG) const;
-  SDValue LowerSIGN_EXTEND_INREG(SDValue Op, SelectionDAG &DAG) const;
-  EVT genIntType(uint32_t size = 32, uint32_t numEle = 1) const;
   SDValue LowerBRCOND(SDValue Op, SelectionDAG &DAG) const;
-  SDValue LowerFP_ROUND(SDValue Op, SelectionDAG &DAG) const;
 };
 
 namespace AMDGPUISD {
@@ -171,6 +168,7 @@ enum {
   // End AMDIL ISD Opcodes
   DWORDADDR,
   FRACT,
+  CLAMP,
   COS_HW,
   SIN_HW,
   FMAX,
@@ -187,6 +185,8 @@ enum {
   BFM, // Insert a range of bits into a 32-bit word.
   MUL_U24,
   MUL_I24,
+  MAD_U24,
+  MAD_I24,
   TEXTURE_FETCH,
   EXPORT,
   CONST_ADDRESS,
@@ -197,6 +197,12 @@ enum {
   SAMPLEB,
   SAMPLED,
   SAMPLEL,
+
+  // These cvt_f32_ubyte* nodes need to remain consecutive and in order.
+  CVT_F32_UBYTE0,
+  CVT_F32_UBYTE1,
+  CVT_F32_UBYTE2,
+  CVT_F32_UBYTE3,
   FIRST_MEM_OPCODE_NUMBER = ISD::FIRST_TARGET_MEMORY_OPCODE,
   STORE_MSKOR,
   LOAD_CONSTANT,

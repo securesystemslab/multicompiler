@@ -48,16 +48,12 @@ MCSymbol *TargetLoweringObjectFileELF::getCFIPersonalitySymbol(
     const GlobalValue *GV, Mangler &Mang, const TargetMachine &TM,
     MachineModuleInfo *MMI) const {
   unsigned Encoding = getPersonalityEncoding();
-  switch (Encoding & 0x70) {
-  default:
-    report_fatal_error("We do not support this DWARF encoding yet!");
-  case dwarf::DW_EH_PE_absptr:
-    return TM.getSymbol(GV, Mang);
-  case dwarf::DW_EH_PE_pcrel: {
+  if ((Encoding & 0x80) == dwarf::DW_EH_PE_indirect)
     return getContext().GetOrCreateSymbol(StringRef("DW.ref.") +
                                           TM.getSymbol(GV, Mang)->getName());
-  }
-  }
+  if ((Encoding & 0x70) == dwarf::DW_EH_PE_absptr)
+    return TM.getSymbol(GV, Mang);
+  report_fatal_error("We do not support this DWARF encoding yet!");
 }
 
 void TargetLoweringObjectFileELF::emitPersonalityValue(MCStreamer &Streamer,
@@ -339,8 +335,8 @@ getSectionForConstant(SectionKind Kind) const {
   return DataRelROSection;
 }
 
-const MCSection *
-TargetLoweringObjectFileELF::getStaticCtorSection(unsigned Priority) const {
+const MCSection *TargetLoweringObjectFileELF::getStaticCtorSection(
+    unsigned Priority, const MCSymbol *KeySym) const {
   // The default scheme is .ctor / .dtor, so we have to invert the priority
   // numbering.
   if (Priority == 65535)
@@ -359,8 +355,8 @@ TargetLoweringObjectFileELF::getStaticCtorSection(unsigned Priority) const {
   }
 }
 
-const MCSection *
-TargetLoweringObjectFileELF::getStaticDtorSection(unsigned Priority) const {
+const MCSection *TargetLoweringObjectFileELF::getStaticDtorSection(
+    unsigned Priority, const MCSymbol *KeySym) const {
   // The default scheme is .ctor / .dtor, so we have to invert the priority
   // numbering.
   if (Priority == 65535)
@@ -864,4 +860,31 @@ emitModuleFlags(MCStreamer &Streamer,
       Streamer.EmitBytes(Escaped);
     }
   }
+}
+
+static const MCSection *getAssociativeCOFFSection(MCContext &Ctx,
+                                                  const MCSection *Sec,
+                                                  const MCSymbol *KeySym) {
+  // Return the normal section if we don't have to be associative.
+  if (!KeySym)
+    return Sec;
+
+  // Make an associative section with the same name and kind as the normal
+  // section.
+  const MCSectionCOFF *SecCOFF = cast<MCSectionCOFF>(Sec);
+  unsigned Characteristics =
+      SecCOFF->getCharacteristics() | COFF::IMAGE_SCN_LNK_COMDAT;
+  return Ctx.getCOFFSection(SecCOFF->getSectionName(), Characteristics,
+                            SecCOFF->getKind(), KeySym->getName(),
+                            COFF::IMAGE_COMDAT_SELECT_ASSOCIATIVE);
+}
+
+const MCSection *TargetLoweringObjectFileCOFF::getStaticCtorSection(
+    unsigned Priority, const MCSymbol *KeySym) const {
+  return getAssociativeCOFFSection(getContext(), StaticCtorSection, KeySym);
+}
+
+const MCSection *TargetLoweringObjectFileCOFF::getStaticDtorSection(
+    unsigned Priority, const MCSymbol *KeySym) const {
+  return getAssociativeCOFFSection(getContext(), StaticDtorSection, KeySym);
 }
