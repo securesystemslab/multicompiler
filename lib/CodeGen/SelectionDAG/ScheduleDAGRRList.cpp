@@ -24,7 +24,9 @@
 #include "llvm/CodeGen/ScheduleHazardRecognizer.h"
 #include "llvm/CodeGen/SelectionDAGISel.h"
 #include "llvm/IR/DataLayout.h"
+#include "llvm/IR/Function.h"
 #include "llvm/IR/InlineAsm.h"
+#include "llvm/IR/Module.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/RandomNumberGenerator.h"
@@ -1771,9 +1773,9 @@ template<class SF>
 class RegReductionPriorityQueue : public RegReductionPQBase {
   SF Picker;
 
-  static SUnit *popRandom(std::vector<SUnit*> &Q) {
-    RandomNumberGenerator *randGen = RandomNumberGenerator::Get();
-    size_t randIndex = randGen->Random(Q.size());
+  SUnit *popRandom(std::vector<SUnit*> &Q) {
+    RandomNumberGenerator &randGen = MF.getFunction()->getParent()->getRNG();
+    size_t randIndex = randGen.next(Q.size());
     SUnit *V = Q[randIndex];
     if (randIndex < Q.size() - 1)
       std::swap(Q[randIndex], Q.back());
@@ -1803,8 +1805,8 @@ public:
 
     SUnit *V;
     if (RandomizeSchedule) {
-      RandomNumberGenerator *randGen = RandomNumberGenerator::Get();
-      unsigned int Roll = randGen->Random(100);
+      RandomNumberGenerator &randGen = MF.getFunction()->getParent()->getRNG();
+      unsigned int Roll = randGen.next(100);
       if (Roll < SchedRandPercentage) {
         V = popRandom(Queue);
       } else {
