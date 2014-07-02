@@ -102,7 +102,8 @@ DICompileUnit DIBuilder::createCompileUnit(unsigned Lang, StringRef Filename,
                                            StringRef Producer, bool isOptimized,
                                            StringRef Flags, unsigned RunTimeVer,
                                            StringRef SplitName,
-                                           DebugEmissionKind Kind) {
+                                           DebugEmissionKind Kind,
+                                           bool EmitDebugInfo) {
 
   assert(((Lang <= dwarf::DW_LANG_OCaml && Lang >= dwarf::DW_LANG_C89) ||
           (Lang <= dwarf::DW_LANG_hi_user && Lang >= dwarf::DW_LANG_lo_user)) &&
@@ -140,8 +141,14 @@ DICompileUnit DIBuilder::createCompileUnit(unsigned Lang, StringRef Filename,
   MDNode *CUNode = MDNode::get(VMContext, Elts);
 
   // Create a named metadata so that it is easier to find cu in a module.
-  NamedMDNode *NMD = M.getOrInsertNamedMetadata("llvm.dbg.cu");
-  NMD->addOperand(CUNode);
+  // Note that we only generate this when the caller wants to actually
+  // emit debug information. When we are only interested in tracking
+  // source line locations throughout the backend, we prevent codegen from
+  // emitting debug info in the final output by not generating llvm.dbg.cu.
+  if (EmitDebugInfo) {
+    NamedMDNode *NMD = M.getOrInsertNamedMetadata("llvm.dbg.cu");
+    NMD->addOperand(CUNode);
+  }
 
   return DICompileUnit(CUNode);
 }
@@ -1068,18 +1075,19 @@ DIVariable DIBuilder::createComplexVariable(unsigned Tag, DIDescriptor Scope,
                                             DITypeRef Ty,
                                             ArrayRef<Value *> Addr,
                                             unsigned ArgNo) {
-  SmallVector<Value *, 15> Elts;
-  Elts.push_back(GetTagConstant(VMContext, Tag));
-  Elts.push_back(getNonCompileUnitScope(Scope)),
-  Elts.push_back(MDString::get(VMContext, Name));
-  Elts.push_back(F);
-  Elts.push_back(ConstantInt::get(Type::getInt32Ty(VMContext),
-                                  (LineNo | (ArgNo << 24))));
-  Elts.push_back(Ty);
-  Elts.push_back(Constant::getNullValue(Type::getInt32Ty(VMContext)));
-  Elts.push_back(Constant::getNullValue(Type::getInt32Ty(VMContext)));
-  Elts.append(Addr.begin(), Addr.end());
-
+  assert(Addr.size() > 0 && "complex address is empty");
+  Value *Elts[] = {
+    GetTagConstant(VMContext, Tag),
+    getNonCompileUnitScope(Scope),
+    MDString::get(VMContext, Name),
+    F,
+    ConstantInt::get(Type::getInt32Ty(VMContext),
+                     (LineNo | (ArgNo << 24))),
+    Ty,
+    Constant::getNullValue(Type::getInt32Ty(VMContext)),
+    Constant::getNullValue(Type::getInt32Ty(VMContext)),
+    MDNode::get(VMContext, Addr)
+  };
   return DIVariable(MDNode::get(VMContext, Elts));
 }
 

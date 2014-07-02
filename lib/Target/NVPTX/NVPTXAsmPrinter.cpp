@@ -734,23 +734,7 @@ void NVPTXAsmPrinter::printReturnValStr(const Function *F, raw_ostream &O) {
         << " func_retval0";
     } else {
       if ((Ty->getTypeID() == Type::StructTyID) || isa<VectorType>(Ty)) {
-        SmallVector<EVT, 16> vtparts;
-        ComputeValueVTs(*TLI, Ty, vtparts);
-        unsigned totalsz = 0;
-        for (unsigned i = 0, e = vtparts.size(); i != e; ++i) {
-          unsigned elems = 1;
-          EVT elemtype = vtparts[i];
-          if (vtparts[i].isVector()) {
-            elems = vtparts[i].getVectorNumElements();
-            elemtype = vtparts[i].getVectorElementType();
-          }
-          for (unsigned j = 0, je = elems; j != je; ++j) {
-            unsigned sz = elemtype.getSizeInBits();
-            if (elemtype.isInteger() && (sz < 8))
-              sz = 8;
-            totalsz += sz / 8;
-          }
-        }
+        unsigned totalsz = TD->getTypeAllocSize(Ty);
         unsigned retAlignment = 0;
         if (!llvm::getAlign(*F, 0, retAlignment))
           retAlignment = TD->getABITypeAlignment(Ty);
@@ -1321,6 +1305,10 @@ bool NVPTXAsmPrinter::doFinalization(Module &M) {
 // external global variable with init     -> .visible
 // external without init                  -> .extern
 // appending                              -> not allowed, assert.
+// for any linkage other than
+// internal, private, linker_private,
+// linker_private_weak, linker_private_weak_def_auto,
+// we emit                                -> .weak.
 
 void NVPTXAsmPrinter::emitLinkageDirective(const GlobalValue *V,
                                            raw_ostream &O) {
@@ -1346,6 +1334,9 @@ void NVPTXAsmPrinter::emitLinkageDirective(const GlobalValue *V,
         msg.append(V->getName().str());
       msg.append("has unsupported appending linkage type");
       llvm_unreachable(msg.c_str());
+    } else if (!V->hasInternalLinkage() &&
+               !V->hasPrivateLinkage()) {
+      O << ".weak ";
     }
   }
 }
@@ -1360,6 +1351,11 @@ void NVPTXAsmPrinter::printModuleLevelGV(const GlobalVariable *GVar,
       return;
   }
 
+  // Skip LLVM intrinsic global variables
+  if (GVar->getName().startswith("llvm.") ||
+      GVar->getName().startswith("nvvm."))
+    return;
+
   const DataLayout *TD = TM.getDataLayout();
 
   // GlobalVariables are always constant pointers themselves.
@@ -1371,6 +1367,10 @@ void NVPTXAsmPrinter::printModuleLevelGV(const GlobalVariable *GVar,
       O << ".visible ";
     else
       O << ".extern ";
+  } else if (GVar->hasLinkOnceLinkage() || GVar->hasWeakLinkage() ||
+             GVar->hasAvailableExternallyLinkage() ||
+             GVar->hasCommonLinkage()) {
+    O << ".weak ";
   }
 
   if (llvm::isTexture(*GVar)) {
@@ -1438,7 +1438,7 @@ void NVPTXAsmPrinter::printModuleLevelGV(const GlobalVariable *GVar,
         O << "linear";
         break;
       case 2:
-        assert(0 && "Anisotropic filtering is not supported");
+        llvm_unreachable("Anisotropic filtering is not supported");
       default:
         O << "nearest";
         break;
@@ -1480,6 +1480,11 @@ void NVPTXAsmPrinter::printModuleLevelGV(const GlobalVariable *GVar,
 
   O << ".";
   emitPTXAddressSpace(PTy->getAddressSpace(), O);
+
+  if (isManaged(*GVar)) {
+    O << " .attribute(.managed)";
+  }
+
   if (GVar->getAlignment() == 0)
     O << " .align " << (int) TD->getPrefTypeAlignment(ETy);
   else
@@ -1497,13 +1502,24 @@ void NVPTXAsmPrinter::printModuleLevelGV(const GlobalVariable *GVar,
 
     // Ptx allows variable initilization only for constant and global state
     // spaces.
-    if (((PTy->getAddressSpace() == llvm::ADDRESS_SPACE_GLOBAL) ||
-         (PTy->getAddressSpace() == llvm::ADDRESS_SPACE_CONST)) &&
-        GVar->hasInitializer()) {
-      const Constant *Initializer = GVar->getInitializer();
-      if (!Initializer->isNullValue()) {
-        O << " = ";
-        printScalarConstant(Initializer, O);
+    if (GVar->hasInitializer()) {
+      if ((PTy->getAddressSpace() == llvm::ADDRESS_SPACE_GLOBAL) ||
+          (PTy->getAddressSpace() == llvm::ADDRESS_SPACE_CONST)) {
+        const Constant *Initializer = GVar->getInitializer();
+        // 'undef' is treated as there is no value spefied.
+        if (!Initializer->isNullValue() && !isa<UndefValue>(Initializer)) {
+          O << " = ";
+          printScalarConstant(Initializer, O);
+        }
+      } else {
+        // The frontend adds zero-initializer to variables that don't have an
+        // initial value, so skip warning for this case.
+        if (!GVar->getInitializer()->isNullValue()) {
+          std::string warnMsg = "initial value of '" + GVar->getName().str() +
+              "' is not allowed in addrspace(" +
+              llvm::utostr_32(PTy->getAddressSpace()) + ")";
+          report_fatal_error(warnMsg.c_str());
+        }
       }
     }
   } else {
@@ -1562,7 +1578,7 @@ void NVPTXAsmPrinter::printModuleLevelGV(const GlobalVariable *GVar,
       }
       break;
     default:
-      assert(0 && "type not supported yet");
+      llvm_unreachable("type not supported yet");
     }
 
   }
@@ -1682,7 +1698,7 @@ void NVPTXAsmPrinter::emitPTXGlobalVariable(const GlobalVariable *GVar,
     O << "]";
     break;
   default:
-    assert(0 && "type not supported yet");
+    llvm_unreachable("type not supported yet");
   }
   return;
 }

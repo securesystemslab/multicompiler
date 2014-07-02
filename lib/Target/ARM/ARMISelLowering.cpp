@@ -2333,7 +2333,8 @@ ARMTargetLowering::LowerToTLSGeneralDynamicModel(GlobalAddressSDNode *GA,
   TargetLowering::CallLoweringInfo CLI(DAG);
   CLI.setDebugLoc(dl).setChain(Chain)
     .setCallee(CallingConv::C, Type::getInt32Ty(*DAG.getContext()),
-               DAG.getExternalSymbol("__tls_get_addr", PtrVT), &Args, 0);
+               DAG.getExternalSymbol("__tls_get_addr", PtrVT), std::move(Args),
+               0);
 
   std::pair<SDValue, SDValue> CallResult = LowerCallTo(CLI);
   return CallResult.first;
@@ -4504,6 +4505,11 @@ static SDValue isNEONModifiedImm(uint64_t SplatBits, uint64_t SplatUndef,
       BitMask <<= 8;
       ImmMask <<= 1;
     }
+
+    if (DAG.getTargetLoweringInfo().isBigEndian())
+      // swap higher and lower 32 bit word
+      Imm = ((Imm & 0xf) << 4) | ((Imm & 0xf0) >> 4);
+
     // Op=1, Cmode=1110.
     OpCmode = 0x1e;
     VT = is128Bits ? MVT::v2i64 : MVT::v1i64;
@@ -6090,7 +6096,7 @@ SDValue ARMTargetLowering::LowerFSINCOS(SDValue Op, SelectionDAG &DAG) const {
   TargetLowering::CallLoweringInfo CLI(DAG);
   CLI.setDebugLoc(dl).setChain(DAG.getEntryNode())
     .setCallee(CallingConv::C, Type::getVoidTy(*DAG.getContext()), Callee,
-               &Args, 0)
+               std::move(Args), 0)
     .setDiscardResult();
 
   std::pair<SDValue, SDValue> CallResult = LowerCallTo(CLI);
@@ -7147,7 +7153,7 @@ ARMTargetLowering::EmitLowered__chkstk(MachineInstr *MI,
   // thumb-2 environment, so there is no interworking required.  As a result, we
   // do not expect a veneer to be emitted by the linker, clobbering IP.
   //
-  // Each module recieves its own copy of __chkstk, so no import thunk is
+  // Each module receives its own copy of __chkstk, so no import thunk is
   // required, again, ensuring that IP is not clobbered.
   //
   // Finally, although some linkers may theoretically provide a trampoline for
@@ -10559,7 +10565,7 @@ SDValue ARMTargetLowering::LowerDivRem(SDValue Op, SelectionDAG &DAG) const {
   SDLoc dl(Op);
   TargetLowering::CallLoweringInfo CLI(DAG);
   CLI.setDebugLoc(dl).setChain(InChain)
-    .setCallee(getLibcallCallingConv(LC), RetTy, Callee, &Args, 0)
+    .setCallee(getLibcallCallingConv(LC), RetTy, Callee, std::move(Args), 0)
     .setInRegister().setSExtResult(isSigned).setZExtResult(!isSigned);
 
   std::pair<SDValue, SDValue> CallInfo = LowerCallTo(CLI);

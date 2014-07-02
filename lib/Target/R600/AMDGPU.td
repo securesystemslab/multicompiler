@@ -32,30 +32,25 @@ def FeatureIfCvt : SubtargetFeature <"disable-ifcvt",
         "false",
         "Disable the if conversion pass">;
 
-def FeatureFP64     : SubtargetFeature<"fp64",
+def FeatureFP64 : SubtargetFeature<"fp64",
         "FP64",
         "true",
-        "Enable 64bit double precision operations">;
+        "Enable double precision operations">;
 
 def Feature64BitPtr : SubtargetFeature<"64BitPtr",
         "Is64bit",
         "true",
-        "Specify if 64bit addressing should be used.">;
-
-def Feature32on64BitPtr : SubtargetFeature<"64on32BitPtr",
-        "Is32on64bit",
-        "false",
-        "Specify if 64bit sized pointers with 32bit addressing should be used.">;
+        "Specify if 64-bit addressing should be used">;
 
 def FeatureR600ALUInst : SubtargetFeature<"R600ALUInst",
         "R600ALUInst",
         "false",
-        "Older version of ALU instructions encoding.">;
+        "Older version of ALU instructions encoding">;
 
 def FeatureVertexCache : SubtargetFeature<"HasVertexCache",
         "HasVertexCache",
         "true",
-        "Specify use of dedicated vertex cache.">;
+        "Specify use of dedicated vertex cache">;
 
 def FeatureCaymanISA : SubtargetFeature<"caymanISA",
         "CaymanISA",
@@ -86,28 +81,40 @@ def FeatureWavefrontSize16 : SubtargetFeatureWavefrontSize<16>;
 def FeatureWavefrontSize32 : SubtargetFeatureWavefrontSize<32>;
 def FeatureWavefrontSize64 : SubtargetFeatureWavefrontSize<64>;
 
+class SubtargetFeatureLocalMemorySize <int Value> : SubtargetFeature<
+        "localmemorysize"#Value,
+        "LocalMemorySize",
+        !cast<string>(Value),
+        "The size of local memory in bytes">;
+
 class SubtargetFeatureGeneration <string Value,
                                   list<SubtargetFeature> Implies> :
         SubtargetFeature <Value, "Gen", "AMDGPUSubtarget::"#Value,
                           Value#" GPU generation", Implies>;
 
+def FeatureLocalMemorySize0 : SubtargetFeatureLocalMemorySize<0>;
+def FeatureLocalMemorySize32768 : SubtargetFeatureLocalMemorySize<32768>;
+def FeatureLocalMemorySize65536 : SubtargetFeatureLocalMemorySize<65536>;
+
 def FeatureR600 : SubtargetFeatureGeneration<"R600",
-        [FeatureR600ALUInst, FeatureFetchLimit8]>;
+        [FeatureR600ALUInst, FeatureFetchLimit8, FeatureLocalMemorySize0]>;
 
 def FeatureR700 : SubtargetFeatureGeneration<"R700",
-        [FeatureFetchLimit16]>;
+        [FeatureFetchLimit16, FeatureLocalMemorySize0]>;
 
 def FeatureEvergreen : SubtargetFeatureGeneration<"EVERGREEN",
-        [FeatureFetchLimit16]>;
+        [FeatureFetchLimit16, FeatureLocalMemorySize32768]>;
 
 def FeatureNorthernIslands : SubtargetFeatureGeneration<"NORTHERN_ISLANDS",
-        [FeatureFetchLimit16, FeatureWavefrontSize64]>;
+        [FeatureFetchLimit16, FeatureWavefrontSize64,
+         FeatureLocalMemorySize32768]
+>;
 
 def FeatureSouthernIslands : SubtargetFeatureGeneration<"SOUTHERN_ISLANDS",
-        [Feature64BitPtr, FeatureFP64]>;
+        [Feature64BitPtr, FeatureFP64, FeatureLocalMemorySize32768]>;
 
 def FeatureSeaIslands : SubtargetFeatureGeneration<"SEA_ISLANDS",
-        [Feature64BitPtr, FeatureFP64]>;
+        [Feature64BitPtr, FeatureFP64, FeatureLocalMemorySize65536]>;
 //===----------------------------------------------------------------------===//
 
 def AMDGPUInstrInfo : InstrInfo {

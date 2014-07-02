@@ -74,6 +74,12 @@ public:
     return isPPC64 ? 16 : 4;
   }
 
+  /// getTOCSaveOffset - Return the previous frame offset to save the
+  /// TOC register -- 64-bit SVR4 ABI only.
+  static unsigned getTOCSaveOffset(void) {
+    return 40;
+  }
+
   /// getFramePointerSaveOffset - Return the previous frame offset to save the
   /// frame pointer.
   static unsigned getFramePointerSaveOffset(bool isPPC64, bool isDarwinABI) {
@@ -109,12 +115,8 @@ public:
     return 8;
   }
 
-  /// getMinCallArgumentsSize - Return the size of the minium PowerPC ABI
-  /// argument area.
-  static unsigned getMinCallArgumentsSize(bool isPPC64, bool isDarwinABI);
   const SpillSlot *
   getCalleeSavedSpillSlots(unsigned &NumEntries) const override;
-  static unsigned getMinCallFrameSize(bool isPPC64, bool isDarwinABI);
 };
 } // End llvm namespace
 

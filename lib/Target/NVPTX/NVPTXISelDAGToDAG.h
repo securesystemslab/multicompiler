@@ -59,10 +59,11 @@ private:
 
   SDNode *Select(SDNode *N) override;
   SDNode *SelectIntrinsicNoChain(SDNode *N);
+  SDNode *SelectIntrinsicChain(SDNode *N);
   SDNode *SelectTexSurfHandle(SDNode *N);
   SDNode *SelectLoad(SDNode *N);
   SDNode *SelectLoadVector(SDNode *N);
-  SDNode *SelectLDGLDUVector(SDNode *N);
+  SDNode *SelectLDGLDU(SDNode *N);
   SDNode *SelectStore(SDNode *N);
   SDNode *SelectStoreVector(SDNode *N);
   SDNode *SelectLoadParam(SDNode *N);
@@ -71,6 +72,7 @@ private:
   SDNode *SelectAddrSpaceCast(SDNode *N);
   SDNode *SelectTextureIntrinsic(SDNode *N);
   SDNode *SelectSurfaceIntrinsic(SDNode *N);
+  SDNode *SelectBFE(SDNode *N);
         
   inline SDValue getI32Imm(unsigned Imm) {
     return CurDAG->getTargetConstant(Imm, MVT::i32);

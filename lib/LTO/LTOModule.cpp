@@ -605,31 +605,8 @@ namespace {
       }
     }
 
-    // FIXME: mostly copied for the obj streamer.
-    void AddValueSymbols(const MCExpr *Value) {
-      switch (Value->getKind()) {
-      case MCExpr::Target:
-        // FIXME: What should we do in here?
-        break;
-
-      case MCExpr::Constant:
-        break;
-
-      case MCExpr::Binary: {
-        const MCBinaryExpr *BE = cast<MCBinaryExpr>(Value);
-        AddValueSymbols(BE->getLHS());
-        AddValueSymbols(BE->getRHS());
-        break;
-      }
-
-      case MCExpr::SymbolRef:
-        markUsed(cast<MCSymbolRefExpr>(Value)->getSymbol());
-        break;
-
-      case MCExpr::Unary:
-        AddValueSymbols(cast<MCUnaryExpr>(Value)->getSubExpr());
-        break;
-      }
+    void visitUsedSymbol(const MCSymbol &Sym) override {
+      markUsed(Sym);
     }
 
   public:
@@ -647,22 +624,15 @@ namespace {
 
     void EmitInstruction(const MCInst &Inst,
                          const MCSubtargetInfo &STI) override {
-      // Scan for values.
-      for (unsigned i = Inst.getNumOperands(); i--; )
-        if (Inst.getOperand(i).isExpr())
-          AddValueSymbols(Inst.getOperand(i).getExpr());
+      MCStreamer::EmitInstruction(Inst, STI);
     }
     void EmitLabel(MCSymbol *Symbol) override {
-      Symbol->setSection(*getCurrentSection().first);
+      MCStreamer::EmitLabel(Symbol);
       markDefined(*Symbol);
-    }
-    void EmitDebugLabel(MCSymbol *Symbol) override {
-      EmitLabel(Symbol);
     }
     void EmitAssignment(MCSymbol *Symbol, const MCExpr *Value) override {
-      // FIXME: should we handle aliases?
       markDefined(*Symbol);
-      AddValueSymbols(Value);
+      MCStreamer::EmitAssignment(Symbol, Value);
     }
     bool EmitSymbolAttribute(MCSymbol *Symbol,
                              MCSymbolAttr Attribute) override {
@@ -677,44 +647,6 @@ namespace {
     void EmitCommonSymbol(MCSymbol *Symbol, uint64_t Size,
                           unsigned ByteAlignment) override {
       markDefined(*Symbol);
-    }
-
-    void EmitBundleAlignMode(unsigned AlignPow2) override {}
-    void EmitBundleLock(bool AlignToEnd) override {}
-    void EmitBundleUnlock() override {}
-
-    // Noop calls.
-    void ChangeSection(const MCSection *Section,
-                       const MCExpr *Subsection) override {}
-    void EmitAssemblerFlag(MCAssemblerFlag Flag) override {}
-    void EmitThumbFunc(MCSymbol *Func) override {}
-    void EmitSymbolDesc(MCSymbol *Symbol, unsigned DescValue) override {}
-    void EmitWeakReference(MCSymbol *Alias, const MCSymbol *Symbol) override {}
-    void BeginCOFFSymbolDef(const MCSymbol *Symbol) override {}
-    void EmitCOFFSymbolStorageClass(int StorageClass) override {}
-    void EmitCOFFSymbolType(int Type) override {}
-    void EndCOFFSymbolDef() override {}
-    void EmitELFSize(MCSymbol *Symbol, const MCExpr *Value) override {}
-    void EmitLocalCommonSymbol(MCSymbol *Symbol, uint64_t Size,
-                               unsigned ByteAlignment) override {}
-    void EmitTBSSSymbol(const MCSection *Section, MCSymbol *Symbol,
-                        uint64_t Size, unsigned ByteAlignment) override {}
-    void EmitBytes(StringRef Data) override {}
-    void EmitValueImpl(const MCExpr *Value, unsigned Size,
-                       const SMLoc &Loc) override {}
-    void EmitULEB128Value(const MCExpr *Value) override {}
-    void EmitSLEB128Value(const MCExpr *Value) override {}
-    void EmitValueToAlignment(unsigned ByteAlignment, int64_t Value,
-                              unsigned ValueSize,
-                              unsigned MaxBytesToEmit) override {}
-    void EmitCodeAlignment(unsigned ByteAlignment,
-                           unsigned MaxBytesToEmit) override {}
-    bool EmitValueToOffset(const MCExpr *Offset,
-                           unsigned char Value) override { return false; }
-    void EmitFileDirective(StringRef Filename) override {}
-    void FinishImpl() override {}
-    void EmitCFIEndProcImpl(MCDwarfFrameInfo &Frame) override {
-      RecordProcEnd(Frame);
     }
   };
 } // end anonymous namespace
@@ -750,10 +682,9 @@ bool LTOModule::addAsmGlobalSymbols(std::string &errMsg) {
   if (Parser->Run(false))
     return true;
 
-  for (RecordStreamer::const_iterator i = Streamer->begin(),
-         e = Streamer->end(); i != e; ++i) {
-    StringRef Key = i->first();
-    RecordStreamer::State Value = i->second;
+  for (auto &KV : *Streamer) {
+    StringRef Key = KV.first();
+    RecordStreamer::State Value = KV.second;
     if (Value == RecordStreamer::DefinedGlobal)
       addAsmGlobalSymbol(Key.data(), LTO_SYMBOL_SCOPE_DEFAULT);
     else if (Value == RecordStreamer::Defined)

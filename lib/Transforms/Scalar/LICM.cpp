@@ -192,6 +192,14 @@ namespace {
                          SmallVectorImpl<BasicBlock*> &ExitBlocks,
                          SmallVectorImpl<Instruction*> &InsertPts,
                          PredIteratorCache &PIC);
+
+    /// \brief Create a copy of the instruction in the exit block and patch up
+    /// SSA.
+    /// PN is a user of I in ExitBlock that can be used to get the number and
+    /// list of predecessors fast.
+    Instruction *CloneInstructionInExitBlock(Instruction &I,
+                                             BasicBlock &ExitBlock,
+                                             PHINode &PN);
   };
 }
 
@@ -531,6 +539,35 @@ bool LICM::isNotUsedInLoop(Instruction &I) {
   return true;
 }
 
+Instruction *LICM::CloneInstructionInExitBlock(Instruction &I,
+                                               BasicBlock &ExitBlock,
+                                               PHINode &PN) {
+  Instruction *New = I.clone();
+  ExitBlock.getInstList().insert(ExitBlock.getFirstInsertionPt(), New);
+  if (!I.getName().empty()) New->setName(I.getName() + ".le");
+
+  // Build LCSSA PHI nodes for any in-loop operands. Note that this is
+  // particularly cheap because we can rip off the PHI node that we're
+  // replacing for the number and blocks of the predecessors.
+  // OPT: If this shows up in a profile, we can instead finish sinking all
+  // invariant instructions, and then walk their operands to re-establish
+  // LCSSA. That will eliminate creating PHI nodes just to nuke them when
+  // sinking bottom-up.
+  for (User::op_iterator OI = New->op_begin(), OE = New->op_end(); OI != OE;
+       ++OI)
+    if (Instruction *OInst = dyn_cast<Instruction>(*OI))
+      if (Loop *OLoop = LI->getLoopFor(OInst->getParent()))
+        if (!OLoop->contains(&PN)) {
+          PHINode *OpPN =
+              PHINode::Create(OInst->getType(), PN.getNumIncomingValues(),
+                              OInst->getName() + ".lcssa", ExitBlock.begin());
+          for (unsigned i = 0, e = PN.getNumIncomingValues(); i != e; ++i)
+            OpPN->addIncoming(OInst, PN.getIncomingBlock(i));
+          *OI = OpPN;
+        }
+  return New;
+}
+
 /// sink - When an instruction is found to only be used outside of the loop,
 /// this function moves it to the exit blocks and patches up SSA form as needed.
 /// This method is guaranteed to remove the original instruction from its
@@ -550,6 +587,9 @@ void LICM::sink(Instruction &I) {
   SmallPtrSet<BasicBlock *, 32> ExitBlockSet(ExitBlocks.begin(), ExitBlocks.end());
 #endif
 
+  // Clones of this instruction. Don't create more than one per exit block!
+  SmallDenseMap<BasicBlock *, Instruction *, 32> SunkCopies;
+
   // If this instruction is only used outside of the loop, then all users are
   // PHI nodes in exit blocks due to LCSSA form. Just RAUW them with clones of
   // the instruction.
@@ -561,30 +601,13 @@ void LICM::sink(Instruction &I) {
     assert(ExitBlockSet.count(ExitBlock) &&
            "The LCSSA PHI is not in an exit block!");
 
-    Instruction *New = I.clone();
-    ExitBlock->getInstList().insert(ExitBlock->getFirstInsertionPt(), New);
-    if (!I.getName().empty())
-      New->setName(I.getName() + ".le");
-
-    // Build LCSSA PHI nodes for any in-loop operands. Note that this is
-    // particularly cheap because we can rip off the PHI node that we're
-    // replacing for the number and blocks of the predecessors.
-    // OPT: If this shows up in a profile, we can instead finish sinking all
-    // invariant instructions, and then walk their operands to re-establish
-    // LCSSA. That will eliminate creating PHI nodes just to nuke them when
-    // sinking bottom-up.
-    for (User::op_iterator OI = New->op_begin(), OE = New->op_end(); OI != OE;
-         ++OI)
-      if (Instruction *OInst = dyn_cast<Instruction>(*OI))
-        if (Loop *OLoop = LI->getLoopFor(OInst->getParent()))
-          if (!OLoop->contains(PN)) {
-            PHINode *OpPN = PHINode::Create(
-                OInst->getType(), PN->getNumIncomingValues(),
-                OInst->getName() + ".lcssa", ExitBlock->begin());
-            for (unsigned i = 0, e = PN->getNumIncomingValues(); i != e; ++i)
-              OpPN->addIncoming(OInst, PN->getIncomingBlock(i));
-            *OI = OpPN;
-          }
+    Instruction *New;
+    auto It = SunkCopies.find(ExitBlock);
+    if (It != SunkCopies.end())
+      New = It->second;
+    else
+      New = SunkCopies[ExitBlock] =
+          CloneInstructionInExitBlock(I, *ExitBlock, *PN);
 
     PN->replaceAllUsesWith(New);
     PN->eraseFromParent();

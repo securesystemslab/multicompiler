@@ -13,17 +13,19 @@
 
 #include "llvm/Bitcode/ReaderWriter.h"
 #include "llvm/IR/LLVMContext.h"
+#include "llvm/IR/GVMaterializer.h"
 #include "llvm/IR/Mangler.h"
 #include "llvm/IR/Module.h"
 #include "llvm/Object/IRObjectFile.h"
+#include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/raw_ostream.h"
 using namespace llvm;
 using namespace object;
 
-IRObjectFile::IRObjectFile(MemoryBuffer *Object, std::error_code &EC,
-                           LLVMContext &Context, bool BufferOwned)
-    : SymbolicFile(Binary::ID_IR, Object, BufferOwned) {
-  ErrorOr<Module*> MOrErr = parseBitcodeFile(Object, Context);
+IRObjectFile::IRObjectFile(std::unique_ptr<MemoryBuffer> Object,
+                           std::error_code &EC, LLVMContext &Context)
+    : SymbolicFile(Binary::ID_IR, std::move(Object)) {
+  ErrorOr<Module *> MOrErr = getLazyBitcodeModule(Data.get(), Context);
   if ((EC = MOrErr.getError()))
     return;
 
@@ -36,6 +38,8 @@ IRObjectFile::IRObjectFile(MemoryBuffer *Object, std::error_code &EC,
 
   Mang.reset(new Mangler(DL));
 }
+
+IRObjectFile::~IRObjectFile() { M->getMaterializer()->releaseBuffer(); }
 
 static const GlobalValue &getGV(DataRefImpl &Symb) {
   return *reinterpret_cast<GlobalValue*>(Symb.p & ~uintptr_t(3));
@@ -104,11 +108,21 @@ std::error_code IRObjectFile::printSymbolName(raw_ostream &OS,
   return object_error::success;
 }
 
+static bool isDeclaration(const GlobalValue &V) {
+  if (V.hasAvailableExternallyLinkage())
+    return true;
+
+  if (V.isMaterializable())
+    return false;
+
+  return V.isDeclaration();
+}
+
 uint32_t IRObjectFile::getSymbolFlags(DataRefImpl Symb) const {
   const GlobalValue &GV = getGV(Symb);
 
   uint32_t Res = BasicSymbolRef::SF_None;
-  if (GV.isDeclaration() || GV.hasAvailableExternallyLinkage())
+  if (isDeclaration(GV))
     Res |= BasicSymbolRef::SF_Undefined;
   if (GV.hasPrivateLinkage())
     Res |= BasicSymbolRef::SF_FormatSpecific;
@@ -141,10 +155,10 @@ basic_symbol_iterator IRObjectFile::symbol_end_impl() const {
 }
 
 ErrorOr<SymbolicFile *> llvm::object::SymbolicFile::createIRObjectFile(
-    MemoryBuffer *Object, LLVMContext &Context, bool BufferOwned) {
+    std::unique_ptr<MemoryBuffer> Object, LLVMContext &Context) {
   std::error_code EC;
   std::unique_ptr<IRObjectFile> Ret(
-      new IRObjectFile(Object, EC, Context, BufferOwned));
+      new IRObjectFile(std::move(Object), EC, Context));
   if (EC)
     return EC;
   return Ret.release();

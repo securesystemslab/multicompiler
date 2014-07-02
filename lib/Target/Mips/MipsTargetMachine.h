@@ -17,12 +17,9 @@
 #include "MipsFrameLowering.h"
 #include "MipsISelLowering.h"
 #include "MipsInstrInfo.h"
-#include "MipsJITInfo.h"
-#include "MipsSelectionDAGInfo.h"
 #include "MipsSubtarget.h"
 #include "llvm/CodeGen/Passes.h"
 #include "llvm/CodeGen/SelectionDAGISel.h"
-#include "llvm/IR/DataLayout.h"
 #include "llvm/Target/TargetFrameLowering.h"
 #include "llvm/Target/TargetMachine.h"
 
@@ -32,7 +29,6 @@ class MipsRegisterInfo;
 
 class MipsTargetMachine : public LLVMTargetMachine {
   MipsSubtarget       Subtarget;
-  const DataLayout    DL; // Calculates type size & alignment
   std::unique_ptr<const MipsInstrInfo> InstrInfo;
   std::unique_ptr<const MipsFrameLowering> FrameLowering;
   std::unique_ptr<const MipsTargetLowering> TLInfo;
@@ -42,9 +38,6 @@ class MipsTargetMachine : public LLVMTargetMachine {
   std::unique_ptr<const MipsInstrInfo> InstrInfoSE;
   std::unique_ptr<const MipsFrameLowering> FrameLoweringSE;
   std::unique_ptr<const MipsTargetLowering> TLInfoSE;
-  MipsSelectionDAGInfo TSInfo;
-  const InstrItineraryData &InstrItins;
-  MipsJITInfo JITInfo;
 
 public:
   MipsTargetMachine(const Target &T, StringRef TT,
@@ -63,14 +56,16 @@ public:
   { return FrameLowering.get(); }
   const MipsSubtarget *getSubtargetImpl() const override
   { return &Subtarget; }
-  const DataLayout *getDataLayout()    const override
-  { return &DL;}
 
   const InstrItineraryData *getInstrItineraryData() const override {
-    return Subtarget.inMips16Mode() ? nullptr : &InstrItins;
+    return Subtarget.inMips16Mode()
+               ? nullptr
+               : &getSubtargetImpl()->getInstrItineraryData();
   }
 
-  MipsJITInfo *getJITInfo() override { return &JITInfo; }
+  MipsJITInfo *getJITInfo() override {
+    return Subtarget.getJITInfo();
+  }
 
   const MipsRegisterInfo *getRegisterInfo()  const override {
     return &InstrInfo->getRegisterInfo();
@@ -80,8 +75,11 @@ public:
     return TLInfo.get();
   }
 
+  const DataLayout *getDataLayout() const override {
+    return getSubtargetImpl()->getDataLayout();
+  }
   const MipsSelectionDAGInfo* getSelectionDAGInfo() const override {
-    return &TSInfo;
+    return getSubtargetImpl()->getSelectionDAGInfo();
   }
 
   // Pass Pipeline Configuration

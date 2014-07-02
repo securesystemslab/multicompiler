@@ -177,8 +177,7 @@ protected:
   bool isDyldELFObject;
 
 public:
-  ELFObjectFile(MemoryBuffer *Object, std::error_code &EC,
-                bool BufferOwned = true);
+  ELFObjectFile(std::unique_ptr<MemoryBuffer> Object, std::error_code &EC);
 
   const Elf_Sym *getSymbol(DataRefImpl Symb) const;
 
@@ -774,13 +773,13 @@ ELFObjectFile<ELFT>::getRela(DataRefImpl Rela) const {
 }
 
 template <class ELFT>
-ELFObjectFile<ELFT>::ELFObjectFile(MemoryBuffer *Object, std::error_code &ec,
-                                   bool BufferOwned)
+ELFObjectFile<ELFT>::ELFObjectFile(std::unique_ptr<MemoryBuffer> Object,
+                                   std::error_code &EC)
     : ObjectFile(getELFType(static_cast<endianness>(ELFT::TargetEndianness) ==
                                 support::little,
                             ELFT::Is64Bits),
-                 Object, BufferOwned),
-      EF(Object, ec) {}
+                 std::move(Object)),
+      EF(Data.get(), EC) {}
 
 template <class ELFT>
 basic_symbol_iterator ELFObjectFile<ELFT>::symbol_begin_impl() const {
@@ -918,6 +917,7 @@ StringRef ELFObjectFile<ELFT>::getFileFormatName() const {
 
 template <class ELFT>
 unsigned ELFObjectFile<ELFT>::getArch() const {
+  bool IsLittleEndian = ELFT::TargetEndianness == support::little;
   switch (EF.getHeader()->e_machine) {
   case ELF::EM_386:
     return Triple::x86;
@@ -930,11 +930,16 @@ unsigned ELFObjectFile<ELFT>::getArch() const {
   case ELF::EM_HEXAGON:
     return Triple::hexagon;
   case ELF::EM_MIPS:
-    return (ELFT::TargetEndianness == support::little) ? Triple::mipsel
-                                                       : Triple::mips;
+    switch (EF.getHeader()->e_ident[ELF::EI_CLASS]) {
+    case ELF::ELFCLASS32:
+      return IsLittleEndian ? Triple::mipsel : Triple::mips;
+    case ELF::ELFCLASS64:
+      return IsLittleEndian ? Triple::mips64el : Triple::mips64;
+    default:
+      report_fatal_error("Invalid ELFCLASS!");
+    }
   case ELF::EM_PPC64:
-    return (ELFT::TargetEndianness == support::little) ? Triple::ppc64le
-                                                       : Triple::ppc64;
+    return IsLittleEndian ? Triple::ppc64le : Triple::ppc64;
   case ELF::EM_S390:
     return Triple::systemz;
 

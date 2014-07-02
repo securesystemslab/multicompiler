@@ -9,8 +9,10 @@
         add.d     $f1,$f7,$f29
         add.s     $f8,$f21,$f24
         addi      $13,$9,26322
+        addi      $8,$8,~1             # CHECK: addi $8, $8, -2 # encoding: [0x21,0x08,0xff,0xfe]
         addu      $9,$a0,$a2
         and       $s7,$v0,$12
+        and       $2,4                 # CHECK: andi $2, $2, 4 # encoding: [0x30,0x42,0x00,0x04]
         bc1f      $fcc0, 4             # CHECK: bc1f 4        # encoding: [0x45,0x00,0x00,0x01]
         bc1f      $fcc1, 4             # CHECK: bc1f $fcc1, 4 # encoding: [0x45,0x04,0x00,0x01]
         bc1f      4                    # CHECK: bc1f 4        # encoding: [0x45,0x00,0x00,0x01]
@@ -150,6 +152,7 @@
         nop
         nor       $a3,$zero,$a3
         or        $12,$s0,$sp
+        or        $2, 4                # CHECK: ori $2, $2, 4          # encoding: [0x34,0x42,0x00,0x04]
         pref      1, 8($5)             # CHECK: pref 1, 8($5)          # encoding: [0xcc,0xa1,0x00,0x08]
         round.l.d $f12,$f1
         round.l.s $f25,$f5
@@ -195,6 +198,7 @@
         swl       $15,13694($s3)
         swr       $s1,-26590($14)
         swxc1     $f19,$12($k0)
+        sync                           # CHECK: sync                   # encoding: [0x00,0x00,0x00,0x0f]
         teqi      $s5,-17504
         tgei      $s1,5025
         tgeiu     $sp,-28621

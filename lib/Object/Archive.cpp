@@ -181,23 +181,24 @@ Archive::Child::getAsBinary(LLVMContext *Context) const {
   ErrorOr<std::unique_ptr<MemoryBuffer>> BuffOrErr = getMemoryBuffer();
   if (std::error_code EC = BuffOrErr.getError())
     return EC;
-  return createBinary(BuffOrErr.get().release(), Context);
+
+  std::unique_ptr<MemoryBuffer> Buff(BuffOrErr.get().release());
+  return createBinary(Buff, Context);
 }
 
-ErrorOr<Archive*> Archive::create(MemoryBuffer *Source) {
+ErrorOr<Archive *> Archive::create(std::unique_ptr<MemoryBuffer> Source) {
   std::error_code EC;
-  std::unique_ptr<Archive> Ret(new Archive(Source, EC));
+  std::unique_ptr<Archive> Ret(new Archive(std::move(Source), EC));
   if (EC)
     return EC;
   return Ret.release();
 }
 
-Archive::Archive(MemoryBuffer *source, std::error_code &ec)
-    : Binary(Binary::ID_Archive, source), SymbolTable(child_end()) {
+Archive::Archive(std::unique_ptr<MemoryBuffer> Source, std::error_code &ec)
+    : Binary(Binary::ID_Archive, std::move(Source)), SymbolTable(child_end()) {
   // Check for sufficient magic.
-  assert(source);
-  if (source->getBufferSize() < 8 ||
-      StringRef(source->getBufferStart(), 8) != Magic) {
+  if (Data->getBufferSize() < 8 ||
+      StringRef(Data->getBufferStart(), 8) != Magic) {
     ec = object_error::invalid_file_type;
     return;
   }

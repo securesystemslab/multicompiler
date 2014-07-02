@@ -14,6 +14,9 @@
 #ifndef MIPSSUBTARGET_H
 #define MIPSSUBTARGET_H
 
+#include "MipsJITInfo.h"
+#include "MipsSelectionDAGInfo.h"
+#include "llvm/IR/DataLayout.h"
 #include "llvm/MC/MCInstrItineraries.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Target/TargetSubtargetInfo.h"
@@ -132,6 +135,11 @@ protected:
   MipsTargetMachine *TM;
 
   Triple TargetTriple;
+
+  const DataLayout DL; // Calculates type size & alignment
+  const MipsSelectionDAGInfo TSInfo;
+  MipsJITInfo JITInfo;
+
 public:
   bool enablePostRAScheduler(CodeGenOpt::Level OptLevel,
                              AntiDepBreakMode& Mode,
@@ -242,12 +250,18 @@ public:
   /// \brief Reset the subtarget for the Mips target.
   void resetSubtarget(MachineFunction *MF);
 
+  MipsSubtarget &initializeSubtargetDependencies(StringRef CPU, StringRef FS);
+
   /// Does the system support unaligned memory access.
   ///
   /// MIPS32r6/MIPS64r6 require full unaligned access support but does not
   /// specify which component of the system provides it. Hardware, software, and
   /// hybrid implementations are all valid.
   bool systemSupportsUnalignedAccess() const { return hasMips32r6(); }
+
+  MipsJITInfo *getJITInfo() { return &JITInfo; }
+  const MipsSelectionDAGInfo *getSelectionDAGInfo() const { return &TSInfo; }
+  const DataLayout *getDataLayout() const { return &DL; }
 };
 } // End llvm namespace
 

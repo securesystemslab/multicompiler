@@ -524,6 +524,23 @@ bool SIInstrInfo::isLiteralConstant(const MachineOperand &MO) const {
   return (MO.isImm() || MO.isFPImm()) && !isInlineConstant(MO);
 }
 
+static bool compareMachineOp(const MachineOperand &Op0,
+                             const MachineOperand &Op1) {
+  if (Op0.getType() != Op1.getType())
+    return false;
+
+  switch (Op0.getType()) {
+  case MachineOperand::MO_Register:
+    return Op0.getReg() == Op1.getReg();
+  case MachineOperand::MO_Immediate:
+    return Op0.getImm() == Op1.getImm();
+  case MachineOperand::MO_FPImmediate:
+    return Op0.getFPImm() == Op1.getFPImm();
+  default:
+    llvm_unreachable("Didn't expect to be comparing these operand types");
+  }
+}
+
 bool SIInstrInfo::verifyInstruction(const MachineInstr *MI,
                                     StringRef &ErrInfo) const {
   uint16_t Opcode = MI->getOpcode();
@@ -542,7 +559,14 @@ bool SIInstrInfo::verifyInstruction(const MachineInstr *MI,
   // Make sure the register classes are correct
   for (unsigned i = 0, e = Desc.getNumOperands(); i != e; ++i) {
     switch (Desc.OpInfo[i].OperandType) {
-    case MCOI::OPERAND_REGISTER:
+    case MCOI::OPERAND_REGISTER: {
+      int RegClass = Desc.OpInfo[i].RegClass;
+      if (!RI.regClassCanUseImmediate(RegClass) &&
+          (MI->getOperand(i).isImm() || MI->getOperand(i).isFPImm())) {
+        ErrInfo = "Expected register, but got immediate";
+        return false;
+      }
+    }
       break;
     case MCOI::OPERAND_IMMEDIATE:
       if (!MI->getOperand(i).isImm() && !MI->getOperand(i).isFPImm()) {
@@ -630,6 +654,24 @@ bool SIInstrInfo::verifyInstruction(const MachineInstr *MI,
       return false;
     }
   }
+
+  // Verify misc. restrictions on specific instructions.
+  if (Desc.getOpcode() == AMDGPU::V_DIV_SCALE_F32 ||
+      Desc.getOpcode() == AMDGPU::V_DIV_SCALE_F64) {
+    MI->dump();
+
+    const MachineOperand &Src0 = MI->getOperand(2);
+    const MachineOperand &Src1 = MI->getOperand(3);
+    const MachineOperand &Src2 = MI->getOperand(4);
+    if (Src0.isReg() && Src1.isReg() && Src2.isReg()) {
+      if (!compareMachineOp(Src0, Src1) &&
+          !compareMachineOp(Src0, Src2)) {
+        ErrInfo = "v_div_scale_{f32|f64} require src0 = src1 or src2";
+        return false;
+      }
+    }
+  }
+
   return true;
 }
 
@@ -664,6 +706,7 @@ unsigned SIInstrInfo::getVALUOp(const MachineInstr &MI) {
   case AMDGPU::S_SEXT_I32_I16: return AMDGPU::V_BFE_I32;
   case AMDGPU::S_BFE_U32: return AMDGPU::V_BFE_U32;
   case AMDGPU::S_BFE_I32: return AMDGPU::V_BFE_I32;
+  case AMDGPU::S_BREV_B32: return AMDGPU::V_BFREV_B32_e32;
   case AMDGPU::S_NOT_B32: return AMDGPU::V_NOT_B32_e32;
   case AMDGPU::S_NOT_B64: return AMDGPU::V_NOT_B32_e32;
   case AMDGPU::S_CMP_EQ_I32: return AMDGPU::V_CMP_EQ_I32_e32;
@@ -679,6 +722,8 @@ unsigned SIInstrInfo::getVALUOp(const MachineInstr &MI) {
   case AMDGPU::S_LOAD_DWORDX4_IMM:
   case AMDGPU::S_LOAD_DWORDX4_SGPR: return AMDGPU::BUFFER_LOAD_DWORDX4_ADDR64;
   case AMDGPU::S_BCNT1_I32_B32: return AMDGPU::V_BCNT_U32_B32_e32;
+  case AMDGPU::S_FF1_I32_B32: return AMDGPU::V_FFBL_B32_e32;
+  case AMDGPU::S_FLBIT_I32_B32: return AMDGPU::V_FFBH_U32_e32;
   }
 }
 

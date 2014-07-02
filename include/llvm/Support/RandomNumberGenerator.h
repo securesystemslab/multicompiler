@@ -17,37 +17,40 @@
 #define LLVM_SUPPORT_RANDOMNUMBERGENERATOR_H_
 
 #include "llvm/ADT/StringRef.h"
-#include <string>
+#include "llvm/Support/Compiler.h"
+#include "llvm/Support/DataTypes.h" // Needed for uint64_t on Windows.
 #include <random>
 
 namespace llvm {
 
+/// A random number generator.
+/// Instances of this class should not be shared across threads.
 class RandomNumberGenerator {
 public:
-  /// \brief Add additional personalization data to the RNG seed.
-  ///
-  /// This function should be used to add deterministic command line
-  /// argument data to the RNG initialization, resulting in a
-  /// different stream of random numbers for each invocation during a
-  /// build. The input to this function should be unique per
-  /// compilation unit.
-  static void SetSalt(const StringRef &Salt);
+  /// Seeds and salts the underlying RNG engine. The salt of type StringRef
+  /// is passed into the constructor. The seed can be set on the command
+  /// line via -rng-seed=<uint64>.
+  /// The reason for the salt is to ensure different random streams even if
+  /// the same seed is used for multiple invocations of the compiler.
+  /// A good salt value should add additional entropy and be constant across
+  /// different machines (i.e., no paths) to allow for reproducible builds.
+  /// An instance of this class can be retrieved from the current Module.
+  /// \see Module::getRNG
+  RandomNumberGenerator(StringRef Salt);
 
-  static RandomNumberGenerator *Get();
-
-  /// \brief Returns a random number in the range [0, Max).
-  uint64_t Random(uint64_t Max);
+  /// Returns a random number in the range [0, Max).
+  uint64_t next(uint64_t Max);
 
 private:
-  std::default_random_engine generator;
+  // 64-bit Mersenne Twister by Matsumoto and Nishimura, 2000
+  // http://en.cppreference.com/w/cpp/numeric/random/mersenne_twister_engine
+  std::mt19937_64 Generator;
 
-  void Seed(StringRef Salt, uint64_t Seed);
-
-  RandomNumberGenerator();
   // Noncopyable.
-  RandomNumberGenerator(const RandomNumberGenerator &other) = delete;
+  RandomNumberGenerator(const RandomNumberGenerator &other)
+      LLVM_DELETED_FUNCTION;
   RandomNumberGenerator &
-  operator=(const RandomNumberGenerator &other) = delete;
+  operator=(const RandomNumberGenerator &other) LLVM_DELETED_FUNCTION;
 };
 }
 

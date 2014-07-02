@@ -16,7 +16,6 @@
 #define NVPTXISELLOWERING_H
 
 #include "NVPTX.h"
-#include "NVPTXSubtarget.h"
 #include "llvm/CodeGen/SelectionDAG.h"
 #include "llvm/Target/TargetLowering.h"
 
@@ -50,6 +49,11 @@ enum NodeType {
   CallSeqBegin,
   CallSeqEnd,
   CallPrototype,
+  FUN_SHFL_CLAMP,
+  FUN_SHFR_CLAMP,
+  MUL_WIDE_SIGNED,
+  MUL_WIDE_UNSIGNED,
+  IMAD,
   Dummy,
 
   LoadV2 = ISD::FIRST_TARGET_MEMORY_OPCODE,
@@ -167,6 +171,8 @@ enum NodeType {
 };
 }
 
+class NVPTXSubtarget;
+
 //===--------------------------------------------------------------------===//
 // TargetLowering Implementation
 //===--------------------------------------------------------------------===//
@@ -196,9 +202,9 @@ public:
   /// getFunctionAlignment - Return the Log2 alignment of this function.
   unsigned getFunctionAlignment(const Function *F) const;
 
-  EVT getSetCCResultType(LLVMContext &, EVT VT) const override {
+  EVT getSetCCResultType(LLVMContext &Ctx, EVT VT) const override {
     if (VT.isVector())
-      return MVT::getVectorVT(MVT::i1, VT.getVectorNumElements());
+      return EVT::getVectorVT(Ctx, MVT::i1, VT.getVectorNumElements());
     return MVT::i1;
   }
 
@@ -255,8 +261,12 @@ private:
   SDValue LowerSTOREi1(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerSTOREVector(SDValue Op, SelectionDAG &DAG) const;
 
+  SDValue LowerShiftRightParts(SDValue Op, SelectionDAG &DAG) const;
+  SDValue LowerShiftLeftParts(SDValue Op, SelectionDAG &DAG) const;
+
   void ReplaceNodeResults(SDNode *N, SmallVectorImpl<SDValue> &Results,
                           SelectionDAG &DAG) const override;
+  SDValue PerformDAGCombine(SDNode *N, DAGCombinerInfo &DCI) const override;
 
   unsigned getArgumentAlignment(SDValue Callee, const ImmutableCallSite *CS,
                                 Type *Ty, unsigned Idx) const;

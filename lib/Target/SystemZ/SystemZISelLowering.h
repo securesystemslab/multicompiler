@@ -198,7 +198,7 @@ class SystemZTargetMachine;
 
 class SystemZTargetLowering : public TargetLowering {
 public:
-  explicit SystemZTargetLowering(SystemZTargetMachine &TM);
+  explicit SystemZTargetLowering(const TargetMachine &TM);
 
   // Override TargetLowering.
   MVT getScalarShiftAmountTy(EVT LHSTy) const override {
@@ -249,7 +249,6 @@ public:
 
 private:
   const SystemZSubtarget &Subtarget;
-  const SystemZTargetMachine &TM;
 
   // Implement LowerOperation for individual opcodes.
   SDValue lowerSETCC(SDValue Op, SelectionDAG &DAG) const;

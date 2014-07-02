@@ -493,7 +493,7 @@ def neon_vcvt_imm32 : Operand<i32> {
 // rot_imm: An integer that encodes a rotate amount. Must be 8, 16, or 24.
 def rot_imm_XFORM: SDNodeXForm<imm, [{
   switch (N->getZExtValue()){
-  default: assert(0);
+  default: llvm_unreachable(nullptr);
   case 0:  return CurDAG->getTargetConstant(0, MVT::i32);
   case 8:  return CurDAG->getTargetConstant(1, MVT::i32);
   case 16: return CurDAG->getTargetConstant(2, MVT::i32);
@@ -3334,8 +3334,8 @@ def SBFX  : I<(outs GPRnopc:$Rd),
   let Inst{3-0}   = Rn;
 }
 
-def UBFX  : I<(outs GPR:$Rd),
-              (ins GPR:$Rn, imm0_31:$lsb, imm1_32:$width),
+def UBFX  : I<(outs GPRnopc:$Rd),
+              (ins GPRnopc:$Rn, imm0_31:$lsb, imm1_32:$width),
                AddrMode1, 4, IndexModeNone, DPFrm, IIC_iUNAsi,
                "ubfx", "\t$Rd, $Rn, $lsb, $width", "", []>,
                Requires<[IsARM, HasV6T2]> {
@@ -5113,9 +5113,11 @@ let usesCustomInserter = 1, Uses = [R4], Defs = [R4, SP] in
 // __aeabi_read_tp preserves the registers r1-r3.
 // This is a pseudo inst so that we can get the encoding right,
 // complete with fixup for the aeabi_read_tp function.
+// TPsoft is valid for ARM mode only, in case of Thumb mode a tTPsoft pattern
+// is defined in "ARMInstrThumb.td".
 let isCall = 1,
   Defs = [R0, R12, LR, CPSR], Uses = [SP] in {
-  def TPsoft : PseudoInst<(outs), (ins), IIC_Br,
+  def TPsoft : ARMPseudoInst<(outs), (ins), 4, IIC_Br,
                [(set R0, ARMthread_pointer)]>, Sched<[WriteBr]>;
 }
 

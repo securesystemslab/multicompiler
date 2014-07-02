@@ -13,11 +13,10 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm-c/lto.h"
-#include "llvm-c/Core.h"
-#include "llvm-c/Target.h"
 #include "llvm/CodeGen/CommandFlags.h"
 #include "llvm/LTO/LTOCodeGenerator.h"
 #include "llvm/LTO/LTOModule.h"
+#include "llvm/Support/TargetSelect.h"
 
 // extra command-line flags needed for LTOCodeGenerator
 static cl::opt<bool>
@@ -46,12 +45,12 @@ static bool parsedOptions = false;
 // Initialize the configured targets if they have not been initialized.
 static void lto_initialize() {
   if (!initialized) {
-    LLVMInitializeAllTargetInfos();
-    LLVMInitializeAllTargets();
-    LLVMInitializeAllTargetMCs();
-    LLVMInitializeAllAsmParsers();
-    LLVMInitializeAllAsmPrinters();
-    LLVMInitializeAllDisassemblers();
+    InitializeAllTargetInfos();
+    InitializeAllTargets();
+    InitializeAllTargetMCs();
+    InitializeAllAsmParsers();
+    InitializeAllAsmPrinters();
+    InitializeAllDisassemblers();
     initialized = true;
   }
 }

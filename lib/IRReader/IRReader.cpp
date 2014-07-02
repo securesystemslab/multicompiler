@@ -39,7 +39,7 @@ Module *llvm::getLazyIRModule(MemoryBuffer *Buffer, SMDiagnostic &Err,
     if (std::error_code EC = ModuleOrErr.getError()) {
       Err = SMDiagnostic(Buffer->getBufferIdentifier(), SourceMgr::DK_Error,
                          EC.message());
-      // ParseBitcodeFile does not take ownership of the Buffer in the
+      // getLazyBitcodeModule does not take ownership of the Buffer in the
       // case of an error.
       delete Buffer;
       return nullptr;
@@ -76,11 +76,12 @@ Module *llvm::ParseIR(MemoryBuffer *Buffer, SMDiagnostic &Err,
     else
       M = ModuleOrErr.get();
     // parseBitcodeFile does not take ownership of the Buffer.
-    delete Buffer;
     return M;
   }
 
-  return ParseAssembly(Buffer, nullptr, Err, Context);
+  return ParseAssembly(MemoryBuffer::getMemBuffer(
+                           Buffer->getBuffer(), Buffer->getBufferIdentifier()),
+                       nullptr, Err, Context);
 }
 
 Module *llvm::ParseIRFile(const std::string &Filename, SMDiagnostic &Err,
@@ -92,7 +93,7 @@ Module *llvm::ParseIRFile(const std::string &Filename, SMDiagnostic &Err,
     return nullptr;
   }
 
-  return ParseIR(File.release(), Err, Context);
+  return ParseIR(File.get(), Err, Context);
 }
 
 //===----------------------------------------------------------------------===//
@@ -104,7 +105,8 @@ LLVMBool LLVMParseIRInContext(LLVMContextRef ContextRef,
                               char **OutMessage) {
   SMDiagnostic Diag;
 
-  *OutM = wrap(ParseIR(unwrap(MemBuf), Diag, *unwrap(ContextRef)));
+  std::unique_ptr<MemoryBuffer> MB(unwrap(MemBuf));
+  *OutM = wrap(ParseIR(MB.get(), Diag, *unwrap(ContextRef)));
 
   if(!*OutM) {
     if (OutMessage) {

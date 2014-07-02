@@ -115,7 +115,7 @@ const uint64_t UnknownAddressOrSize = ~0ULL;
 class SymbolicFile : public Binary {
 public:
   virtual ~SymbolicFile();
-  SymbolicFile(unsigned int Type, MemoryBuffer *Source, bool BufferOwned);
+  SymbolicFile(unsigned int Type, std::unique_ptr<MemoryBuffer> Source);
 
   // virtual interface.
   virtual void moveSymbolNext(DataRefImpl &Symb) const = 0;
@@ -136,20 +136,23 @@ public:
   basic_symbol_iterator symbol_end() const {
     return symbol_end_impl();
   }
+  typedef iterator_range<basic_symbol_iterator> basic_symbol_iterator_range;
+  basic_symbol_iterator_range symbols() const {
+    return basic_symbol_iterator_range(symbol_begin(), symbol_end());
+  }
 
   // construction aux.
-  static ErrorOr<SymbolicFile *> createIRObjectFile(MemoryBuffer *Object,
-                                                    LLVMContext &Context,
-                                                    bool BufferOwned = true);
+  static ErrorOr<SymbolicFile *>
+  createIRObjectFile(std::unique_ptr<MemoryBuffer> Object,
+                     LLVMContext &Context);
 
-  static ErrorOr<SymbolicFile *> createSymbolicFile(MemoryBuffer *Object,
-                                                    bool BufferOwned,
-                                                    sys::fs::file_magic Type,
-                                                    LLVMContext *Context);
+  static ErrorOr<SymbolicFile *>
+  createSymbolicFile(std::unique_ptr<MemoryBuffer> &Object,
+                     sys::fs::file_magic Type, LLVMContext *Context);
 
-  static ErrorOr<SymbolicFile *> createSymbolicFile(MemoryBuffer *Object) {
-    return createSymbolicFile(Object, true, sys::fs::file_magic::unknown,
-                              nullptr);
+  static ErrorOr<SymbolicFile *>
+  createSymbolicFile(std::unique_ptr<MemoryBuffer> &Object) {
+    return createSymbolicFile(Object, sys::fs::file_magic::unknown, nullptr);
   }
   static ErrorOr<SymbolicFile *> createSymbolicFile(StringRef ObjectPath);
 

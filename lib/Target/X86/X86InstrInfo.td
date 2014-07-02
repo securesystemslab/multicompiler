@@ -155,27 +155,6 @@ def X86cas16 : SDNode<"X86ISD::LCMPXCHG16_DAG", SDTX86caspair,
                         [SDNPHasChain, SDNPInGlue, SDNPOutGlue, SDNPMayStore,
                          SDNPMayLoad, SDNPMemOperand]>;
 
-def X86AtomAdd64 : SDNode<"X86ISD::ATOMADD64_DAG", SDTX86atomicBinary,
-                        [SDNPHasChain, SDNPMayStore,
-                         SDNPMayLoad, SDNPMemOperand]>;
-def X86AtomSub64 : SDNode<"X86ISD::ATOMSUB64_DAG", SDTX86atomicBinary,
-                        [SDNPHasChain, SDNPMayStore,
-                         SDNPMayLoad, SDNPMemOperand]>;
-def X86AtomOr64 : SDNode<"X86ISD::ATOMOR64_DAG", SDTX86atomicBinary,
-                        [SDNPHasChain, SDNPMayStore,
-                         SDNPMayLoad, SDNPMemOperand]>;
-def X86AtomXor64 : SDNode<"X86ISD::ATOMXOR64_DAG", SDTX86atomicBinary,
-                        [SDNPHasChain, SDNPMayStore,
-                         SDNPMayLoad, SDNPMemOperand]>;
-def X86AtomAnd64 : SDNode<"X86ISD::ATOMAND64_DAG", SDTX86atomicBinary,
-                        [SDNPHasChain, SDNPMayStore,
-                         SDNPMayLoad, SDNPMemOperand]>;
-def X86AtomNand64 : SDNode<"X86ISD::ATOMNAND64_DAG", SDTX86atomicBinary,
-                        [SDNPHasChain, SDNPMayStore,
-                         SDNPMayLoad, SDNPMemOperand]>;
-def X86AtomSwap64 : SDNode<"X86ISD::ATOMSWAP64_DAG", SDTX86atomicBinary,
-                        [SDNPHasChain, SDNPMayStore,
-                         SDNPMayLoad, SDNPMemOperand]>;
 def X86retflag : SDNode<"X86ISD::RET_FLAG", SDTX86Ret,
                         [SDNPHasChain, SDNPOptInGlue, SDNPVariadic]>;
 
@@ -208,6 +187,8 @@ def X86rdtsc   : SDNode<"X86ISD::RDTSC_DAG", SDTX86Void,
                         [SDNPHasChain, SDNPOutGlue, SDNPSideEffect]>;
 def X86rdtscp  : SDNode<"X86ISD::RDTSCP_DAG", SDTX86Void,
                         [SDNPHasChain, SDNPOutGlue, SDNPSideEffect]>;
+def X86rdpmc   : SDNode<"X86ISD::RDPMC_DAG", SDTX86Void,
+                        [SDNPHasChain, SDNPOutGlue, SDNPSideEffect]>; 
 
 def X86Wrapper    : SDNode<"X86ISD::Wrapper",     SDTX86Wrapper>;
 def X86WrapperRIP : SDNode<"X86ISD::WrapperRIP",  SDTX86Wrapper>;

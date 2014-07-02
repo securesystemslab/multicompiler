@@ -9,11 +9,11 @@
 ; }
 ; with "clang++ -S -emit-llvm -fsanitize=address -O0 -g test.cc"
 
-; First, argument variable "y" resides in %rdx:
-; CHECK: DEBUG_VALUE: bar:y <- RDX
+; First, argument variable "y" resides in %rdi:
+; CHECK: DEBUG_VALUE: bar:y <- RDI
 
 ; Then its address is stored in a location on a stack:
-; CHECK: movq %rdx, [[OFFSET:[0-9]+]](%rsp)
+; CHECK: movq %rdi, [[OFFSET:[0-9]+]](%rsp)
 ; CHECK-NEXT: [[START_LABEL:.Ltmp[0-9]+]]
 ; CHECK-NEXT: DEBUG_VALUE: bar:y <- [RSP+[[OFFSET]]]
 ; This location should be valid until the end of the function.
@@ -26,7 +26,7 @@
 ; CHECK-NEXT: .quad .Lset{{[0-9]+}}
 ; CHECK-NEXT: .Lset{{[0-9]+}} = [[START_LABEL]]-.Lfunc_begin0
 ; CHECK-NEXT: .quad .Lset{{[0-9]+}}
-; CHECK: DW_OP_reg1
+; CHECK: DW_OP_reg5
 
 ; Then it's addressed via %rsp:
 ; CHECK:      .Lset{{[0-9]+}} = [[START_LABEL]]-.Lfunc_begin0
@@ -181,6 +181,6 @@ attributes #1 = { nounwind readnone }
 !9 = metadata !{i32 2, metadata !"Dwarf Version", i32 4}
 !10 = metadata !{i32 2, metadata !"Debug Info Version", i32 1}
 !11 = metadata !{metadata !"clang version 3.5.0 (209308)"}
-!12 = metadata !{i32 786689, metadata !4, metadata !"y", metadata !5, i32 16777217, metadata !8, i32 0, i32 0, i64 2} ; [ DW_TAG_arg_variable ] [y] [line 1]
+!12 = metadata !{i32 786689, metadata !4, metadata !"y", metadata !5, i32 16777217, metadata !8, i32 0, i32 0, metadata !14} ; [ DW_TAG_arg_variable ] [y] [line 1]
 !13 = metadata !{i32 2, i32 0, metadata !4, null}
-
+!14 = metadata !{i64 2}

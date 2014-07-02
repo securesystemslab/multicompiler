@@ -37,7 +37,7 @@ void MCTargetStreamer::finish() {}
 void MCTargetStreamer::emitAssignment(MCSymbol *Symbol, const MCExpr *Value) {}
 
 MCStreamer::MCStreamer(MCContext &Ctx)
-    : Context(Ctx), CurrentW64UnwindInfo(nullptr), LastSymbol(nullptr) {
+    : Context(Ctx), CurrentW64UnwindInfo(nullptr) {
   SectionStack.push_back(std::pair<MCSectionSubPair, MCSectionSubPair>());
 }
 
@@ -51,7 +51,6 @@ void MCStreamer::reset() {
     delete W64UnwindInfos[i];
   W64UnwindInfos.clear();
   CurrentW64UnwindInfo = nullptr;
-  LastSymbol = nullptr;
   SectionStack.clear();
   SectionStack.push_back(std::pair<MCSectionSubPair, MCSectionSubPair>());
 }
@@ -234,18 +233,10 @@ void MCStreamer::EmitLabel(MCSymbol *Symbol) {
   assert(!Symbol->isVariable() && "Cannot emit a variable symbol!");
   assert(getCurrentSection().first && "Cannot emit before setting section!");
   AssignSection(Symbol, getCurrentSection().first);
-  LastSymbol = Symbol;
 
   MCTargetStreamer *TS = getTargetStreamer();
   if (TS)
     TS->emitLabel(Symbol);
-}
-
-void MCStreamer::EmitDebugLabel(MCSymbol *Symbol) {
-  assert(!Symbol->isVariable() && "Cannot emit a variable symbol!");
-  assert(getCurrentSection().first && "Cannot emit before setting section!");
-  AssignSection(Symbol, getCurrentSection().first);
-  LastSymbol = Symbol;
 }
 
 void MCStreamer::EmitCompactUnwindEncoding(uint32_t CompactUnwindEncoding) {
@@ -273,17 +264,6 @@ void MCStreamer::EmitCFIStartProc(bool IsSimple) {
 void MCStreamer::EmitCFIStartProcImpl(MCDwarfFrameInfo &Frame) {
 }
 
-void MCStreamer::RecordProcStart(MCDwarfFrameInfo &Frame) {
-  // Report an error if we haven't seen a symbol yet where we'd bind
-  // .cfi_startproc.
-  if (!LastSymbol)
-    report_fatal_error("No symbol to start a frame");
-  Frame.Function = LastSymbol;
-  // We need to create a local symbol to avoid relocations.
-  Frame.Begin = getContext().CreateTempSymbol();
-  EmitLabel(Frame.Begin);
-}
-
 void MCStreamer::EmitCFIEndProc() {
   EnsureValidFrame();
   MCDwarfFrameInfo *CurFrame = getCurrentFrameInfo();
@@ -291,11 +271,9 @@ void MCStreamer::EmitCFIEndProc() {
 }
 
 void MCStreamer::EmitCFIEndProcImpl(MCDwarfFrameInfo &Frame) {
-}
-
-void MCStreamer::RecordProcEnd(MCDwarfFrameInfo &Frame) {
-  Frame.End = getContext().CreateTempSymbol();
-  EmitLabel(Frame.End);
+  // Put a dummy non-null value in Frame.End to mark that this frame has been
+  // closed.
+  Frame.End = (MCSymbol *) 1;
 }
 
 MCSymbol *MCStreamer::EmitCFICommon() {
@@ -447,7 +425,7 @@ void MCStreamer::EnsureValidW64UnwindInfo() {
     report_fatal_error("No open Win64 EH frame function!");
 }
 
-void MCStreamer::EmitWin64EHStartProc(const MCSymbol *Symbol) {
+void MCStreamer::EmitWinCFIStartProc(const MCSymbol *Symbol) {
   MCWin64EHUnwindInfo *CurFrame = CurrentW64UnwindInfo;
   if (CurFrame && !CurFrame->End)
     report_fatal_error("Starting a function before ending the previous one!");
@@ -458,7 +436,7 @@ void MCStreamer::EmitWin64EHStartProc(const MCSymbol *Symbol) {
   setCurrentW64UnwindInfo(Frame);
 }
 
-void MCStreamer::EmitWin64EHEndProc() {
+void MCStreamer::EmitWinCFIEndProc() {
   EnsureValidW64UnwindInfo();
   MCWin64EHUnwindInfo *CurFrame = CurrentW64UnwindInfo;
   if (CurFrame->ChainedParent)
@@ -467,7 +445,7 @@ void MCStreamer::EmitWin64EHEndProc() {
   EmitLabel(CurFrame->End);
 }
 
-void MCStreamer::EmitWin64EHStartChained() {
+void MCStreamer::EmitWinCFIStartChained() {
   EnsureValidW64UnwindInfo();
   MCWin64EHUnwindInfo *Frame = new MCWin64EHUnwindInfo;
   MCWin64EHUnwindInfo *CurFrame = CurrentW64UnwindInfo;
@@ -478,7 +456,7 @@ void MCStreamer::EmitWin64EHStartChained() {
   setCurrentW64UnwindInfo(Frame);
 }
 
-void MCStreamer::EmitWin64EHEndChained() {
+void MCStreamer::EmitWinCFIEndChained() {
   EnsureValidW64UnwindInfo();
   MCWin64EHUnwindInfo *CurFrame = CurrentW64UnwindInfo;
   if (!CurFrame->ChainedParent)
@@ -488,8 +466,8 @@ void MCStreamer::EmitWin64EHEndChained() {
   CurrentW64UnwindInfo = CurFrame->ChainedParent;
 }
 
-void MCStreamer::EmitWin64EHHandler(const MCSymbol *Sym, bool Unwind,
-                                    bool Except) {
+void MCStreamer::EmitWinEHHandler(const MCSymbol *Sym, bool Unwind,
+                                  bool Except) {
   EnsureValidW64UnwindInfo();
   MCWin64EHUnwindInfo *CurFrame = CurrentW64UnwindInfo;
   if (CurFrame->ChainedParent)
@@ -503,14 +481,14 @@ void MCStreamer::EmitWin64EHHandler(const MCSymbol *Sym, bool Unwind,
     CurFrame->HandlesExceptions = true;
 }
 
-void MCStreamer::EmitWin64EHHandlerData() {
+void MCStreamer::EmitWinEHHandlerData() {
   EnsureValidW64UnwindInfo();
   MCWin64EHUnwindInfo *CurFrame = CurrentW64UnwindInfo;
   if (CurFrame->ChainedParent)
     report_fatal_error("Chained unwind areas can't have handlers!");
 }
 
-void MCStreamer::EmitWin64EHPushReg(unsigned Register) {
+void MCStreamer::EmitWinCFIPushReg(unsigned Register) {
   EnsureValidW64UnwindInfo();
   MCWin64EHUnwindInfo *CurFrame = CurrentW64UnwindInfo;
   MCSymbol *Label = getContext().CreateTempSymbol();
@@ -519,13 +497,15 @@ void MCStreamer::EmitWin64EHPushReg(unsigned Register) {
   CurFrame->Instructions.push_back(Inst);
 }
 
-void MCStreamer::EmitWin64EHSetFrame(unsigned Register, unsigned Offset) {
+void MCStreamer::EmitWinCFISetFrame(unsigned Register, unsigned Offset) {
   EnsureValidW64UnwindInfo();
   MCWin64EHUnwindInfo *CurFrame = CurrentW64UnwindInfo;
   if (CurFrame->LastFrameInst >= 0)
     report_fatal_error("Frame register and offset already specified!");
   if (Offset & 0x0F)
     report_fatal_error("Misaligned frame pointer offset!");
+  if (Offset > 240)
+    report_fatal_error("Frame offset must be less than or equal to 240!");
   MCSymbol *Label = getContext().CreateTempSymbol();
   MCWin64EHInstruction Inst(Win64EH::UOP_SetFPReg, Label, Register, Offset);
   EmitLabel(Label);
@@ -533,8 +513,10 @@ void MCStreamer::EmitWin64EHSetFrame(unsigned Register, unsigned Offset) {
   CurFrame->Instructions.push_back(Inst);
 }
 
-void MCStreamer::EmitWin64EHAllocStack(unsigned Size) {
+void MCStreamer::EmitWinCFIAllocStack(unsigned Size) {
   EnsureValidW64UnwindInfo();
+  if (Size == 0)
+    report_fatal_error("Allocation size must be non-zero!");
   if (Size & 7)
     report_fatal_error("Misaligned stack allocation!");
   MCWin64EHUnwindInfo *CurFrame = CurrentW64UnwindInfo;
@@ -544,7 +526,7 @@ void MCStreamer::EmitWin64EHAllocStack(unsigned Size) {
   CurFrame->Instructions.push_back(Inst);
 }
 
-void MCStreamer::EmitWin64EHSaveReg(unsigned Register, unsigned Offset) {
+void MCStreamer::EmitWinCFISaveReg(unsigned Register, unsigned Offset) {
   EnsureValidW64UnwindInfo();
   if (Offset & 7)
     report_fatal_error("Misaligned saved register offset!");
@@ -557,7 +539,7 @@ void MCStreamer::EmitWin64EHSaveReg(unsigned Register, unsigned Offset) {
   CurFrame->Instructions.push_back(Inst);
 }
 
-void MCStreamer::EmitWin64EHSaveXMM(unsigned Register, unsigned Offset) {
+void MCStreamer::EmitWinCFISaveXMM(unsigned Register, unsigned Offset) {
   EnsureValidW64UnwindInfo();
   if (Offset & 0x0F)
     report_fatal_error("Misaligned saved vector register offset!");
@@ -570,7 +552,7 @@ void MCStreamer::EmitWin64EHSaveXMM(unsigned Register, unsigned Offset) {
   CurFrame->Instructions.push_back(Inst);
 }
 
-void MCStreamer::EmitWin64EHPushFrame(bool Code) {
+void MCStreamer::EmitWinCFIPushFrame(bool Code) {
   EnsureValidW64UnwindInfo();
   MCWin64EHUnwindInfo *CurFrame = CurrentW64UnwindInfo;
   if (CurFrame->Instructions.size() > 0)
@@ -581,7 +563,7 @@ void MCStreamer::EmitWin64EHPushFrame(bool Code) {
   CurFrame->Instructions.push_back(Inst);
 }
 
-void MCStreamer::EmitWin64EHEndProlog() {
+void MCStreamer::EmitWinCFIEndProlog() {
   EnsureValidW64UnwindInfo();
   MCWin64EHUnwindInfo *CurFrame = CurrentW64UnwindInfo;
   CurFrame->PrologEnd = getContext().CreateTempSymbol();
@@ -589,11 +571,9 @@ void MCStreamer::EmitWin64EHEndProlog() {
 }
 
 void MCStreamer::EmitCOFFSectionIndex(MCSymbol const *Symbol) {
-  llvm_unreachable("This file format doesn't support this directive");
 }
 
 void MCStreamer::EmitCOFFSecRel32(MCSymbol const *Symbol) {
-  llvm_unreachable("This file format doesn't support this directive");
 }
 
 /// EmitRawText - If this file is backed by an assembly streamer, this dumps
@@ -629,9 +609,82 @@ void MCStreamer::Finish() {
 }
 
 void MCStreamer::EmitAssignment(MCSymbol *Symbol, const MCExpr *Value) {
+  visitUsedExpr(*Value);
   Symbol->setVariableValue(Value);
 
   MCTargetStreamer *TS = getTargetStreamer();
   if (TS)
     TS->emitAssignment(Symbol, Value);
 }
+
+void MCStreamer::visitUsedSymbol(const MCSymbol &Sym) {
+}
+
+void MCStreamer::visitUsedExpr(const MCExpr &Expr) {
+  switch (Expr.getKind()) {
+  case MCExpr::Target:
+    cast<MCTargetExpr>(Expr).visitUsedExpr(*this);
+    break;
+
+  case MCExpr::Constant:
+    break;
+
+  case MCExpr::Binary: {
+    const MCBinaryExpr &BE = cast<MCBinaryExpr>(Expr);
+    visitUsedExpr(*BE.getLHS());
+    visitUsedExpr(*BE.getRHS());
+    break;
+  }
+
+  case MCExpr::SymbolRef:
+    visitUsedSymbol(cast<MCSymbolRefExpr>(Expr).getSymbol());
+    break;
+
+  case MCExpr::Unary:
+    visitUsedExpr(*cast<MCUnaryExpr>(Expr).getSubExpr());
+    break;
+  }
+}
+
+void MCStreamer::EmitInstruction(const MCInst &Inst,
+                                 const MCSubtargetInfo &STI) {
+  // Scan for values.
+  for (unsigned i = Inst.getNumOperands(); i--;)
+    if (Inst.getOperand(i).isExpr())
+      visitUsedExpr(*Inst.getOperand(i).getExpr());
+}
+
+void MCStreamer::EmitAssemblerFlag(MCAssemblerFlag Flag) {}
+void MCStreamer::EmitThumbFunc(MCSymbol *Func) {}
+void MCStreamer::EmitSymbolDesc(MCSymbol *Symbol, unsigned DescValue) {}
+void MCStreamer::BeginCOFFSymbolDef(const MCSymbol *Symbol) {}
+void MCStreamer::EndCOFFSymbolDef() {}
+void MCStreamer::EmitFileDirective(StringRef Filename) {}
+void MCStreamer::EmitCOFFSymbolStorageClass(int StorageClass) {}
+void MCStreamer::EmitCOFFSymbolType(int Type) {}
+void MCStreamer::EmitELFSize(MCSymbol *Symbol, const MCExpr *Value) {}
+void MCStreamer::EmitLocalCommonSymbol(MCSymbol *Symbol, uint64_t Size,
+                                       unsigned ByteAlignment) {}
+void MCStreamer::EmitTBSSSymbol(const MCSection *Section, MCSymbol *Symbol,
+                                uint64_t Size, unsigned ByteAlignment) {}
+void MCStreamer::ChangeSection(const MCSection *, const MCExpr *) {}
+void MCStreamer::EmitWeakReference(MCSymbol *Alias, const MCSymbol *Symbol) {}
+void MCStreamer::EmitBytes(StringRef Data) {}
+void MCStreamer::EmitValueImpl(const MCExpr *Value, unsigned Size,
+                               const SMLoc &Loc) {
+  visitUsedExpr(*Value);
+}
+void MCStreamer::EmitULEB128Value(const MCExpr *Value) {}
+void MCStreamer::EmitSLEB128Value(const MCExpr *Value) {}
+void MCStreamer::EmitValueToAlignment(unsigned ByteAlignment, int64_t Value,
+                                      unsigned ValueSize,
+                                      unsigned MaxBytesToEmit) {}
+void MCStreamer::EmitCodeAlignment(unsigned ByteAlignment,
+                                   unsigned MaxBytesToEmit) {}
+bool MCStreamer::EmitValueToOffset(const MCExpr *Offset, unsigned char Value) {
+  return false;
+}
+void MCStreamer::EmitBundleAlignMode(unsigned AlignPow2) {}
+void MCStreamer::EmitBundleLock(bool AlignToEnd) {}
+void MCStreamer::FinishImpl() {}
+void MCStreamer::EmitBundleUnlock() {}

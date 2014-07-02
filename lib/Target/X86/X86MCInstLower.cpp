@@ -13,6 +13,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "X86AsmPrinter.h"
+#include "X86RegisterInfo.h"
 #include "InstPrinter/X86ATTInstPrinter.h"
 #include "MCTargetDesc/X86BaseInfo.h"
 #include "llvm/ADT/SmallString.h"
@@ -779,6 +780,9 @@ static void LowerPATCHPOINT(MCStreamer &OS, StackMaps &SM,
 
 void X86AsmPrinter::EmitInstruction(const MachineInstr *MI) {
   X86MCInstLower MCInstLowering(*MF, *this);
+  const X86RegisterInfo *RI =
+      static_cast<const X86RegisterInfo *>(TM.getRegisterInfo());
+
   switch (MI->getOpcode()) {
   case TargetOpcode::DBG_VALUE:
     llvm_unreachable("Should be handled target independently");
@@ -882,6 +886,37 @@ void X86AsmPrinter::EmitInstruction(const MachineInstr *MI) {
     EmitToStreamer(OutStreamer, MCInstBuilder(X86::MOV64rr)
       .addReg(X86::R10)
       .addReg(X86::RAX));
+    return;
+
+  case X86::SEH_PushReg:
+    OutStreamer.EmitWinCFIPushReg(RI->getSEHRegNum(MI->getOperand(0).getImm()));
+    return;
+
+  case X86::SEH_SaveReg:
+    OutStreamer.EmitWinCFISaveReg(RI->getSEHRegNum(MI->getOperand(0).getImm()),
+                                  MI->getOperand(1).getImm());
+    return;
+
+  case X86::SEH_SaveXMM:
+    OutStreamer.EmitWinCFISaveXMM(RI->getSEHRegNum(MI->getOperand(0).getImm()),
+                                  MI->getOperand(1).getImm());
+    return;
+
+  case X86::SEH_StackAlloc:
+    OutStreamer.EmitWinCFIAllocStack(MI->getOperand(0).getImm());
+    return;
+
+  case X86::SEH_SetFrame:
+    OutStreamer.EmitWinCFISetFrame(RI->getSEHRegNum(MI->getOperand(0).getImm()),
+                                   MI->getOperand(1).getImm());
+    return;
+
+  case X86::SEH_PushFrame:
+    OutStreamer.EmitWinCFIPushFrame(MI->getOperand(0).getImm());
+    return;
+
+  case X86::SEH_EndPrologue:
+    OutStreamer.EmitWinCFIEndProlog();
     return;
   }
 

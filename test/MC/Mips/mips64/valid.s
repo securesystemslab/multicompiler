@@ -9,8 +9,10 @@
         add.d     $f1,$f7,$f29
         add.s     $f8,$f21,$f24
         addi      $13,$9,26322
+        addi      $8,$8,~1             # CHECK: addi $8, $8, -2 # encoding: [0x21,0x08,0xff,0xfe]
         addu      $9,$a0,$a2
         and       $s7,$v0,$12
+        and       $2,4                 # CHECK: andi $2, $2, 4 # encoding: [0x30,0x42,0x00,0x04]
         bc1f      $fcc0, 4             # CHECK: bc1f 4        # encoding: [0x45,0x00,0x00,0x01]
         bc1f      $fcc1, 4             # CHECK: bc1f $fcc1, 4 # encoding: [0x45,0x04,0x00,0x01]
         bc1f      4                    # CHECK: bc1f 4        # encoding: [0x45,0x00,0x00,0x01]
@@ -165,6 +167,7 @@
         nop
         nor       $a3,$zero,$a3
         or        $12,$s0,$sp
+        or        $2, 4                # CHECK: ori $2, $2, 4          # encoding: [0x34,0x42,0x00,0x04]
         pref      1, 8($5)             # CHECK: pref 1, 8($5)          # encoding: [0xcc,0xa1,0x00,0x08]
         round.l.d $f12,$f1
         round.l.s $f25,$f5
@@ -173,6 +176,8 @@
         sb        $s6,-19857($14)
         sc        $15,18904($s3)       # CHECK: sc $15, 18904($19)     # encoding: [0xe2,0x6f,0x49,0xd8]
         scd       $15,-8243($sp)       # CHECK: scd $15, -8243($sp)    # encoding: [0xf3,0xaf,0xdf,0xcd]
+        sdbbp                          # CHECK: sdbbp                  # encoding: [0x70,0x00,0x00,0x3f]
+        sdbbp     34                   # CHECK: sdbbp 34               # encoding: [0x70,0x00,0x08,0xbf]
         sd        $12,5835($10)
         sdc1      $f31,30574($13)
         sdc2      $20,23157($s2)       # CHECK: sdc2 $20, 23157($18)   # encoding: [0xfa,0x54,0x5a,0x75]
@@ -211,6 +216,8 @@
         swl       $15,13694($s3)
         swr       $s1,-26590($14)
         swxc1     $f19,$12($k0)
+        sync                           # CHECK: sync                   # encoding: [0x00,0x00,0x00,0x0f]
+        sync      1                    # CHECK: sync 1                 # encoding: [0x00,0x00,0x00,0x4f]
         teqi      $s5,-17504
         tgei      $s1,5025
         tgeiu     $sp,-28621

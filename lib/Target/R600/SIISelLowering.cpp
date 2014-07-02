@@ -14,8 +14,8 @@
 
 #include "SIISelLowering.h"
 #include "AMDGPU.h"
+#include "AMDGPUIntrinsicInfo.h"
 #include "AMDGPUSubtarget.h"
-#include "AMDILIntrinsicInfo.h"
 #include "SIInstrInfo.h"
 #include "SIMachineFunctionInfo.h"
 #include "SIRegisterInfo.h"
@@ -77,6 +77,8 @@ SITargetLowering::SITargetLowering(TargetMachine &TM) :
   setOperationAction(ISD::ADD, MVT::i32, Legal);
   setOperationAction(ISD::ADDC, MVT::i32, Legal);
   setOperationAction(ISD::ADDE, MVT::i32, Legal);
+  setOperationAction(ISD::SUBC, MVT::i32, Legal);
+  setOperationAction(ISD::SUBE, MVT::i32, Legal);
 
   // We need to custom lower vector stores from local memory
   setOperationAction(ISD::LOAD, MVT::v2i32, Custom);
@@ -89,14 +91,12 @@ SITargetLowering::SITargetLowering(TargetMachine &TM) :
 
   // We need to custom lower loads/stores from private memory
   setOperationAction(ISD::LOAD, MVT::i32, Custom);
-  setOperationAction(ISD::LOAD, MVT::i64, Custom);
   setOperationAction(ISD::LOAD, MVT::v2i32, Custom);
   setOperationAction(ISD::LOAD, MVT::v4i32, Custom);
   setOperationAction(ISD::LOAD, MVT::v8i32, Custom);
 
   setOperationAction(ISD::STORE, MVT::i1, Custom);
   setOperationAction(ISD::STORE, MVT::i32, Custom);
-  setOperationAction(ISD::STORE, MVT::i64, Custom);
   setOperationAction(ISD::STORE, MVT::v2i32, Custom);
   setOperationAction(ISD::STORE, MVT::v4i32, Custom);
 
@@ -136,6 +136,7 @@ SITargetLowering::SITargetLowering(TargetMachine &TM) :
   setOperationAction(ISD::INTRINSIC_WO_CHAIN, MVT::v4f32, Custom);
 
   setOperationAction(ISD::INTRINSIC_VOID, MVT::Other, Custom);
+  setOperationAction(ISD::BRCOND, MVT::Other, Custom);
 
   setLoadExtAction(ISD::SEXTLOAD, MVT::i1, Promote);
   setLoadExtAction(ISD::SEXTLOAD, MVT::i8, Custom);
@@ -211,6 +212,11 @@ SITargetLowering::SITargetLowering(TargetMachine &TM) :
     setOperationAction(ISD::FFLOOR, MVT::f64, Legal);
     setOperationAction(ISD::FRINT, MVT::f64, Legal);
   }
+
+  // FIXME: These should be removed and handled the same was as f32 fneg. Source
+  // modifiers also work for the double instructions.
+  setOperationAction(ISD::FNEG, MVT::f64, Expand);
+  setOperationAction(ISD::FABS, MVT::f64, Expand);
 
   setTargetDAGCombine(ISD::SELECT_CC);
   setTargetDAGCombine(ISD::SETCC);
@@ -481,19 +487,20 @@ MachineBasicBlock * SITargetLowering::EmitInstrWithCustomInserter(
     MI->eraseFromParent();
     break;
   }
-  case AMDGPU::V_SUB_F64:
-    BuildMI(*BB, I, MI->getDebugLoc(), TII->get(AMDGPU::V_ADD_F64),
-            MI->getOperand(0).getReg())
-            .addReg(MI->getOperand(1).getReg())
-            .addReg(MI->getOperand(2).getReg())
-            .addImm(0)  /* src2 */
-            .addImm(0)  /* ABS */
-            .addImm(0)  /* CLAMP */
-            .addImm(0)  /* OMOD */
-            .addImm(2); /* NEG */
+  case AMDGPU::V_SUB_F64: {
+    unsigned DestReg = MI->getOperand(0).getReg();
+    BuildMI(*BB, I, MI->getDebugLoc(), TII->get(AMDGPU::V_ADD_F64), DestReg)
+      .addImm(0)  // SRC0 modifiers
+      .addReg(MI->getOperand(1).getReg())
+      .addImm(1)  // SRC1 modifiers
+      .addReg(MI->getOperand(2).getReg())
+      .addImm(0)  // SRC2 modifiers
+      .addImm(0)  // src2
+      .addImm(0)  // CLAMP
+      .addImm(0); // OMOD
     MI->eraseFromParent();
     break;
-
+  }
   case AMDGPU::SI_RegisterStorePseudo: {
     MachineRegisterInfo &MRI = BB->getParent()->getRegInfo();
     unsigned Reg = MRI.createVirtualRegister(&AMDGPU::SReg_64RegClass);
@@ -594,6 +601,14 @@ SDValue SITargetLowering::LowerOperation(SDValue Op, SelectionDAG &DAG) const {
   case ISD::BRCOND: return LowerBRCOND(Op, DAG);
   case ISD::LOAD: {
     LoadSDNode *Load = dyn_cast<LoadSDNode>(Op);
+    EVT VT = Op.getValueType();
+
+    // These loads are legal.
+    if (Load->getAddressSpace() == AMDGPUAS::LOCAL_ADDRESS &&
+        VT.isVector() && VT.getVectorNumElements() == 2 &&
+        VT.getVectorElementType() == MVT::i32)
+      return SDValue();
+
     if (Op.getValueType().isVector() &&
         (Load->getAddressSpace() == AMDGPUAS::LOCAL_ADDRESS ||
          Load->getAddressSpace() == AMDGPUAS::PRIVATE_ADDRESS ||
@@ -902,6 +917,12 @@ SDValue SITargetLowering::LowerSTORE(SDValue Op, SelectionDAG &DAG) const {
   SDLoc DL(Op);
   StoreSDNode *Store = cast<StoreSDNode>(Op);
   EVT VT = Store->getMemoryVT();
+
+  // These stores are legal.
+  if (Store->getAddressSpace() == AMDGPUAS::LOCAL_ADDRESS &&
+      VT.isVector() && VT.getVectorNumElements() == 2 &&
+      VT.getVectorElementType() == MVT::i32)
+    return SDValue();
 
   SDValue Ret = AMDGPUTargetLowering::LowerSTORE(Op, DAG);
   if (Ret.getNode())

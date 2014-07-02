@@ -43,6 +43,7 @@ add_llvm_library(LLVMSupport
   PrettyStackTrace.cpp
   RandomNumberGenerator.cpp
   Regex.cpp
+  ScaledNumber.cpp
   SmallPtrSet.cpp
   SmallVector.cpp
   SourceMgr.cpp
@@ -90,7 +91,6 @@ add_llvm_library(LLVMSupport
   TimeValue.cpp
   Valgrind.cpp
   Watchdog.cpp
-  WindowsError.cpp
 
   ADDITIONAL_HEADERS
   Unix/Host.inc

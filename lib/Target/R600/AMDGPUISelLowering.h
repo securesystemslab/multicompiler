@@ -51,12 +51,20 @@ private:
   SDValue LowerSREM32(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerSREM64(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerUDIVREM(SDValue Op, SelectionDAG &DAG) const;
+  SDValue LowerFCEIL(SDValue Op, SelectionDAG &DAG) const;
+  SDValue LowerFTRUNC(SDValue Op, SelectionDAG &DAG) const;
+  SDValue LowerFRINT(SDValue Op, SelectionDAG &DAG) const;
+  SDValue LowerFNEARBYINT(SDValue Op, SelectionDAG &DAG) const;
+  SDValue LowerFFLOOR(SDValue Op, SelectionDAG &DAG) const;
+
   SDValue LowerUINT_TO_FP(SDValue Op, SelectionDAG &DAG) const;
 
   SDValue ExpandSIGN_EXTEND_INREG(SDValue Op,
                                   unsigned BitsDiff,
                                   SelectionDAG &DAG) const;
   SDValue LowerSIGN_EXTEND_INREG(SDValue Op, SelectionDAG &DAG) const;
+
+  SDValue performMulCombine(SDNode *N, DAGCombinerInfo &DCI) const;
 
 protected:
   static EVT getEquivalentMemType(LLVMContext &Context, EVT VT);
@@ -76,6 +84,7 @@ protected:
   SDValue SplitVectorStore(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerLOAD(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerSTORE(SDValue Op, SelectionDAG &DAG) const;
+  SDValue LowerSDIVREM(SDValue Op, SelectionDAG &DAG) const;
   bool isHWTrueValue(SDValue Op) const;
   bool isHWFalseValue(SDValue Op) const;
 
@@ -102,10 +111,12 @@ public:
 
   bool isZExtFree(Type *Src, Type *Dest) const override;
   bool isZExtFree(EVT Src, EVT Dest) const override;
+  bool isZExtFree(SDValue Val, EVT VT2) const override;
 
   bool isNarrowingProfitable(EVT VT1, EVT VT2) const override;
 
   MVT getVectorIdxTy() const override;
+  bool isSelectSupported(SelectSupportKind) const override;
 
   bool isFPImmLegal(const APFloat &Imm, EVT VT) const override;
   bool ShouldShrinkFPConstant(EVT VT) const override;
@@ -148,11 +159,6 @@ public:
     SDValue Op,
     const SelectionDAG &DAG,
     unsigned Depth = 0) const override;
-
-private:
-  // Functions defined in AMDILISelLowering.cpp
-  void InitAMDILLowering();
-  SDValue LowerBRCOND(SDValue Op, SelectionDAG &DAG) const;
 };
 
 namespace AMDGPUISD {
@@ -162,13 +168,15 @@ enum {
   FIRST_NUMBER = ISD::BUILTIN_OP_END,
   CALL,        // Function call based on a single integer
   UMUL,        // 32bit unsigned multiplication
-  DIV_INF,      // Divide with infinity returned on zero divisor
   RET_FLAG,
   BRANCH_COND,
   // End AMDIL ISD Opcodes
   DWORDADDR,
   FRACT,
   CLAMP,
+
+  // SIN_HW, COS_HW - f32 for SI, 1 ULP max error, valid from -100 pi to 100 pi.
+  // Denormals handled on some parts.
   COS_HW,
   SIN_HW,
   FMAX,
@@ -178,11 +186,23 @@ enum {
   SMIN,
   UMIN,
   URECIP,
+  DIV_SCALE,
+  DIV_FMAS,
+  DIV_FIXUP,
+  TRIG_PREOP, // 1 ULP max error for f64
+
+  // RCP, RSQ - For f32, 1 ULP max error, no denormal handling.
+  //            For f64, max error 2^29 ULP, handles denormals.
+  RCP,
+  RSQ,
+  RSQ_LEGACY,
+  RSQ_CLAMPED,
   DOT4,
   BFE_U32, // Extract range of bits with zero extension to 32-bits.
   BFE_I32, // Extract range of bits with sign extension to 32-bits.
   BFI, // (src0 & src1) | (~src0 & src2)
   BFM, // Insert a range of bits into a 32-bit word.
+  BREV, // Reverse bits.
   MUL_U24,
   MUL_I24,
   MAD_U24,
@@ -203,6 +223,15 @@ enum {
   CVT_F32_UBYTE1,
   CVT_F32_UBYTE2,
   CVT_F32_UBYTE3,
+  /// This node is for VLIW targets and it is used to represent a vector
+  /// that is stored in consecutive registers with the same channel.
+  /// For example:
+  ///   |X  |Y|Z|W|
+  /// T0|v.x| | | |
+  /// T1|v.y| | | |
+  /// T2|v.z| | | |
+  /// T3|v.w| | | |
+  BUILD_VERTICAL_VECTOR,
   FIRST_MEM_OPCODE_NUMBER = ISD::FIRST_TARGET_MEMORY_OPCODE,
   STORE_MSKOR,
   LOAD_CONSTANT,

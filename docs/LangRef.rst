@@ -562,6 +562,8 @@ is zero. The address space qualifier must precede any other attributes.
 
 LLVM allows an explicit section to be specified for globals. If the
 target supports it, it will emit globals to the section specified.
+Additionally, the global can placed in a comdat if the target has the necessary
+support.
 
 By default, global initializers are optimized by assuming that global
 variables defined within the module are not modified from their
@@ -627,8 +629,9 @@ an optional ``unnamed_addr`` attribute, a return type, an optional
 :ref:`parameter attribute <paramattrs>` for the return type, a function
 name, a (possibly empty) argument list (each with optional :ref:`parameter
 attributes <paramattrs>`), optional :ref:`function attributes <fnattrs>`,
-an optional section, an optional alignment, an optional :ref:`garbage
-collector name <gc>`, an optional :ref:`prefix <prefixdata>`, an opening
+an optional section, an optional alignment,
+an optional :ref:`comdat <langref_comdats>`,
+an optional :ref:`garbage collector name <gc>`, an optional :ref:`prefix <prefixdata>`, an opening
 curly brace, a list of basic blocks, and a closing curly brace.
 
 LLVM function declarations consist of the "``declare``" keyword, an
@@ -658,6 +661,7 @@ predecessors, it also cannot have any :ref:`PHI nodes <i_phi>`.
 
 LLVM allows an explicit section to be specified for functions. If the
 target supports it, it will emit functions to the section specified.
+Additionally, the function can placed in a COMDAT.
 
 An explicit alignment may be specified for a function. If not present,
 or if the alignment is set to zero, the alignment of the function is set
@@ -673,8 +677,8 @@ Syntax::
     define [linkage] [visibility] [DLLStorageClass]
            [cconv] [ret attrs]
            <ResultType> @<FunctionName> ([argument list])
-           [unnamed_addr] [fn Attrs] [section "name"] [align N]
-           [gc] [prefix Constant] { ... }
+           [unnamed_addr] [fn Attrs] [section "name"] [comdat $<ComdatName>]
+           [align N] [gc] [prefix Constant] { ... }
 
 .. _langref_aliases:
 
@@ -715,6 +719,89 @@ some can only be checked when producing an object file:
 
 * No global value in the expression can be a declaration, since that
   would require a relocation, which is not possible.
+
+.. _langref_comdats:
+
+Comdats
+-------
+
+Comdat IR provides access to COFF and ELF object file COMDAT functionality.
+
+Comdats have a name which represents the COMDAT key.  All global objects which
+specify this key will only end up in the final object file if the linker chooses
+that key over some other key.  Aliases are placed in the same COMDAT that their
+aliasee computes to, if any.
+
+Comdats have a selection kind to provide input on how the linker should
+choose between keys in two different object files.
+
+Syntax::
+
+    $<Name> = comdat SelectionKind
+
+The selection kind must be one of the following:
+
+``any``
+    The linker may choose any COMDAT key, the choice is arbitrary.
+``exactmatch``
+    The linker may choose any COMDAT key but the sections must contain the
+    same data.
+``largest``
+    The linker will choose the section containing the largest COMDAT key.
+``noduplicates``
+    The linker requires that only section with this COMDAT key exist.
+``samesize``
+    The linker may choose any COMDAT key but the sections must contain the
+    same amount of data.
+
+Note that the Mach-O platform doesn't support COMDATs and ELF only supports
+``any`` as a selection kind.
+
+Here is an example of a COMDAT group where a function will only be selected if
+the COMDAT key's section is the largest:
+
+.. code-block:: llvm
+
+   $foo = comdat largest
+   @foo = global i32 2, comdat $foo
+
+   define void @bar() comdat $foo {
+     ret void
+   }
+
+In a COFF object file, this will create a COMDAT section with selection kind
+``IMAGE_COMDAT_SELECT_LARGEST`` containing the contents of the ``@foo`` symbol
+and another COMDAT section with selection kind
+``IMAGE_COMDAT_SELECT_ASSOCIATIVE`` which is associated with the first COMDAT
+section and contains the contents of the ``@baz`` symbol.
+
+There are some restrictions on the properties of the global object.
+It, or an alias to it, must have the same name as the COMDAT group when
+targeting COFF.
+The contents and size of this object may be used during link-time to determine
+which COMDAT groups get selected depending on the selection kind.
+Because the name of the object must match the name of the COMDAT group, the
+linkage of the global object must not be local; local symbols can get renamed
+if a collision occurs in the symbol table.
+
+The combined use of COMDATS and section attributes may yield surprising results.
+For example:
+
+.. code-block:: llvm
+
+   $foo = comdat any
+   $bar = comdat any
+   @g1 = global i32 42, section "sec", comdat $foo
+   @g2 = global i32 42, section "sec", comdat $bar
+
+From the object file perspective, this requires the creation of two sections
+with the same name.  This is necessary because both globals belong to different
+COMDAT groups and COMDATs, at the object file level, are represented by
+sections.
+
+Note that certain IR constructs like global variables and functions may create
+COMDATs in the object file in addition to any which are specified using COMDAT
+IR.  This arises, for example, when a global variable has linkonce_odr linkage.
 
 .. _namedmetadatastructure:
 
@@ -2749,11 +2836,12 @@ number representing the maximum relative error, for example:
 '``range``' Metadata
 ^^^^^^^^^^^^^^^^^^^^
 
-``range`` metadata may be attached only to loads of integer types. It
-expresses the possible ranges the loaded value is in. The ranges are
-represented with a flattened list of integers. The loaded value is known
-to be in the union of the ranges defined by each consecutive pair. Each
-pair has the following properties:
+``range`` metadata may be attached only to ``load``, ``call`` and ``invoke`` of
+integer types. It expresses the possible ranges the loaded value or the value
+returned by the called function at this call site is in. The ranges are
+represented with a flattened list of integers. The loaded value or the value
+returned is known to be in the union of the ranges defined by each consecutive
+pair. Each pair has the following properties:
 
 -  The type must match the type loaded by the instruction.
 -  The pair ``a,b`` represents the range ``[a,b)``.
@@ -2771,8 +2859,9 @@ Examples:
 
       %a = load i8* %x, align 1, !range !0 ; Can only be 0 or 1
       %b = load i8* %y, align 1, !range !1 ; Can only be 255 (-1), 0 or 1
-      %c = load i8* %z, align 1, !range !2 ; Can only be 0, 1, 3, 4 or 5
-      %d = load i8* %z, align 1, !range !3 ; Can only be -2, -1, 3, 4 or 5
+      %c = call i8 @foo(),       !range !2 ; Can only be 0, 1, 3, 4 or 5
+      %d = invoke i8 @bar() to label %cont
+             unwind label %lpad, !range !3 ; Can only be -2, -1, 3, 4 or 5
     ...
     !0 = metadata !{ i8 0, i8 2 }
     !1 = metadata !{ i8 255, i8 2 }
@@ -2802,7 +2891,7 @@ constructs:
 
 The loop identifier metadata can be used to specify additional per-loop
 metadata. Any operands after the first operand can be treated as user-defined
-metadata. For example the ``llvm.vectorizer.unroll`` metadata is understood
+metadata. For example the ``llvm.loop.vectorize.unroll`` metadata is understood
 by the loop vectorizer to indicate how many times to unroll the loop:
 
 .. code-block:: llvm
@@ -2810,7 +2899,7 @@ by the loop vectorizer to indicate how many times to unroll the loop:
       br i1 %exitcond, label %._crit_edge, label %.lr.ph, !llvm.loop !0
     ...
     !0 = metadata !{ metadata !0, metadata !1 }
-    !1 = metadata !{ metadata !"llvm.vectorizer.unroll", i32 2 }
+    !1 = metadata !{ metadata !"llvm.loop.vectorize.unroll", i32 2 }
 
 '``llvm.mem``'
 ^^^^^^^^^^^^^^^
@@ -2895,54 +2984,54 @@ the loop identifier metadata node directly:
    !1 = metadata !{ metadata !1 } ; an identifier for the inner loop
    !2 = metadata !{ metadata !2 } ; an identifier for the outer loop
 
-'``llvm.vectorizer``'
-^^^^^^^^^^^^^^^^^^^^^
+'``llvm.loop.vectorize``'
+^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Metadata prefixed with ``llvm.vectorizer`` is used to control per-loop
+Metadata prefixed with ``llvm.loop.vectorize`` is used to control per-loop
 vectorization parameters such as vectorization factor and unroll factor.
 
-``llvm.vectorizer`` metadata should be used in conjunction with ``llvm.loop``
-loop identification metadata.
+``llvm.loop.vectorize`` metadata should be used in conjunction with
+``llvm.loop`` loop identification metadata.
 
-'``llvm.vectorizer.unroll``' Metadata
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+'``llvm.loop.vectorize.unroll``' Metadata
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 This metadata instructs the loop vectorizer to unroll the specified
 loop exactly ``N`` times.
 
-The first operand is the string ``llvm.vectorizer.unroll`` and the second
+The first operand is the string ``llvm.loop.vectorize.unroll`` and the second
 operand is an integer specifying the unroll factor. For example:
 
 .. code-block:: llvm
 
-   !0 = metadata !{ metadata !"llvm.vectorizer.unroll", i32 4 }
+   !0 = metadata !{ metadata !"llvm.loop.vectorize.unroll", i32 4 }
 
-Note that setting ``llvm.vectorizer.unroll`` to 1 disables unrolling of the
-loop.
+Note that setting ``llvm.loop.vectorize.unroll`` to 1 disables
+unrolling of the loop.
 
-If ``llvm.vectorizer.unroll`` is set to 0 then the amount of unrolling will be
-determined automatically.
+If ``llvm.loop.vectorize.unroll`` is set to 0 then the amount of
+unrolling will be determined automatically.
 
-'``llvm.vectorizer.width``' Metadata
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+'``llvm.loop.vectorize.width``' Metadata
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 This metadata sets the target width of the vectorizer to ``N``. Without
 this metadata, the vectorizer will choose a width automatically.
 Regardless of this metadata, the vectorizer will only vectorize loops if
 it believes it is valid to do so.
 
-The first operand is the string ``llvm.vectorizer.width`` and the second
-operand is an integer specifying the width. For example:
+The first operand is the string ``llvm.loop.vectorize.width`` and the
+second operand is an integer specifying the width. For example:
 
 .. code-block:: llvm
 
-   !0 = metadata !{ metadata !"llvm.vectorizer.width", i32 4 }
+   !0 = metadata !{ metadata !"llvm.loop.vectorize.width", i32 4 }
 
-Note that setting ``llvm.vectorizer.width`` to 1 disables vectorization of the
-loop.
+Note that setting ``llvm.loop.vectorize.width`` to 1 disables
+vectorization of the loop.
 
-If ``llvm.vectorizer.width`` is set to 0 then the width will be determined
-automatically.
+If ``llvm.loop.vectorize.width`` is set to 0 then the width will be
+determined automatically.
 
 Module Flags Metadata
 =====================
@@ -3143,6 +3232,42 @@ assembly writer or object file emitter.
 Each individual option is required to be either a valid option for the target's
 linker, or an option that is reserved by the target specific assembly writer or
 object file emitter. No other aspect of these options is defined by the IR.
+
+C type width Module Flags Metadata
+----------------------------------
+
+The ARM backend emits a section into each generated object file describing the
+options that it was compiled with (in a compiler-independent way) to prevent
+linking incompatible objects, and to allow automatic library selection. Some
+of these options are not visible at the IR level, namely wchar_t width and enum
+width.
+
+To pass this information to the backend, these options are encoded in module
+flags metadata, using the following key-value pairs:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 30 70
+
+   * - Key
+     - Value
+
+   * - short_wchar
+     - * 0 --- sizeof(wchar_t) == 4
+       * 1 --- sizeof(wchar_t) == 2
+
+   * - short_enum
+     - * 0 --- Enums are at least as large as an ``int``.
+       * 1 --- Enums are stored in the smallest integer type which can
+         represent all of its values.
+
+For example, the following metadata section specifies that the module was
+compiled with a ``wchar_t`` width of 4 bytes, and the underlying type of an
+enum is the smallest type which can represent all of its values::
+
+    !llvm.module.flags = !{!0, !1}
+    !0 = metadata !{i32 1, metadata !"short_wchar", i32 1}
+    !1 = metadata !{i32 1, metadata !"short_enum", i32 0}
 
 .. _intrinsicglobalvariables:
 
@@ -6283,7 +6408,7 @@ This instruction requires several arguments:
       uses value of call or is void).
    -  Option ``-tailcallopt`` is enabled, or
       ``llvm::GuaranteedTailCallOpt`` is ``true``.
-   -  `Platform specific constraints are
+   -  `Platform-specific constraints are
       met. <CodeGenerator.html#tailcallopt>`_
 
 #. The optional "cconv" marker indicates which :ref:`calling

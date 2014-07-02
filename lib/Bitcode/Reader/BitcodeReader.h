@@ -26,6 +26,7 @@
 #include <vector>
 
 namespace llvm {
+  class Comdat;
   class MemoryBuffer;
   class LLVMContext;
 
@@ -125,8 +126,7 @@ public:
 class BitcodeReader : public GVMaterializer {
   LLVMContext &Context;
   Module *TheModule;
-  MemoryBuffer *Buffer;
-  bool BufferOwned;
+  std::unique_ptr<MemoryBuffer> Buffer;
   std::unique_ptr<BitstreamReader> StreamFile;
   BitstreamCursor Stream;
   DataStreamer *LazyStreamer;
@@ -136,6 +136,7 @@ class BitcodeReader : public GVMaterializer {
   std::vector<Type*> TypeList;
   BitcodeReaderValueList ValueList;
   BitcodeReaderMDValueList MDValueList;
+  std::vector<Comdat *> ComdatList;
   SmallVector<Instruction *, 64> InstructionList;
   SmallVector<SmallVector<uint64_t, 64>, 64> UseListRecords;
 
@@ -224,28 +225,20 @@ public:
   }
 
   explicit BitcodeReader(MemoryBuffer *buffer, LLVMContext &C)
-    : Context(C), TheModule(nullptr), Buffer(buffer), BufferOwned(false),
-      LazyStreamer(nullptr), NextUnreadBit(0), SeenValueSymbolTable(false),
-      ValueList(C), MDValueList(C),
-      SeenFirstFunctionBody(false), UseRelativeIDs(false) {
-  }
+      : Context(C), TheModule(nullptr), Buffer(buffer), LazyStreamer(nullptr),
+        NextUnreadBit(0), SeenValueSymbolTable(false), ValueList(C),
+        MDValueList(C), SeenFirstFunctionBody(false), UseRelativeIDs(false) {}
   explicit BitcodeReader(DataStreamer *streamer, LLVMContext &C)
-    : Context(C), TheModule(nullptr), Buffer(nullptr), BufferOwned(false),
-      LazyStreamer(streamer), NextUnreadBit(0), SeenValueSymbolTable(false),
-      ValueList(C), MDValueList(C),
-      SeenFirstFunctionBody(false), UseRelativeIDs(false) {
-  }
-  ~BitcodeReader() {
-    FreeState();
-  }
+      : Context(C), TheModule(nullptr), Buffer(nullptr), LazyStreamer(streamer),
+        NextUnreadBit(0), SeenValueSymbolTable(false), ValueList(C),
+        MDValueList(C), SeenFirstFunctionBody(false), UseRelativeIDs(false) {}
+  ~BitcodeReader() { FreeState(); }
 
   void materializeForwardReferencedFunctions();
 
   void FreeState();
 
-  /// setBufferOwned - If this is true, the reader will destroy the MemoryBuffer
-  /// when the reader is destroyed.
-  void setBufferOwned(bool Owned) { BufferOwned = Owned; }
+  void releaseBuffer() override;
 
   bool isMaterializable(const GlobalValue *GV) const override;
   bool isDematerializable(const GlobalValue *GV) const override;

@@ -68,10 +68,9 @@ getTargetNodeName(unsigned Opcode) const
   }
 }
 
-XCoreTargetLowering::XCoreTargetLowering(XCoreTargetMachine &XTM)
-  : TargetLowering(XTM, new XCoreTargetObjectFile()),
-    TM(XTM),
-    Subtarget(*XTM.getSubtargetImpl()) {
+XCoreTargetLowering::XCoreTargetLowering(const TargetMachine &TM)
+    : TargetLowering(TM, new XCoreTargetObjectFile()), TM(TM),
+      Subtarget(TM.getSubtarget<XCoreSubtarget>()) {
 
   // Set up the register classes.
   addRegisterClass(MVT::i32, &XCore::GRRegsRegClass);
@@ -492,7 +491,7 @@ LowerLOAD(SDValue Op, SelectionDAG &DAG) const {
   CLI.setDebugLoc(DL).setChain(Chain)
     .setCallee(CallingConv::C, IntPtrTy,
                DAG.getExternalSymbol("__misaligned_load", getPointerTy()),
-               &Args, 0);
+               std::move(Args), 0);
 
   std::pair<SDValue, SDValue> CallResult = LowerCallTo(CLI);
   SDValue Ops[] = { CallResult.first, CallResult.second };
@@ -552,7 +551,7 @@ LowerSTORE(SDValue Op, SelectionDAG &DAG) const
   CLI.setDebugLoc(dl).setChain(Chain)
     .setCallee(CallingConv::C, Type::getVoidTy(*DAG.getContext()),
                DAG.getExternalSymbol("__misaligned_store", getPointerTy()),
-               &Args, 0);
+               std::move(Args), 0);
 
   std::pair<SDValue, SDValue> CallResult = LowerCallTo(CLI);
   return CallResult.second;

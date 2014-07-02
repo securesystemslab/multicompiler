@@ -124,24 +124,7 @@ bool LTOCodeGenerator::addModule(LTOModule* mod, std::string& errMsg) {
 }
 
 void LTOCodeGenerator::setTargetOptions(TargetOptions options) {
-  Options.LessPreciseFPMADOption = options.LessPreciseFPMADOption;
-  Options.NoFramePointerElim = options.NoFramePointerElim;
-  Options.AllowFPOpFusion = options.AllowFPOpFusion;
-  Options.UnsafeFPMath = options.UnsafeFPMath;
-  Options.NoInfsFPMath = options.NoInfsFPMath;
-  Options.NoNaNsFPMath = options.NoNaNsFPMath;
-  Options.HonorSignDependentRoundingFPMathOption =
-    options.HonorSignDependentRoundingFPMathOption;
-  Options.UseSoftFloat = options.UseSoftFloat;
-  Options.FloatABIType = options.FloatABIType;
-  Options.NoZerosInBSS = options.NoZerosInBSS;
-  Options.GuaranteedTailCallOpt = options.GuaranteedTailCallOpt;
-  Options.DisableTailCalls = options.DisableTailCalls;
-  Options.StackAlignmentOverride = options.StackAlignmentOverride;
-  Options.TrapFuncName = options.TrapFuncName;
-  Options.PositionIndependentExecutable = options.PositionIndependentExecutable;
-  Options.UseInitArray = options.UseInitArray;
-  Options.NOPInsertion = options.NOPInsertion;
+  Options = options;
 }
 
 void LTOCodeGenerator::setDebugInfo(lto_debug_model debug) {

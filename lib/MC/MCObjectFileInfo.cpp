@@ -18,9 +18,29 @@
 #include "llvm/MC/MCSectionMachO.h"
 using namespace llvm;
 
+static bool useCompactUnwind(const Triple &T) {
+  // Only on darwin.
+  if (!T.isOSDarwin())
+    return false;
+
+  // aarch64 always has it.
+  if (T.getArch() == Triple::arm64 || T.getArch() == Triple::aarch64)
+    return true;
+
+  // Use it on newer version of OS X.
+  if (T.isMacOSX() && !T.isMacOSXVersionLT(10, 6))
+    return true;
+
+  // And the iOS simulator.
+  if (T.isiOS() &&
+      (T.getArch() == Triple::x86_64 || T.getArch() == Triple::x86))
+    return true;
+
+  return false;
+}
+
 void MCObjectFileInfo::InitMachOMCObjectFileInfo(Triple T) {
   // MachO
-  IsFunctionEHFrameSymbolPrivate = false;
   SupportsWeakOmittedEHFrame = false;
 
   if (T.isOSDarwin() &&
@@ -151,13 +171,10 @@ void MCObjectFileInfo::InitMachOMCObjectFileInfo(Triple T) {
 
   COFFDebugSymbolsSection = nullptr;
 
-  if ((T.isMacOSX() && !T.isMacOSXVersionLT(10, 6)) ||
-      (T.isOSDarwin() &&
-       (T.getArch() == Triple::arm64 || T.getArch() == Triple::aarch64))) {
+  if (useCompactUnwind(T)) {
     CompactUnwindSection =
-      Ctx->getMachOSection("__LD", "__compact_unwind",
-                           MachO::S_ATTR_DEBUG,
-                           SectionKind::getReadOnly());
+        Ctx->getMachOSection("__LD", "__compact_unwind", MachO::S_ATTR_DEBUG,
+                             SectionKind::getReadOnly());
 
     if (T.getArch() == Triple::x86_64 || T.getArch() == Triple::x86)
       CompactUnwindDwarfEHFrameOnly = 0x04000000;
@@ -632,11 +649,16 @@ void MCObjectFileInfo::InitCOFFMCObjectFileInfo(Triple T) {
   // though it contains relocatable pointers.  In PIC mode, this is probably a
   // big runtime hit for C++ apps.  Either the contents of the LSDA need to be
   // adjusted or this should be a data section.
-  LSDASection =
-    Ctx->getCOFFSection(".gcc_except_table",
-                        COFF::IMAGE_SCN_CNT_INITIALIZED_DATA |
-                        COFF::IMAGE_SCN_MEM_READ,
-                        SectionKind::getReadOnly());
+  assert(T.isOSWindows() && "Windows is the only supported COFF target");
+  if (T.getArch() == Triple::x86_64) {
+    // On Windows 64 with SEH, the LSDA is emitted into the .xdata section
+    LSDASection = 0;
+  } else {
+    LSDASection = Ctx->getCOFFSection(".gcc_except_table",
+                                      COFF::IMAGE_SCN_CNT_INITIALIZED_DATA |
+                                          COFF::IMAGE_SCN_MEM_READ,
+                                      SectionKind::getReadOnly());
+  }
 
   // Debug info.
   COFFDebugSymbolsSection =
@@ -774,7 +796,7 @@ void MCObjectFileInfo::InitCOFFMCObjectFileInfo(Triple T) {
                         SectionKind::getDataRel());
 }
 
-void MCObjectFileInfo::InitMCObjectFileInfo(StringRef TT, Reloc::Model relocm,
+void MCObjectFileInfo::InitMCObjectFileInfo(StringRef T, Reloc::Model relocm,
                                             CodeModel::Model cm,
                                             MCContext &ctx) {
   RelocM = relocm;
@@ -784,7 +806,6 @@ void MCObjectFileInfo::InitMCObjectFileInfo(StringRef TT, Reloc::Model relocm,
   // Common.
   CommDirectiveSupportsAlignment = true;
   SupportsWeakOmittedEHFrame = true;
-  IsFunctionEHFrameSymbolPrivate = true;
   SupportsCompactUnwindWithoutEHFrame = false;
 
   PersonalityEncoding = LSDAEncoding = FDECFIEncoding = TTypeEncoding =
@@ -799,8 +820,9 @@ void MCObjectFileInfo::InitMCObjectFileInfo(StringRef TT, Reloc::Model relocm,
   DwarfAccelNamespaceSection = nullptr; // Used only by selected targets.
   DwarfAccelTypesSection = nullptr;     // Used only by selected targets.
 
-  Triple T(TT);
-  Triple::ArchType Arch = T.getArch();
+  TT = Triple(T);
+
+  Triple::ArchType Arch = TT.getArch();
   // FIXME: Checking for Arch here to filter out bogus triples such as
   // cellspu-apple-darwin. Perhaps we should fix in Triple?
   if ((Arch == Triple::x86 || Arch == Triple::x86_64 ||
@@ -808,17 +830,17 @@ void MCObjectFileInfo::InitMCObjectFileInfo(StringRef TT, Reloc::Model relocm,
        Arch == Triple::arm64 || Arch == Triple::aarch64 ||
        Arch == Triple::ppc || Arch == Triple::ppc64 ||
        Arch == Triple::UnknownArch) &&
-      (T.isOSDarwin() || T.isOSBinFormatMachO())) {
+      (TT.isOSDarwin() || TT.isOSBinFormatMachO())) {
     Env = IsMachO;
-    InitMachOMCObjectFileInfo(T);
+    InitMachOMCObjectFileInfo(TT);
   } else if ((Arch == Triple::x86 || Arch == Triple::x86_64 ||
               Arch == Triple::arm || Arch == Triple::thumb) &&
-             (T.isOSWindows() && T.getObjectFormat() == Triple::COFF)) {
+             (TT.isOSWindows() && TT.getObjectFormat() == Triple::COFF)) {
     Env = IsCOFF;
-    InitCOFFMCObjectFileInfo(T);
+    InitCOFFMCObjectFileInfo(TT);
   } else {
     Env = IsELF;
-    InitELFMCObjectFileInfo(T);
+    InitELFMCObjectFileInfo(TT);
   }
 }
 

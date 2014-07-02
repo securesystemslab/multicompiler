@@ -37,12 +37,12 @@ class VectorLegalizer {
   const TargetLowering &TLI;
   bool Changed; // Keep track of whether anything changed
 
-  /// LegalizedNodes - For nodes that are of legal width, and that have more
-  /// than one use, this map indicates what regularized operand to use.  This
-  /// allows us to avoid legalizing the same thing more than once.
+  /// For nodes that are of legal width, and that have more than one use, this
+  /// map indicates what regularized operand to use.  This allows us to avoid
+  /// legalizing the same thing more than once.
   SmallDenseMap<SDValue, SDValue, 64> LegalizedNodes;
 
-  // Adds a node to the translation cache
+  /// \brief Adds a node to the translation cache.
   void AddLegalizedOperand(SDValue From, SDValue To) {
     LegalizedNodes.insert(std::make_pair(From, To));
     // If someone requests legalization of the new node, return itself.
@@ -50,41 +50,61 @@ class VectorLegalizer {
       LegalizedNodes.insert(std::make_pair(To, To));
   }
 
-  // Legalizes the given node
+  /// \brief Legalizes the given node.
   SDValue LegalizeOp(SDValue Op);
-  // Assuming the node is legal, "legalize" the results
+
+  /// \brief Assuming the node is legal, "legalize" the results.
   SDValue TranslateLegalizeResults(SDValue Op, SDValue Result);
-  // Implements unrolling a VSETCC.
+
+  /// \brief Implements unrolling a VSETCC.
   SDValue UnrollVSETCC(SDValue Op);
-  // Implements expansion for FNEG; falls back to UnrollVectorOp if FSUB
-  // isn't legal.
-  // Implements expansion for UINT_TO_FLOAT; falls back to UnrollVectorOp if
-  // SINT_TO_FLOAT and SHR on vectors isn't legal.
+
+  /// \brief Implement expand-based legalization of vector operations.
+  ///
+  /// This is just a high-level routine to dispatch to specific code paths for
+  /// operations to legalize them.
+  SDValue Expand(SDValue Op);
+
+  /// \brief Implements expansion for FNEG; falls back to UnrollVectorOp if
+  /// FSUB isn't legal.
+  ///
+  /// Implements expansion for UINT_TO_FLOAT; falls back to UnrollVectorOp if
+  /// SINT_TO_FLOAT and SHR on vectors isn't legal.
   SDValue ExpandUINT_TO_FLOAT(SDValue Op);
-  // Implement expansion for SIGN_EXTEND_INREG using SRL and SRA.
+
+  /// \brief Implement expansion for SIGN_EXTEND_INREG using SRL and SRA.
   SDValue ExpandSEXTINREG(SDValue Op);
-  // Expand bswap of vectors into a shuffle if legal.
+
+  /// \brief Expand bswap of vectors into a shuffle if legal.
   SDValue ExpandBSWAP(SDValue Op);
-  // Implement vselect in terms of XOR, AND, OR when blend is not supported
-  // by the target.
+
+  /// \brief Implement vselect in terms of XOR, AND, OR when blend is not
+  /// supported by the target.
   SDValue ExpandVSELECT(SDValue Op);
   SDValue ExpandSELECT(SDValue Op);
   SDValue ExpandLoad(SDValue Op);
   SDValue ExpandStore(SDValue Op);
   SDValue ExpandFNEG(SDValue Op);
-  // Implements vector promotion; this is essentially just bitcasting the
-  // operands to a different type and bitcasting the result back to the
-  // original type.
-  SDValue PromoteVectorOp(SDValue Op);
-  // Implements [SU]INT_TO_FP vector promotion; this is a [zs]ext of the input
-  // operand to the next size up.
-  SDValue PromoteVectorOpINT_TO_FP(SDValue Op);
-  // Implements FP_TO_[SU]INT vector promotion of the result type; it is
-  // promoted to the next size up integer type.  The result is then truncated
-  // back to the original type.
-  SDValue PromoteVectorOpFP_TO_INT(SDValue Op, bool isSigned);
 
-  public:
+  /// \brief Implements vector promotion.
+  ///
+  /// This is essentially just bitcasting the operands to a different type and
+  /// bitcasting the result back to the original type.
+  SDValue Promote(SDValue Op);
+
+  /// \brief Implements [SU]INT_TO_FP vector promotion.
+  ///
+  /// This is a [zs]ext of the input operand to the next size up.
+  SDValue PromoteINT_TO_FP(SDValue Op);
+
+  /// \brief Implements FP_TO_[SU]INT vector promotion of the result type.
+  ///
+  /// It is promoted to the next size up integer type.  The result is then
+  /// truncated back to the original type.
+  SDValue PromoteFP_TO_INT(SDValue Op, bool isSigned);
+
+public:
+  /// \brief Begin legalizer the vector operations in the DAG.
   bool Run();
   VectorLegalizer(SelectionDAG& dag) :
       DAG(dag), TLI(dag.getTargetLoweringInfo()), Changed(false) {}
@@ -267,27 +287,11 @@ SDValue VectorLegalizer::LegalizeOp(SDValue Op) {
 
   switch (TLI.getOperationAction(Node->getOpcode(), QueryType)) {
   case TargetLowering::Promote:
-    switch (Op.getOpcode()) {
-    default:
-      // "Promote" the operation by bitcasting
-      Result = PromoteVectorOp(Op);
-      Changed = true;
-      break;
-    case ISD::SINT_TO_FP:
-    case ISD::UINT_TO_FP:
-      // "Promote" the operation by extending the operand.
-      Result = PromoteVectorOpINT_TO_FP(Op);
-      Changed = true;
-      break;
-    case ISD::FP_TO_UINT:
-    case ISD::FP_TO_SINT:
-      // Promote the operation by extending the operand.
-      Result = PromoteVectorOpFP_TO_INT(Op, Op->getOpcode() == ISD::FP_TO_SINT);
-      Changed = true;
-      break;
-    }
+    Result = Promote(Op);
+    Changed = true;
     break;
-  case TargetLowering::Legal: break;
+  case TargetLowering::Legal:
+    break;
   case TargetLowering::Custom: {
     SDValue Tmp1 = TLI.LowerOperation(Op, DAG);
     if (Tmp1.getNode()) {
@@ -297,23 +301,7 @@ SDValue VectorLegalizer::LegalizeOp(SDValue Op) {
     // FALL THROUGH
   }
   case TargetLowering::Expand:
-    if (Node->getOpcode() == ISD::SIGN_EXTEND_INREG)
-      Result = ExpandSEXTINREG(Op);
-    else if (Node->getOpcode() == ISD::BSWAP)
-      Result = ExpandBSWAP(Op);
-    else if (Node->getOpcode() == ISD::VSELECT)
-      Result = ExpandVSELECT(Op);
-    else if (Node->getOpcode() == ISD::SELECT)
-      Result = ExpandSELECT(Op);
-    else if (Node->getOpcode() == ISD::UINT_TO_FP)
-      Result = ExpandUINT_TO_FLOAT(Op);
-    else if (Node->getOpcode() == ISD::FNEG)
-      Result = ExpandFNEG(Op);
-    else if (Node->getOpcode() == ISD::SETCC)
-      Result = UnrollVSETCC(Op);
-    else
-      Result = DAG.UnrollVectorOp(Op.getNode());
-    break;
+    Result = Expand(Op);
   }
 
   // Make sure that the generated code is itself legal.
@@ -328,10 +316,23 @@ SDValue VectorLegalizer::LegalizeOp(SDValue Op) {
   return Result;
 }
 
-SDValue VectorLegalizer::PromoteVectorOp(SDValue Op) {
-  // Vector "promotion" is basically just bitcasting and doing the operation
-  // in a different type.  For example, x86 promotes ISD::AND on v2i32 to
-  // v1i64.
+SDValue VectorLegalizer::Promote(SDValue Op) {
+  // For a few operations there is a specific concept for promotion based on
+  // the operand's type.
+  switch (Op.getOpcode()) {
+  case ISD::SINT_TO_FP:
+  case ISD::UINT_TO_FP:
+    // "Promote" the operation by extending the operand.
+    return PromoteINT_TO_FP(Op);
+  case ISD::FP_TO_UINT:
+  case ISD::FP_TO_SINT:
+    // Promote the operation by extending the operand.
+    return PromoteFP_TO_INT(Op, Op->getOpcode() == ISD::FP_TO_SINT);
+  }
+
+  // The rest of the time, vector "promotion" is basically just bitcasting and
+  // doing the operation in a different type.  For example, x86 promotes
+  // ISD::AND on v2i32 to v1i64.
   MVT VT = Op.getSimpleValueType();
   assert(Op.getNode()->getNumValues() == 1 &&
          "Can't promote a vector with multiple results!");
@@ -351,7 +352,7 @@ SDValue VectorLegalizer::PromoteVectorOp(SDValue Op) {
   return DAG.getNode(ISD::BITCAST, dl, VT, Op);
 }
 
-SDValue VectorLegalizer::PromoteVectorOpINT_TO_FP(SDValue Op) {
+SDValue VectorLegalizer::PromoteINT_TO_FP(SDValue Op) {
   // INT_TO_FP operations may require the input operand be promoted even
   // when the type is otherwise legal.
   EVT VT = Op.getOperand(0).getValueType();
@@ -387,7 +388,7 @@ SDValue VectorLegalizer::PromoteVectorOpINT_TO_FP(SDValue Op) {
 // elements and then truncate the result.  This is different from the default
 // PromoteVector which uses bitcast to promote thus assumning that the
 // promoted vector type has the same overall size.
-SDValue VectorLegalizer::PromoteVectorOpFP_TO_INT(SDValue Op, bool isSigned) {
+SDValue VectorLegalizer::PromoteFP_TO_INT(SDValue Op, bool isSigned) {
   assert(Op.getNode()->getNumValues() == 1 &&
          "Can't promote a vector with multiple results!");
   EVT VT = Op.getValueType();
@@ -607,6 +608,27 @@ SDValue VectorLegalizer::ExpandStore(SDValue Op) {
   SDValue TF =  DAG.getNode(ISD::TokenFactor, dl, MVT::Other, Stores);
   AddLegalizedOperand(Op, TF);
   return TF;
+}
+
+SDValue VectorLegalizer::Expand(SDValue Op) {
+  switch (Op->getOpcode()) {
+  case ISD::SIGN_EXTEND_INREG:
+    return ExpandSEXTINREG(Op);
+  case ISD::BSWAP:
+    return ExpandBSWAP(Op);
+  case ISD::VSELECT:
+    return ExpandVSELECT(Op);
+  case ISD::SELECT:
+    return ExpandSELECT(Op);
+  case ISD::UINT_TO_FP:
+    return ExpandUINT_TO_FLOAT(Op);
+  case ISD::FNEG:
+    return ExpandFNEG(Op);
+  case ISD::SETCC:
+    return UnrollVSETCC(Op);
+  default:
+    return DAG.UnrollVectorOp(Op.getNode());
+  }
 }
 
 SDValue VectorLegalizer::ExpandSELECT(SDValue Op) {

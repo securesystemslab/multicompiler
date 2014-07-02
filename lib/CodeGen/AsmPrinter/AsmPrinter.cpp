@@ -47,7 +47,6 @@
 #include "llvm/Target/TargetInstrInfo.h"
 #include "llvm/Target/TargetLowering.h"
 #include "llvm/Target/TargetLoweringObjectFile.h"
-#include "llvm/Target/TargetOptions.h"
 #include "llvm/Target/TargetRegisterInfo.h"
 #include "llvm/Target/TargetSubtargetInfo.h"
 #include "llvm/Transforms/Utils/GlobalStatus.h"
@@ -244,7 +243,7 @@ bool AsmPrinter::doInitialization(Module &M) {
   case ExceptionHandling::ARM:
     ES = new ARMException(this);
     break;
-  case ExceptionHandling::Win64:
+  case ExceptionHandling::WinEH:
     ES = new Win64Exception(this);
     break;
   }
@@ -710,13 +709,12 @@ AsmPrinter::CFIMoveType AsmPrinter::needsCFIMoves() {
 }
 
 bool AsmPrinter::needsSEHMoves() {
-  return MAI->getExceptionHandlingType() == ExceptionHandling::Win64 &&
+  return MAI->getExceptionHandlingType() == ExceptionHandling::WinEH &&
     MF->getFunction()->needsUnwindTableEntry();
 }
 
 void AsmPrinter::emitCFIInstruction(const MachineInstr &MI) {
-  ExceptionHandling::ExceptionsType ExceptionHandlingType =
-      MAI->getExceptionHandlingType();
+  ExceptionHandling ExceptionHandlingType = MAI->getExceptionHandlingType();
   if (ExceptionHandlingType != ExceptionHandling::DwarfCFI &&
       ExceptionHandlingType != ExceptionHandling::ARM)
     return;
@@ -1867,8 +1865,10 @@ static void emitGlobalConstantFP(const ConstantFP *CFP, AsmPrinter &AP) {
     SmallString<8> StrVal;
     CFP->getValueAPF().toString(StrVal);
 
-    assert(CFP->getType() != nullptr && "Expecting non-null Type");
-    CFP->getType()->print(AP.OutStreamer.GetCommentOS());
+    if (CFP->getType())
+      CFP->getType()->print(AP.OutStreamer.GetCommentOS());
+    else
+      AP.OutStreamer.GetCommentOS() << "Printing <null> Type";
     AP.OutStreamer.GetCommentOS() << ' ' << StrVal << '\n';
   }
 

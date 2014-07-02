@@ -1,5 +1,6 @@
 // RUN: llvm-mc < %s -triple=x86_64-apple-macosx10.7 -filetype=obj | llvm-readobj -r | FileCheck %s
 // RUN: llvm-mc < %s -triple=x86_64-apple-macosx10.6 -filetype=obj | llvm-readobj -r | FileCheck %s
+// RUN: llvm-mc < %s -triple=x86_64-apple-ios7.0.0 -filetype=obj | llvm-readobj -r | FileCheck %s
 // RUN: llvm-mc < %s -triple=x86_64-apple-macosx10.5 -filetype=obj | llvm-readobj -r | FileCheck --check-prefix=OLD64 %s
 // RUN: llvm-mc < %s -triple=i686-apple-macosx10.6 -filetype=obj | llvm-readobj -r | FileCheck %s
 // RUN: llvm-mc < %s -triple=i686-apple-macosx10.5 -filetype=obj | llvm-readobj -r | FileCheck --check-prefix=OLD32 %s
@@ -23,7 +24,7 @@ _bar:
 
 // OLD64:      Relocations [
 // OLD64-NEXT:   Section __eh_frame {
-// OLD64-NEXT:     0x20 0 3 1 X86_64_RELOC_SUBTRACTOR 0 _bar.eh
+// OLD64-NEXT:     0x20 0 3 0 X86_64_RELOC_SUBTRACTOR 0
 // OLD64-NEXT:     0x20 0 3 1 X86_64_RELOC_UNSIGNED 0 _bar
 // OLD64-NEXT:   }
 // OLD64-NEXT: ]

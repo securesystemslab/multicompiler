@@ -17,70 +17,45 @@
 #include "llvm/Support/RandomNumberGenerator.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
-#include "llvm/Support/ManagedStatic.h"
-#include "llvm/Support/ThreadLocal.h"
 
 using namespace llvm;
 
-// Initialized once, then only read by threads, so no locking required.
-static std::string SaltData;
-
+// Tracking BUG: 19665
+// http://llvm.org/bugs/show_bug.cgi?id=19665
+//
 // Do not change to cl::opt<uint64_t> since this silently breaks argument parsing.
 static cl::opt<unsigned long long>
-RandomSeed("rng-seed", cl::value_desc("seed"),
-           cl::desc("Seed for the random number generator"), cl::init(0));
+Seed("rng-seed", cl::value_desc("seed"),
+     cl::desc("Seed for the random number generator"), cl::init(0));
 
-static cl::opt<std::string, true>
-SaltDataOpt("salt-data",
-            cl::desc("Salt data for the RNG (testing only, should be set "
-                     "by command line options"),
-            cl::Hidden, cl::location(SaltData));
+RandomNumberGenerator::RandomNumberGenerator(StringRef Salt) {
+  DEBUG(
+    if (Seed == 0)
+      errs() << "Warning! Using unseeded random number generator.\n"
+  );
 
-static ManagedStatic<sys::ThreadLocal<const RandomNumberGenerator> > Instance;
+  // Combine seed and salt using std::seed_seq.
+  // Entropy: Seed-low, Seed-high, Salt...
+  std::vector<uint32_t> Data;
+  Data.reserve(2 + Salt.size()/4 + 1);
+  Data.push_back(Seed);
+  Data.push_back(Seed >> 32);
 
-void RandomNumberGenerator::SetSalt(const StringRef &Salt) {
-  SaltData = Salt;
-}
+  uint32_t Pack = 0;
+  for (size_t I = 0; I < Salt.size(); ++I) {
+    Pack <<= 8;
+    Pack += Salt[I];
 
-RandomNumberGenerator *RandomNumberGenerator::Get() {
-  RandomNumberGenerator *RNG =
-      const_cast<RandomNumberGenerator *>(Instance->get());
-
-  if (RNG == nullptr) {
-    RNG = new RandomNumberGenerator;
-    Instance->set(RNG);
+    if (I%4 == 3)
+      Data.push_back(Pack);
   }
+  Data.push_back(Pack);
 
-  return RNG;
+  std::seed_seq SeedSeq(Data.begin(), Data.end());
+  Generator.seed(SeedSeq);
 }
 
-// Note that every new RNG will produce the same stream of
-// pseudo-random numbers, unless SetSalt is called again.
-RandomNumberGenerator::RandomNumberGenerator() {
-  if (RandomSeed == 0 && SaltData.empty())
-    DEBUG(errs()
-          << "Warning! Using unseeded and unsalted random number generator\n");
-
-  Seed(SaltData, RandomSeed);
-}
-
-uint64_t RandomNumberGenerator::Random(uint64_t Max) {
+uint64_t RandomNumberGenerator::next(uint64_t Max) {
   std::uniform_int_distribution<uint64_t> distribution(0, Max - 1);
-  return distribution(generator);
-}
-
-void RandomNumberGenerator::Seed(StringRef Salt, uint64_t Seed) {
-  DEBUG(dbgs() << "Re-Seeding RNG from salt and seed\n");
-  DEBUG(dbgs() << "Salt: " << Salt << "\n");
-  DEBUG(dbgs() << "Seed: " << Seed << "\n");
-
-  // Sequence: Seed-low, Seed-high, Salt...
-  size_t SeedSize = Salt.size() + 2;
-  uint32_t Seeds[SeedSize];
-  Seeds[0] = Seed;
-  Seeds[1] = Seed >> 32;
-  std::copy_n(Salt.begin(), Salt.size(), Seeds + 2);
-
-  std::seed_seq SeedSeq(Seeds, Seeds + SeedSize);
-  generator.seed(SeedSeq);
+  return distribution(Generator);
 }

@@ -41,9 +41,13 @@ enum class EncodingType {
 };
 }
 
-namespace ExceptionHandling {
-enum ExceptionsType { None, DwarfCFI, SjLj, ARM, Win64 };
-}
+enum class ExceptionHandling {
+  None,     /// No exception support
+  DwarfCFI, /// DWARF-like instruction based exceptions
+  SjLj,     /// setjmp/longjmp based exceptions
+  ARM,      /// ARM EHABI
+  WinEH,    /// Windows Exception Handling
+};
 
 namespace LCOMM {
 enum LCOMMType { NoAlignment, ByteAlignment, Log2Alignment };
@@ -116,8 +120,8 @@ protected:
   /// This is appended to emitted labels.  Defaults to ":"
   const char *LabelSuffix;
 
-  /// This is appended to emitted labels.  Defaults to ":"
-  const char *DebugLabelSuffix;
+  // Print the EH begin symbol with an assignment. Defaults to false.
+  bool UseAssignmentForEHBegin;
 
   /// This prefix is used for globals like constant pool entries that are
   /// completely private to the .s file and should not have names in the .o
@@ -299,7 +303,7 @@ protected:
   bool SupportsDebugInformation;
 
   /// Exception handling format for the target.  Defaults to None.
-  ExceptionHandling::ExceptionsType ExceptionsType;
+  ExceptionHandling ExceptionsType;
 
   /// Windows exception handling data (.pdata) encoding.  Defaults to Invalid.
   WinEH::EncodingType WinEHEncodingType;
@@ -415,7 +419,7 @@ public:
   const char *getCommentString() const { return CommentString; }
   const char *getLabelSuffix() const { return LabelSuffix; }
 
-  const char *getDebugLabelSuffix() const { return DebugLabelSuffix; }
+  bool useAssignmentForEHBegin() const { return UseAssignmentForEHBegin; }
   const char *getPrivateGlobalPrefix() const { return PrivateGlobalPrefix; }
   bool hasLinkerPrivateGlobalPrefix() const {
     return LinkerPrivateGlobalPrefix[0] != '\0';
@@ -472,16 +476,13 @@ public:
   bool doesSupportExceptionHandling() const {
     return ExceptionsType != ExceptionHandling::None;
   }
-  ExceptionHandling::ExceptionsType getExceptionHandlingType() const {
-    return ExceptionsType;
-  }
-  WinEH::EncodingType getWinEHEncodingType() const {
-    return WinEHEncodingType;
-  }
+  ExceptionHandling getExceptionHandlingType() const { return ExceptionsType; }
+  WinEH::EncodingType getWinEHEncodingType() const { return WinEHEncodingType; }
   bool isExceptionHandlingDwarf() const {
     return (ExceptionsType == ExceptionHandling::DwarfCFI ||
             ExceptionsType == ExceptionHandling::ARM ||
-            ExceptionsType == ExceptionHandling::Win64);
+            // Windows handler data still uses DWARF LSDA encoding.
+            ExceptionsType == ExceptionHandling::WinEH);
   }
   bool doesDwarfUseRelocationsAcrossSections() const {
     return DwarfUsesRelocationsAcrossSections;
