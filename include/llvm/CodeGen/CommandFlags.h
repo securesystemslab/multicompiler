@@ -184,11 +184,6 @@ UseInitArray("use-init-array",
              cl::desc("Use .init_array instead of .ctors."),
              cl::init(false));
 
-cl::opt<bool>
-NOPInsertion("nop-insertion",
-             cl::desc("Randomly add NOPs."),
-             cl::init(false));
-
 cl::opt<std::string> StopAfter("stop-after",
                             cl::desc("Stop compilation after a specific pass"),
                             cl::value_desc("pass-name"),
@@ -244,7 +239,6 @@ static inline TargetOptions InitTargetOptionsFromCodeGenFlags() {
   Options.TrapFuncName = TrapFuncName;
   Options.PositionIndependentExecutable = EnablePIE;
   Options.UseInitArray = UseInitArray;
-  Options.NOPInsertion = NOPInsertion;
   Options.DataSections = DataSections;
   Options.FunctionSections = FunctionSections;
 

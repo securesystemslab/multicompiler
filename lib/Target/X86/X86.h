@@ -54,10 +54,6 @@ FunctionPass *createX86FloatingPointStackifierPass();
 /// AVX and SSE.
 FunctionPass *createX86IssueVZeroUpperPass();
 
-/// createNOPInsertionPass - This pass adds NOPs at random between
-/// instructions.
-FunctionPass *createNOPInsertionPass(bool is64Bit);
-
 /// createX86CodeEmitterPass - Return a pass that emits the collected X86 code
 /// to the specified MCE object.
 FunctionPass *createX86JITCodeEmitterPass(X86TargetMachine &TM,

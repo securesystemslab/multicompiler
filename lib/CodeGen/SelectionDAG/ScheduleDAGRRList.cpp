@@ -27,7 +27,6 @@
 #include "llvm/IR/InlineAsm.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
-#include "llvm/Support/RandomNumberGenerator.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Target/TargetInstrInfo.h"
 #include "llvm/Target/TargetLowering.h"
@@ -104,17 +103,6 @@ static cl::opt<int> MaxReorderWindow(
 static cl::opt<unsigned> AvgIPC(
   "sched-avg-ipc", cl::Hidden, cl::init(1),
   cl::desc("Average inst/cycle whan no target itinerary exists."));
-
-static cl::opt<bool> RandomizeSchedule(
-  "sched-randomize",
-  cl::desc("Enable randomization of scheduling"),
-  cl::init(false));
-
-static cl::opt<unsigned> SchedRandPercentage(
-  "sched-randomize-percentage",
-  cl::desc("Percentage of instructions where schedule is randomized"),
-  cl::init(50));
-
 
 namespace {
 //===----------------------------------------------------------------------===//
@@ -1771,17 +1759,6 @@ template<class SF>
 class RegReductionPriorityQueue : public RegReductionPQBase {
   SF Picker;
 
-  RandomNumberGenerator *RNG;
-
-  SUnit *popRandom(std::vector<SUnit*> &Q) {
-    size_t randIndex = (*RNG)() % Q.size(); // FIXME: not uniform
-    SUnit *V = Q[randIndex];
-    if (randIndex < Q.size() - 1)
-      std::swap(Q[randIndex], Q.back());
-    Q.pop_back();
-    return V;
-  }
-
 public:
   RegReductionPriorityQueue(MachineFunction &mf,
                             bool tracksrp,
@@ -1791,10 +1768,7 @@ public:
                             const TargetLowering *tli)
     : RegReductionPQBase(mf, SF::HasReadyFilter, tracksrp, srcorder,
                          tii, tri, tli),
-      Picker(this), RNG(nullptr) {
-    if (RandomizeSchedule)
-      RNG = new RandomNumberGenerator(*MF.getFunction()->getParent(), "RegReductionPriorityQueue");
-  }
+      Picker(this) {}
 
   bool isBottomUp() const override { return SF::IsBottomUp; }
 
@@ -1805,17 +1779,7 @@ public:
   SUnit *pop() override {
     if (Queue.empty()) return nullptr;
 
-    SUnit *V;
-    if (RandomizeSchedule) {
-      unsigned int Roll = (*RNG)() % 100; // FIXME: not uniform
-      if (Roll < SchedRandPercentage) {
-        V = popRandom(Queue);
-      } else {
-        V = popFromQueue(Queue, Picker, scheduleDAG);
-      }
-    } else {
-      V = popFromQueue(Queue, Picker, scheduleDAG);
-    }
+    SUnit *V = popFromQueue(Queue, Picker, scheduleDAG);
     V->NodeQueueId = 0;
     return V;
   }

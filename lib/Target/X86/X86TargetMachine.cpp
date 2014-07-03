@@ -175,11 +175,6 @@ bool X86PassConfig::addPreEmitPass() {
     ShouldPrint = true;
   }
 
-  if (TM->Options.NOPInsertion) {
-    addPass(createNOPInsertionPass(getX86Subtarget().is64Bit()));
-    ShouldPrint = true;
-  }
-
   return ShouldPrint;
 }
 
