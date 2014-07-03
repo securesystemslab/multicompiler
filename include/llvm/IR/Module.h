@@ -206,8 +206,6 @@ private:
   std::string ModuleID;           ///< Human readable identifier for the module
   std::string TargetTriple;       ///< Platform target triple Module compiled on
   void *NamedMDSymTab;            ///< NamedMDNode names.
-  // Allow lazy initialization in const method.
-  mutable RandomNumberGenerator *RNG; ///< The random number generator for this module.
 
   // We need to keep the string because the C API expects us to own the string
   // representation.
@@ -255,11 +253,6 @@ public:
   /// Get any module-scope inline assembly blocks.
   /// @returns a string containing the module-scope inline assembly blocks.
   const std::string &getModuleInlineAsm() const { return GlobalScopeAsm; }
-
-  /// Get the RandomNumberGenerator for this module. The RNG can be
-  /// seeded via -rng-seed=<uint64> and is salted with the ModuleID.
-  /// The returned RNG should not be shared across threads.
-  RandomNumberGenerator &getRNG() const;
 
 /// @}
 /// @name Module Level Mutators

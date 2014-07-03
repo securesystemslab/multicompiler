@@ -24,9 +24,7 @@
 #include "llvm/CodeGen/ScheduleHazardRecognizer.h"
 #include "llvm/CodeGen/SelectionDAGISel.h"
 #include "llvm/IR/DataLayout.h"
-#include "llvm/IR/Function.h"
 #include "llvm/IR/InlineAsm.h"
-#include "llvm/IR/Module.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/RandomNumberGenerator.h"
@@ -1773,9 +1771,10 @@ template<class SF>
 class RegReductionPriorityQueue : public RegReductionPQBase {
   SF Picker;
 
+  RandomNumberGenerator *RNG;
+
   SUnit *popRandom(std::vector<SUnit*> &Q) {
-    RandomNumberGenerator &randGen = MF.getFunction()->getParent()->getRNG();
-    size_t randIndex = randGen.next(Q.size());
+    size_t randIndex = (*RNG)() % Q.size(); // FIXME: not uniform
     SUnit *V = Q[randIndex];
     if (randIndex < Q.size() - 1)
       std::swap(Q[randIndex], Q.back());
@@ -1792,7 +1791,10 @@ public:
                             const TargetLowering *tli)
     : RegReductionPQBase(mf, SF::HasReadyFilter, tracksrp, srcorder,
                          tii, tri, tli),
-      Picker(this) {}
+      Picker(this), RNG(nullptr) {
+    if (RandomizeSchedule)
+      RNG = new RandomNumberGenerator(*MF.getFunction()->getParent(), "RegReductionPriorityQueue");
+  }
 
   bool isBottomUp() const override { return SF::IsBottomUp; }
 
@@ -1805,8 +1807,7 @@ public:
 
     SUnit *V;
     if (RandomizeSchedule) {
-      RandomNumberGenerator &randGen = MF.getFunction()->getParent()->getRNG();
-      unsigned int Roll = randGen.next(100);
+      unsigned int Roll = (*RNG)() % 100; // FIXME: not uniform
       if (Roll < SchedRandPercentage) {
         V = popRandom(Queue);
       } else {
