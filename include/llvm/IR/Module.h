@@ -258,6 +258,11 @@ public:
   /// RNG can be seeded via -rng-seed=<uint64> and is salted with the
   /// ModuleID and the provided pass salt. The returned RNG should not
   /// be shared across threads or passes.
+  ///
+  /// A unique RNG per pass ensures a reproducible random stream even
+  /// when other randomness consuming passes are added or removed. In
+  /// addition, the random stream will be reproducible across LLVM
+  /// versions when the pass does not change.
   RandomNumberGenerator *createRNG(StringRef PassSalt) const;
 
 /// @}

@@ -30,11 +30,8 @@ public:
   /// Seeds and salts the underlying RNG engine. The seed can be set
   /// on the command line via -rng-seed=<uint64>.
   ///
-  /// The RNG is salted with the Module ID of M and a salt (usually
-  /// the pass name) provided by the client pass. Each pass which
-  /// needs randomness should instantiate its own pass, using a unique
-  /// seed. This ensures a reproducible random stream even when other
-  /// randomness consuming passes are added or removed.
+  /// This constructor should not be used directly. Instead use
+  /// Module::createRNG to create a new RNG salted with the Module ID.
   RandomNumberGenerator(StringRef Salt);
 
   /// Returns a random number in the range [0, Max).
@@ -43,7 +40,7 @@ public:
 private:
   // 64-bit Mersenne Twister by Matsumoto and Nishimura, 2000
   // http://en.cppreference.com/w/cpp/numeric/random/mersenne_twister_engine
-  // This RNG should be deterministicly portable across C++11
+  // This RNG is deterministically portable across C++11
   // implementations.
   std::mt19937_64 Generator;
 
