@@ -16,7 +16,6 @@
 #define DEBUG_TYPE "rng"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
-#include "llvm/Support/Path.h"
 #include "llvm/Support/RandomNumberGenerator.h"
 
 using namespace llvm;
@@ -29,37 +28,24 @@ static cl::opt<unsigned long long>
 Seed("rng-seed", cl::value_desc("seed"),
      cl::desc("Seed for the random number generator"), cl::init(0));
 
-RandomNumberGenerator::RandomNumberGenerator(const Module &M, StringRef PassSalt) {
+RandomNumberGenerator::RandomNumberGenerator(StringRef Salt) {
   DEBUG(
     if (Seed == 0)
       dbgs() << "Warning! Using unseeded random number generator.\n"
   );
 
-  // This RNG is guaranteed to produce the same random stream only
-  // when the Module ID and thus the input filename is the same. This
-  // might be problematic if the input filename extension changes
-  // (e.g. from .c to .bc or .ll).
-  //
-  // We could store this salt in NamedMetadata, but this would make
-  // the parameter non-const. This would unfortunately make this
-  // interface unusable by any Machine passes, since they only have a
-  // const reference to their IR Module. Alternatively we can always
-  // store salt metadata from the Module constructor.
-  StringRef ModuleSalt = sys::path::filename(M.getModuleIdentifier());
-
   // Combine seed and salts using std::seed_seq.
-  // Data: Seed-low, Seed-high, ModuleSalt, PassSalt
+  // Data: Seed-low, Seed-high, Salt
   // Note: std::seed_seq can only store 32-bit values, even though we
-  // are using a 64-bit RNG. This isn't a problem since the Mersenn
+  // are using a 64-bit RNG. This isn't a problem since the Mersenne
   // twister constructor copies these correctly into its initial state
   std::vector<uint32_t> Data;
-  Data.reserve(2 + ModuleSalt.size() + PassSalt.size());
+  Data.reserve(2 + Salt.size());
   Data.push_back(Seed);
   Data.push_back(Seed >> 32);
 
   std::vector<uint32_t>::iterator I = Data.end();
-  I = std::copy(ModuleSalt.begin(), ModuleSalt.end(), I);
-  I = std::copy(PassSalt.begin(), PassSalt.end(), I);
+  I = std::copy(Salt.begin(), Salt.end(), I);
 
   std::seed_seq SeedSeq(Data.begin(), Data.end());
   Generator.seed(SeedSeq);

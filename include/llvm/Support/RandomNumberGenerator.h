@@ -17,7 +17,6 @@
 #define LLVM_SUPPORT_RANDOMNUMBERGENERATOR_H_
 
 #include "llvm/ADT/StringRef.h"
-#include "llvm/IR/Module.h"
 #include "llvm/Support/Compiler.h"
 #include "llvm/Support/DataTypes.h" // Needed for uint64_t on Windows.
 #include <random>
@@ -36,7 +35,7 @@ public:
   /// needs randomness should instantiate its own pass, using a unique
   /// seed. This ensures a reproducible random stream even when other
   /// randomness consuming passes are added or removed.
-  RandomNumberGenerator(const Module &M, StringRef PassSalt);
+  RandomNumberGenerator(StringRef Salt);
 
   /// Returns a random number in the range [0, Max).
   uint_fast64_t operator()();
