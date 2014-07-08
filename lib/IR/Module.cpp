@@ -24,6 +24,7 @@
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/LeakDetector.h"
 #include "llvm/Support/Dwarf.h"
+#include "llvm/Support/Path.h"
 #include "llvm/Support/RandomNumberGenerator.h"
 #include <algorithm>
 #include <cstdarg>
@@ -61,6 +62,25 @@ Module::~Module() {
   delete ValSymTab;
   delete static_cast<StringMap<NamedMDNode *> *>(NamedMDSymTab);
 }
+
+RandomNumberGenerator *Module::createRNG(StringRef PassSalt) const {
+  SmallString<32> Salt(PassSalt);
+
+  // This RNG is guaranteed to produce the same random stream only
+  // when the Module ID and thus the input filename is the same. This
+  // might be problematic if the input filename extension changes
+  // (e.g. from .c to .bc or .ll).
+  //
+  // We could store this salt in NamedMetadata, but this would make
+  // the parameter non-const. This would unfortunately make this
+  // interface unusable by any Machine passes, since they only have a
+  // const reference to their IR Module. Alternatively we can always
+  // store salt metadata from the Module constructor.
+  Salt += sys::path::filename(getModuleIdentifier());
+
+  return new RandomNumberGenerator(Salt);
+}
+
 
 /// getNamedValue - Return the first global value in the module with
 /// the specified name, of arbitrary type.  This method returns null
