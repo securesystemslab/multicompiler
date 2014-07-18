@@ -2,11 +2,19 @@ LLVM Multicompiler Patches
 ==========================
 
 This repo is based off the official LLVM git mirror:
-[http://llvm.org/git/llvm.git]. We have added passes which randomize the
+http://llvm.org/git/llvm.git. We have added passes which randomize the
 implementation details of the code to combat code-reuse attacks.
 
-Options:
---------
+Installation
+------------
+
+Follow the LLVM instructions from
+http://llvm.org/docs/GettingStarted.html#git-mirror but substitute this repo for
+the llvm.git repo and https://github.com/securesystemslab/multicompiler-clang
+for the clang.git repo.
+
+Options
+-------
 
 ### General Options
 
