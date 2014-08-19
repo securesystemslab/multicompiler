@@ -38,14 +38,13 @@ RandomNumberGenerator::RandomNumberGenerator(StringRef Salt) {
   // Data: Seed-low, Seed-high, Salt
   // Note: std::seed_seq can only store 32-bit values, even though we
   // are using a 64-bit RNG. This isn't a problem since the Mersenne
-  // twister constructor copies these correctly into its initial state
+  // twister constructor copies these correctly into its initial state.
   std::vector<uint32_t> Data;
   Data.reserve(2 + Salt.size());
   Data.push_back(Seed);
   Data.push_back(Seed >> 32);
 
-  std::vector<uint32_t>::iterator I = Data.end();
-  I = std::copy(Salt.begin(), Salt.end(), I);
+  std::copy(Salt.begin(), Salt.end(), Data.end());
 
   std::seed_seq SeedSeq(Data.begin(), Data.end());
   Generator.seed(SeedSeq);

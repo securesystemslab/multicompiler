@@ -24,20 +24,23 @@
 namespace llvm {
 
 /// A random number generator.
-/// Instances of this class should not be shared across threads.
+///
+/// Instances of this class should not be shared across threads. The
+/// seed should be set by passing the -rng-seed=<uint64> option. Use
+/// Module::createRNG to create a new RNG instance for use with that
+/// module.
 class RandomNumberGenerator {
 public:
-  /// Seeds and salts the underlying RNG engine. The seed can be set
-  /// on the command line via -rng-seed=<uint64>.
+  /// Returns a random number in the range [0, Max).
+  uint_fast64_t operator()();
+
+private:
+  /// Seeds and salts the underlying RNG engine.
   ///
   /// This constructor should not be used directly. Instead use
   /// Module::createRNG to create a new RNG salted with the Module ID.
   RandomNumberGenerator(StringRef Salt);
 
-  /// Returns a random number in the range [0, Max).
-  uint_fast64_t operator()();
-
-private:
   // 64-bit Mersenne Twister by Matsumoto and Nishimura, 2000
   // http://en.cppreference.com/w/cpp/numeric/random/mersenne_twister_engine
   // This RNG is deterministically portable across C++11
@@ -49,6 +52,8 @@ private:
       LLVM_DELETED_FUNCTION;
   RandomNumberGenerator &
   operator=(const RandomNumberGenerator &other) LLVM_DELETED_FUNCTION;
+
+  friend class Module;
 };
 }
 
