@@ -63,8 +63,8 @@ Module::~Module() {
   delete static_cast<StringMap<NamedMDNode *> *>(NamedMDSymTab);
 }
 
-RandomNumberGenerator *Module::createRNG(StringRef PassSalt) const {
-  SmallString<32> Salt(PassSalt);
+RandomNumberGenerator *Module::createRNG(const Pass* P) const {
+  SmallString<32> Salt(P->getPassName());
 
   // This RNG is guaranteed to produce the same random stream only
   // when the Module ID and thus the input filename is the same. This
