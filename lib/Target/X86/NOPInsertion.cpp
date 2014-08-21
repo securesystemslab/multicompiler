@@ -20,6 +20,8 @@
 #include "llvm/CodeGen/MachineModuleInfo.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/IR/BasicBlock.h"
+#include "llvm/IR/Function.h"
+#include "llvm/IR/Module.h"
 #include "llvm/Support/Allocator.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/RandomNumberGenerator.h"
@@ -86,7 +88,7 @@ static const unsigned nopRegs[MAX_NOPS][2] = {
 bool NOPInsertionPass::runOnMachineFunction(MachineFunction &Fn) {
   const TargetInstrInfo *TII = Fn.getTarget().getInstrInfo();
 
-  RandomNumberGenerator RNG(*Fn.getFunction()->getParent(), "NOPInsertion");
+  RandomNumberGenerator *RNG = Fn.getFunction()->getParent()->createRNG(this);
   for (MachineFunction::iterator BB = Fn.begin(), E = Fn.end(); BB != E; ++BB) {
     MachineBasicBlock::iterator FirstTerm = BB->getFirstTerminator();
     // Insert NOPs before instruction.
@@ -98,11 +100,11 @@ bool NOPInsertionPass::runOnMachineFunction(MachineFunction &Fn) {
       }
       // Insert random number of NOP-like instructions.
       for (unsigned i = 0; i < MaxNOPsPerInstruction; i++) {
-        unsigned Roll = RNG() % 100; // FIXME: not uniform
+        unsigned Roll = (*RNG)() % 100; // FIXME: not uniform
         if (Roll >= NOPInsertionPercentage)
           continue;
 
-        unsigned NOPCode = RNG() % MAX_NOPS; // FIXME: not uniform
+        unsigned NOPCode = (*RNG)() % MAX_NOPS; // FIXME: not uniform
 
         MachineInstr *NewMI = NULL;
         unsigned reg = nopRegs[NOPCode][is64Bit];
