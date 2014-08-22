@@ -24,12 +24,9 @@
 #include "llvm/CodeGen/ScheduleHazardRecognizer.h"
 #include "llvm/CodeGen/SelectionDAGISel.h"
 #include "llvm/IR/DataLayout.h"
-#include "llvm/IR/Function.h"
-#include "llvm/IR/Module.h"
 #include "llvm/IR/InlineAsm.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
-#include "llvm/Support/RandomNumberGenerator.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Target/TargetInstrInfo.h"
 #include "llvm/Target/TargetLowering.h"
@@ -106,17 +103,6 @@ static cl::opt<int> MaxReorderWindow(
 static cl::opt<unsigned> AvgIPC(
   "sched-avg-ipc", cl::Hidden, cl::init(1),
   cl::desc("Average inst/cycle whan no target itinerary exists."));
-
-static cl::opt<bool> RandomizeSchedule(
-  "sched-randomize",
-  cl::desc("Enable randomization of scheduling"),
-  cl::init(false));
-
-static cl::opt<unsigned> SchedRandPercentage(
-  "sched-randomize-percentage",
-  cl::desc("Percentage of instructions where schedule is randomized"),
-  cl::init(50));
-
 
 namespace {
 //===----------------------------------------------------------------------===//
@@ -1773,29 +1759,16 @@ template<class SF>
 class RegReductionPriorityQueue : public RegReductionPQBase {
   SF Picker;
 
-  RandomNumberGenerator *RNG;
-
-  SUnit *popRandom(std::vector<SUnit*> &Q) {
-    size_t randIndex = (*RNG)() % Q.size(); // FIXME: not uniform
-    SUnit *V = Q[randIndex];
-    if (randIndex < Q.size() - 1)
-      std::swap(Q[randIndex], Q.back());
-    Q.pop_back();
-    return V;
-  }
-
 public:
   RegReductionPriorityQueue(MachineFunction &mf,
                             bool tracksrp,
                             bool srcorder,
                             const TargetInstrInfo *tii,
                             const TargetRegisterInfo *tri,
-                            const TargetLowering *tli,
-                            RandomNumberGenerator *RNG)
+                            const TargetLowering *tli)
     : RegReductionPQBase(mf, SF::HasReadyFilter, tracksrp, srcorder,
                          tii, tri, tli),
-      Picker(this), RNG(RNG) {
-  }
+      Picker(this) {}
 
   bool isBottomUp() const override { return SF::IsBottomUp; }
 
@@ -1806,17 +1779,7 @@ public:
   SUnit *pop() override {
     if (Queue.empty()) return nullptr;
 
-    SUnit *V;
-    if (RandomizeSchedule) {
-      unsigned int Roll = (*RNG)() % 100; // FIXME: not uniform
-      if (Roll < SchedRandPercentage) {
-        V = popRandom(Queue);
-      } else {
-        V = popFromQueue(Queue, Picker, scheduleDAG);
-      }
-    } else {
-      V = popFromQueue(Queue, Picker, scheduleDAG);
-    }
+    SUnit *V = popFromQueue(Queue, Picker, scheduleDAG);
     V->NodeQueueId = 0;
     return V;
   }
@@ -3018,13 +2981,8 @@ llvm::createBURRListDAGScheduler(SelectionDAGISel *IS,
   const TargetInstrInfo *TII = TM.getInstrInfo();
   const TargetRegisterInfo *TRI = TM.getRegisterInfo();
 
-  // We can't create an RNG unless we have access to a Pass*
-  RandomNumberGenerator *RNG = nullptr;
-  if (RandomizeSchedule)
-    RNG = IS->MF->getFunction()->getParent()->createRNG(IS);
-
   BURegReductionPriorityQueue *PQ =
-    new BURegReductionPriorityQueue(*IS->MF, false, false, TII, TRI, nullptr, RNG);
+    new BURegReductionPriorityQueue(*IS->MF, false, false, TII, TRI, nullptr);
   ScheduleDAGRRList *SD = new ScheduleDAGRRList(*IS->MF, false, PQ, OptLevel);
   PQ->setScheduleDAG(SD);
   return SD;
@@ -3037,13 +2995,8 @@ llvm::createSourceListDAGScheduler(SelectionDAGISel *IS,
   const TargetInstrInfo *TII = TM.getInstrInfo();
   const TargetRegisterInfo *TRI = TM.getRegisterInfo();
 
-  // We can't create an RNG unless we have access to a Pass*
-  RandomNumberGenerator *RNG = nullptr;
-  if (RandomizeSchedule)
-    RNG = IS->MF->getFunction()->getParent()->createRNG(IS);
-
   SrcRegReductionPriorityQueue *PQ =
-    new SrcRegReductionPriorityQueue(*IS->MF, false, true, TII, TRI, nullptr, RNG);
+    new SrcRegReductionPriorityQueue(*IS->MF, false, true, TII, TRI, nullptr);
   ScheduleDAGRRList *SD = new ScheduleDAGRRList(*IS->MF, false, PQ, OptLevel);
   PQ->setScheduleDAG(SD);
   return SD;
@@ -3057,13 +3010,8 @@ llvm::createHybridListDAGScheduler(SelectionDAGISel *IS,
   const TargetRegisterInfo *TRI = TM.getRegisterInfo();
   const TargetLowering *TLI = IS->getTargetLowering();
 
-  // We can't create an RNG unless we have access to a Pass*
-  RandomNumberGenerator *RNG = nullptr;
-  if (RandomizeSchedule)
-    RNG = IS->MF->getFunction()->getParent()->createRNG(IS);
-
   HybridBURRPriorityQueue *PQ =
-    new HybridBURRPriorityQueue(*IS->MF, true, false, TII, TRI, TLI, RNG);
+    new HybridBURRPriorityQueue(*IS->MF, true, false, TII, TRI, TLI);
 
   ScheduleDAGRRList *SD = new ScheduleDAGRRList(*IS->MF, true, PQ, OptLevel);
   PQ->setScheduleDAG(SD);
@@ -3078,13 +3026,8 @@ llvm::createILPListDAGScheduler(SelectionDAGISel *IS,
   const TargetRegisterInfo *TRI = TM.getRegisterInfo();
   const TargetLowering *TLI = IS->getTargetLowering();
 
-  // We can't create an RNG unless we have access to a Pass*
-  RandomNumberGenerator *RNG = nullptr;
-  if (RandomizeSchedule)
-    RNG = IS->MF->getFunction()->getParent()->createRNG(IS);
-
   ILPBURRPriorityQueue *PQ =
-    new ILPBURRPriorityQueue(*IS->MF, true, false, TII, TRI, TLI, RNG);
+    new ILPBURRPriorityQueue(*IS->MF, true, false, TII, TRI, TLI);
   ScheduleDAGRRList *SD = new ScheduleDAGRRList(*IS->MF, true, PQ, OptLevel);
   PQ->setScheduleDAG(SD);
   return SD;
