@@ -1,8 +1,8 @@
-; RUN: llc < %s -rng-seed=5 -nop-insertion -nop-insertion-percentage=10 \
+; RUN: llc < %s -mtriple=x86_64-linux -rng-seed=5 -nop-insertion -nop-insertion-percentage=10 \
 ; RUN:     | FileCheck %s --check-prefix=PERCENT10
-; RUN: llc < %s -rng-seed=5 -nop-insertion -nop-insertion-percentage=50 \
+; RUN: llc < %s -mtriple=x86_64-linux -rng-seed=5 -nop-insertion -nop-insertion-percentage=50 \
 ; RUN:     | FileCheck %s --check-prefix=PERCENT50
-; RUN: llc < %s -rng-seed=5 -nop-insertion -nop-insertion-percentage=100 \
+; RUN: llc < %s -mtriple=x86_64-linux -rng-seed=5 -nop-insertion -nop-insertion-percentage=100 \
 ; RUN:     | FileCheck %s --check-prefix=PERCENT100
 
 ; This test case tests NOP insertion at varying percentage levels.
@@ -26,22 +26,22 @@ entry:
 ; PERCENT10: leaq   (%rsi), %rsi
 
 ; PERCENT50: movq   %rbp, %rbp
+; PERCENT50: nop
 ; PERCENT50: leaq   (%rsi), %rsi
+; PERCENT50: leaq   (%rdi), %rdi
 ; PERCENT50: movq   %rbp, %rbp
-; PERCENT50: leaq   (%rdi), %rdi
 ; PERCENT50: movq   %rsp, %rsp
-; PERCENT50: leaq   (%rsi), %rsi
-; PERCENT50: leaq   (%rdi), %rdi
 
 ; PERCENT100: leaq  (%rdi), %rdi
-; PERCENT100: movq  %rbp, %rbp
-; PERCENT100: leaq  (%rsi), %rsi
-; PERCENT100: movq  %rbp, %rbp
 ; PERCENT100: leaq  (%rdi), %rdi
 ; PERCENT100: movq  %rsp, %rsp
+; PERCENT100: movq  %rsp, %rsp
+; PERCENT100: leaq  (%rdi), %rdi
 ; PERCENT100: leaq  (%rsi), %rsi
+; PERCENT100: leaq  (%rdi), %rdi
+; PERCENT100: movq  %rbp, %rbp
+; PERCENT100: movq  %rsp, %rsp
 ; PERCENT100: leaq  (%rsi), %rsi
 ; PERCENT100: nop
 ; PERCENT100: leaq  (%rsi), %rsi
-; PERCENT100: movq  %rsp, %rsp
-; PERCENT100: movq  %rbp, %rbp
+
