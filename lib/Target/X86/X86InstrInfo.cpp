@@ -34,6 +34,7 @@
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
+#include "llvm/Support/RandomNumberGenerator.h"
 #include "llvm/Target/TargetOptions.h"
 #include <limits>
 
@@ -5291,6 +5292,56 @@ void X86InstrInfo::setExecutionDomain(MachineInstr *MI, unsigned Domain) const {
   }
   assert(table && "Cannot change domain");
   MI->setDesc(get(table[Domain-1]));
+}
+
+/// insertNoop - Insert a noop into the instruction stream at the specified
+/// point.
+void X86InstrInfo::insertNoop(MachineBasicBlock &MBB,
+                              MachineBasicBlock::iterator MI) const {
+  DebugLoc DL;
+  BuildMI(MBB, MI, DL, get(X86::NOOP));
+}
+
+/// insertNoop - Insert a randomly chosen type of noop into the instruction
+/// stream at the specified point to introduce fine-grained diversity.
+void X86InstrInfo::insertNoop(MachineBasicBlock &MBB,
+                              MachineBasicBlock::iterator MI,
+                              RandomNumberGenerator *RNG) const {
+  enum { NOP,
+         MOV_BP, MOV_SP,
+         LEA_SI, LEA_DI,
+         MAX_NOPS };
+
+  static const unsigned NopRegs[MAX_NOPS][2] = {
+    { 0, 0 },
+    { X86::EBP, X86::RBP },
+    { X86::ESP, X86::RSP },
+    { X86::ESI, X86::RSI },
+    { X86::EDI, X86::RDI },
+  };
+
+  unsigned Type = (*RNG)() % MAX_NOPS;
+
+  DebugLoc DL;
+  bool is64Bit = Subtarget.is64Bit();
+  unsigned Reg = NopRegs[Type][is64Bit];
+
+  switch (Type) {
+  case NOP:
+    BuildMI(MBB, MI, DL, get(X86::NOOP));
+    break;
+  case MOV_BP:
+  case MOV_SP:
+    copyPhysReg(MBB, MI, DL, Reg, Reg, false);
+    break;
+  case LEA_SI:
+  case LEA_DI: {
+    unsigned opc = is64Bit ? X86::LEA64r : X86::LEA32r;
+    addRegOffset(BuildMI(MBB, MI, DL, get(opc), Reg),
+                 Reg, false, 0);
+    break;
+  }
+  }
 }
 
 /// getNoopForMachoTarget - Return the noop instruction to use for a noop.

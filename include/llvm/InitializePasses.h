@@ -199,6 +199,7 @@ void initializeMetaRenamerPass(PassRegistry&);
 void initializeMergeFunctionsPass(PassRegistry&);
 void initializeModuleDebugInfoPrinterPass(PassRegistry&);
 void initializeNoAAPass(PassRegistry&);
+void initializeNOPInsertionPass(PassRegistry&);
 void initializeObjCARCAliasAnalysisPass(PassRegistry&);
 void initializeObjCARCAPElimPass(PassRegistry&);
 void initializeObjCARCExpandPass(PassRegistry&);

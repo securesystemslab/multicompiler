@@ -69,6 +69,7 @@ add_llvm_library(LLVMCodeGen
   MachineSink.cpp
   MachineTraceMetrics.cpp
   MachineVerifier.cpp
+  NOPInsertion.cpp
   OcamlGC.cpp
   OptimizePHIs.cpp
   PHIElimination.cpp

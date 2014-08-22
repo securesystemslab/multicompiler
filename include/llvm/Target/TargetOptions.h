@@ -165,7 +165,7 @@ namespace llvm {
     /// if the relocation model is anything other than PIC.
     unsigned PositionIndependentExecutable : 1;
 
-    /// Attempt to insert NOPs
+    /// Randomly insert noop instructions to create fine-grained diversity
     unsigned NOPInsertion : 1;
 
     /// UseInitArray - Use .init_array instead of .ctors for static

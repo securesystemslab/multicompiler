@@ -186,7 +186,7 @@ UseInitArray("use-init-array",
 
 cl::opt<bool>
 NOPInsertion("nop-insertion",
-             cl::desc("Randomly add NOPs."),
+             cl::desc("Randomly add noop instructions to create fine-grained diversity."),
              cl::init(false));
 
 cl::opt<std::string> StopAfter("stop-after",
@@ -243,8 +243,8 @@ static inline TargetOptions InitTargetOptionsFromCodeGenFlags() {
   Options.StackAlignmentOverride = OverrideStackAlignment;
   Options.TrapFuncName = TrapFuncName;
   Options.PositionIndependentExecutable = EnablePIE;
-  Options.UseInitArray = UseInitArray;
   Options.NOPInsertion = NOPInsertion;
+  Options.UseInitArray = UseInitArray;
   Options.DataSections = DataSections;
   Options.FunctionSections = FunctionSections;
 

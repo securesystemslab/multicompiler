@@ -1,4 +1,4 @@
-//===- NOPInsertion.cpp - Insert NOPs between instructions ----------------===//
+//===- NOPInsertion.cpp - NOP Insertion -----------------------------------===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -7,18 +7,17 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// This file contains the NOPInsertion pass.
+// This pass adds fine-grained diversity by displacing code using randomly
+// placed (optionally target supplied) NOP instructions.
 //
 //===----------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "nop-insertion"
-#include "X86InstrBuilder.h"
-#include "X86InstrInfo.h"
+#include "llvm/CodeGen/NOPInsertion.h"
 #include "llvm/ADT/Statistic.h"
-#include "llvm/CodeGen/MachineFunctionPass.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineModuleInfo.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
+#include "llvm/CodeGen/Passes.h"
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Module.h"
@@ -26,8 +25,9 @@
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/RandomNumberGenerator.h"
 #include "llvm/Target/TargetInstrInfo.h"
-
 using namespace llvm;
+
+#define DEBUG_TYPE "nop-insertion"
 
 static cl::opt<unsigned>
 NOPInsertionPercentage(
@@ -45,47 +45,26 @@ MaxNOPsPerInstruction(
 STATISTIC(InsertedNOPs,
           "Total number of noop type instructions inserted for diversity");
 
-namespace {
-class NOPInsertionPass : public MachineFunctionPass {
+char NOPInsertion::ID = 0;
+char &llvm::NOPInsertionID = NOPInsertion::ID;
+INITIALIZE_PASS(NOPInsertion, "nop-insertion",
+                "NOP Insertion for fine-grained code randomization", false,
+                false)
 
-  static char ID;
+NOPInsertion::NOPInsertion() : MachineFunctionPass(ID) {
+  initializeNOPInsertionPass(*PassRegistry::getPassRegistry());
 
-  bool is64Bit;
-
-public:
-  NOPInsertionPass(bool is64Bit_) :
-      MachineFunctionPass(ID), is64Bit(is64Bit_) {
-  }
-
-  virtual bool runOnMachineFunction(MachineFunction &MF);
-
-  virtual const char *getPassName() const {
-    return "NOP insertion pass";
-  }
-
-  virtual void getAnalysisUsage(AnalysisUsage &AU) const {
-    AU.setPreservesCFG();
-    MachineFunctionPass::getAnalysisUsage(AU);
-  }
-};
+  // clamp percentage to 100
+  if (NOPInsertionPercentage > 100)
+    NOPInsertionPercentage = 100;
 }
 
-char NOPInsertionPass::ID = 0;
+void NOPInsertion::getAnalysisUsage(AnalysisUsage &AU) const {
+  AU.setPreservesCFG();
+  MachineFunctionPass::getAnalysisUsage(AU);
+}
 
-enum { NOP,
-       MOV_EBP, MOV_ESP,
-       LEA_ESI, LEA_EDI,
-       MAX_NOPS };
-
-static const unsigned nopRegs[MAX_NOPS][2] = {
-    { 0, 0 },
-    { X86::EBP, X86::RBP },
-    { X86::ESP, X86::RSP },
-    { X86::ESI, X86::RSI },
-    { X86::EDI, X86::RDI },
-};
-
-bool NOPInsertionPass::runOnMachineFunction(MachineFunction &Fn) {
+bool NOPInsertion::runOnMachineFunction(MachineFunction &Fn) {
   const TargetInstrInfo *TII = Fn.getTarget().getInstrInfo();
 
   RandomNumberGenerator *RNG = Fn.getFunction()->getParent()->createRNG(this);
@@ -98,41 +77,18 @@ bool NOPInsertionPass::runOnMachineFunction(MachineFunction &Fn) {
         I = NextI;
         continue;
       }
+
       // Insert random number of NOP-like instructions.
       for (unsigned i = 0; i < MaxNOPsPerInstruction; i++) {
         unsigned Roll = (*RNG)() % 100; // FIXME: not uniform
         if (Roll >= NOPInsertionPercentage)
           continue;
 
-        unsigned NOPCode = (*RNG)() % MAX_NOPS; // FIXME: not uniform
+        TII->insertNoop(*BB, I, RNG);
 
-        MachineInstr *NewMI = NULL;
-        unsigned reg = nopRegs[NOPCode][is64Bit];
-        switch (NOPCode) {
-        case NOP:
-          NewMI = BuildMI(*BB, I, I->getDebugLoc(), TII->get(X86::NOOP));
-          break;
-        case MOV_EBP:
-        case MOV_ESP: {
-          unsigned opc = is64Bit ? X86::MOV64rr : X86::MOV32rr;
-          NewMI = BuildMI(*BB, I, I->getDebugLoc(), TII->get(opc), reg)
-            .addReg(reg);
-          break;
-        }
-
-        case LEA_ESI:
-        case LEA_EDI: {
-          unsigned opc = is64Bit ? X86::LEA64r : X86::LEA32r;
-          NewMI = addRegOffset(BuildMI(*BB, I, I->getDebugLoc(),
-                                       TII->get(opc), reg),
-                               reg, false, 0);
-          break;
-        }
-        }
-
-        if (NewMI != NULL)
-          ++InsertedNOPs;
+        ++InsertedNOPs;
       }
+
       // Do not insert NOPs between terminators.
       if (I == FirstTerm)
         break;
@@ -143,8 +99,3 @@ bool NOPInsertionPass::runOnMachineFunction(MachineFunction &Fn) {
   return true;
 }
 
-namespace llvm {
-  FunctionPass *createNOPInsertionPass(bool is64Bit) {
-    return new NOPInsertionPass(is64Bit);
-  }
-}
