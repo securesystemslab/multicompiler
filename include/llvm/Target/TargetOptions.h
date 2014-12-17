@@ -78,11 +78,12 @@ namespace llvm {
           EnableFastISel(false), PositionIndependentExecutable(false),
           UseInitArray(false), DisableIntegratedAS(false),
           CompressDebugSections(false), FunctionSections(false),
-          DataSections(false), TrapUnreachable(false), TrapFuncName(),
-          FloatABIType(FloatABI::Default),
-          AllowFPOpFusion(FPOpFusion::Standard), JTType(JumpTable::Single),
-          FCFI(false), ThreadModel(ThreadModel::POSIX),
-          CFIType(CFIntegrity::Sub), CFIEnforcing(false), CFIFuncName() {}
+          DataSections(false), NoopInsertion(false),
+          TrapUnreachable(false), TrapFuncName(),
+          FloatABIType(FloatABI::Default), AllowFPOpFusion(FPOpFusion::Standard),
+          JTType(JumpTable::Single), FCFI(false),
+          ThreadModel(ThreadModel::POSIX), CFIType(CFIntegrity::Sub),
+          CFIEnforcing(false), CFIFuncName() {}
 
     /// PrintMachineCode - This flag is enabled when the -print-machineinstrs
     /// option is specified on the command line, and should enable debugging
@@ -197,6 +198,9 @@ namespace llvm {
 
     /// Emit data into separate sections.
     unsigned DataSections : 1;
+
+    /// Randomly insert noop instructions to create fine-grained diversity
+    unsigned NoopInsertion : 1;
 
     /// Emit target-specific trap instruction for 'unreachable' IR instructions.
     unsigned TrapUnreachable : 1;
