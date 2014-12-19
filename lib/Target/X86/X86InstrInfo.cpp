@@ -5532,6 +5532,8 @@ void X86InstrInfo::insertNoop(MachineBasicBlock &MBB,
 void X86InstrInfo::insertNoop(MachineBasicBlock &MBB,
                               MachineBasicBlock::iterator MI,
                               RandomNumberGenerator *RNG) const {
+  // This set of Noop instructions was carefully chosen to not be
+  // useful as ROP gadgets.
   enum { NOP,
          MOV_BP, MOV_SP,
          LEA_SI, LEA_DI,
@@ -5545,7 +5547,9 @@ void X86InstrInfo::insertNoop(MachineBasicBlock &MBB,
     { X86::EDI, X86::RDI },
   };
 
-  unsigned Type = (*RNG)() % MAX_NOPS;
+  static std::uniform_int_distribution<unsigned> Distribution(0,MAX_NOPS-1);
+
+  unsigned Type = Distribution(*RNG);
 
   DebugLoc DL;
   bool is64Bit = Subtarget.is64Bit();

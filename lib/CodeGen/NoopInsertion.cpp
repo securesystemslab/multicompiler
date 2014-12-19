@@ -59,32 +59,39 @@ NoopInsertion::NoopInsertion() : MachineFunctionPass(ID) {
     NoopInsertionPercentage = 100;
 }
 
+NoopInsertion::~NoopInsertion() {
+  if (RNG != NULL)
+    delete RNG;
+}
+
 void NoopInsertion::getAnalysisUsage(AnalysisUsage &AU) const {
   AU.setPreservesCFG();
   MachineFunctionPass::getAnalysisUsage(AU);
 }
 
 bool NoopInsertion::runOnMachineFunction(MachineFunction &Fn) {
+  // The RNG must be initialized on first use so we have a Module to
+  // construct it from
+  if (RNG == NULL)
+    RNG = Fn.getFunction()->getParent()->createRNG(this);
+
   const TargetInstrInfo *TII = Fn.getSubtarget().getInstrInfo();
 
-  RandomNumberGenerator *RNG = Fn.getFunction()->getParent()->createRNG(this);
-  for (MachineFunction::iterator BB = Fn.begin(), E = Fn.end(); BB != E; ++BB) {
-    MachineBasicBlock::iterator FirstTerm = BB->getFirstTerminator();
+  for (auto& BB : Fn) {
+    MachineBasicBlock::iterator FirstTerm = BB.getFirstTerminator();
     // Insert Noops before instruction.
-    for (MachineBasicBlock::iterator I = BB->begin(); I != BB->end(); ) {
-      MachineBasicBlock::iterator NextI = std::next(I);
-      if (I->isPseudo()) {
-        I = NextI;
+    // cannot be a range-based for loop since we need to pass the
+    // iterator to insertNoop()
+    for (MachineBasicBlock::iterator I = BB.begin(); I != BB.end(); ++I) {
+      if (I->isPseudo())
         continue;
-      }
 
       // Insert random number of Noop-like instructions.
       for (unsigned i = 0; i < MaxNoopsPerInstruction; i++) {
-        unsigned Roll = (*RNG)() % 100; // FIXME: not uniform
-        if (Roll >= NoopInsertionPercentage)
+        if (Distribution(*RNG) >= NoopInsertionPercentage)
           continue;
 
-        TII->insertNoop(*BB, I, RNG);
+        TII->insertNoop(BB, I, RNG);
 
         ++InsertedNoops;
       }
@@ -92,8 +99,6 @@ bool NoopInsertion::runOnMachineFunction(MachineFunction &Fn) {
       // Do not insert Noops between terminators.
       if (I == FirstTerm)
         break;
-
-      I = NextI;
     }
   }
   return true;

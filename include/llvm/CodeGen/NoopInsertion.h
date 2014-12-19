@@ -16,18 +16,28 @@
 #define LLVM_CODEGEN_NOOPINSERTION_H
 
 #include "llvm/CodeGen/MachineFunctionPass.h"
+#include <random>
 
 namespace llvm {
+
+class RandomNumberGenerator;
 
 class NoopInsertion : public MachineFunctionPass {
 public:
   static char ID;
 
   NoopInsertion();
+  ~NoopInsertion();
 
-  bool runOnMachineFunction(MachineFunction &MF);
+  bool runOnMachineFunction(MachineFunction &MF) override;
 
   void getAnalysisUsage(AnalysisUsage &AU) const override;
+
+private:
+  RandomNumberGenerator *RNG = NULL;
+
+  // Uniform real distribution from 0 to 100
+  std::uniform_real_distribution<double> Distribution = std::uniform_real_distribution<double>(0,100);
 };
 
 }

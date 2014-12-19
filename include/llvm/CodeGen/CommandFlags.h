@@ -209,7 +209,8 @@ FunctionSections("function-sections",
 
 cl::opt<bool>
 NoopInsertion("noop-insertion",
-             cl::desc("Randomly add Noop instructions to create fine-grained diversity."),
+             cl::desc("Randomly add Noop instructions to create fine-grained "
+                      "code layout diversity."),
              cl::init(false));
 
 cl::opt<llvm::JumpTable::JumpTableType>

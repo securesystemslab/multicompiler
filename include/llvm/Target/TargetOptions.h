@@ -199,7 +199,8 @@ namespace llvm {
     /// Emit data into separate sections.
     unsigned DataSections : 1;
 
-    /// Randomly insert noop instructions to create fine-grained diversity
+    /// Randomly insert noop instructions to create fine-grained code
+    /// layout diversity.
     unsigned NoopInsertion : 1;
 
     /// Emit target-specific trap instruction for 'unreachable' IR instructions.

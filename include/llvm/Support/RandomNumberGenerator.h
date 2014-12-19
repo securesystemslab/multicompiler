@@ -31,8 +31,19 @@ namespace llvm {
 /// module.
 class RandomNumberGenerator {
 public:
+  typedef uint_fast64_t result_type;
+
   /// Returns a random number in the range [0, Max).
-  uint_fast64_t operator()();
+  result_type operator()();
+
+  // Must define min and max to be compatible with URNG as used by
+  // std::uniform_*_distribution
+  static constexpr result_type min() {
+    return std::mt19937_64::min();
+  }
+  static constexpr result_type max() {
+    return std::mt19937_64::max();
+  }
 
 private:
   /// Seeds and salts the underlying RNG engine.
