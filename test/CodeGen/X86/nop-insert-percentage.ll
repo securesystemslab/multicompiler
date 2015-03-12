@@ -26,22 +26,20 @@ entry:
 ; PERCENT10: leaq   (%rsi), %rsi
 
 ; PERCENT50: movq   %rbp, %rbp
+; PERCENT50: nop
 ; PERCENT50: leaq   (%rsi), %rsi
+; PERCENT50: leaq   (%rdi), %rdi
 ; PERCENT50: movq   %rbp, %rbp
-; PERCENT50: leaq   (%rdi), %rdi
 ; PERCENT50: movq   %rsp, %rsp
-; PERCENT50: leaq   (%rsi), %rsi
-; PERCENT50: leaq   (%rdi), %rdi
 
 ; PERCENT100: leaq  (%rdi), %rdi
-; PERCENT100: movq  %rbp, %rbp
-; PERCENT100: leaq  (%rsi), %rsi
-; PERCENT100: movq  %rbp, %rbp
 ; PERCENT100: leaq  (%rdi), %rdi
 ; PERCENT100: movq  %rsp, %rsp
+; PERCENT100: movq  %rsp, %rsp
+; PERCENT100: leaq  (%rdi), %rdi
 ; PERCENT100: leaq  (%rsi), %rsi
+; PERCENT100: movq  %rbp, %rbp
+; PERCENT100: movq  %rsp, %rsp
 ; PERCENT100: leaq  (%rsi), %rsi
 ; PERCENT100: nop
 ; PERCENT100: leaq  (%rsi), %rsi
-; PERCENT100: movq  %rsp, %rsp
-; PERCENT100: movq  %rbp, %rbp
