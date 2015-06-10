@@ -61,7 +61,8 @@ namespace llvm {
           JITEmitDebugInfoToDisk(false), GuaranteedTailCallOpt(false),
           DisableTailCalls(false), StackAlignmentOverride(0),
           EnableFastISel(false), PositionIndependentExecutable(false),
-          NOPInsertion(false), UseInitArray(false), DisableIntegratedAS(false),
+          NOPInsertion(false), ShuffleFunctions(false),
+          UseInitArray(false), DisableIntegratedAS(false),
           CompressDebugSections(false), FunctionSections(false),
           DataSections(false), TrapUnreachable(false), TrapFuncName(""),
           FloatABIType(FloatABI::Default),
@@ -167,6 +168,10 @@ namespace llvm {
 
     /// Randomly insert noop instructions to create fine-grained diversity
     unsigned NOPInsertion : 1;
+
+    /// Randomly shuffle program functions
+    /// FIXME: not sure if TargetOptions is the right place for this
+    unsigned ShuffleFunctions : 1;
 
     /// UseInitArray - Use .init_array instead of .ctors for static
     /// constructors.

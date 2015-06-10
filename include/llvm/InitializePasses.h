@@ -279,6 +279,7 @@ void initializeBBVectorizePass(PassRegistry&);
 void initializeMachineFunctionPrinterPassPass(PassRegistry&);
 void initializeStackMapLivenessPass(PassRegistry&);
 void initializeLoadCombinePass(PassRegistry&);
+void initializeShuffleFunctionsPassPass(PassRegistry&);
 }
 
 #endif

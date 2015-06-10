@@ -189,6 +189,13 @@ NOPInsertion("nop-insertion",
              cl::desc("Randomly add noop instructions to create fine-grained diversity."),
              cl::init(false));
 
+// FIXME: The ShuffleFunctions pass also gets its own command line flag,
+// called "shuffle-functions-pass" to avoid overlap.
+cl::opt<bool>
+ShuffleFunctions("shuffle-functions",
+             cl::desc("Randomly shuffle program functions."),
+             cl::init(false));
+
 cl::opt<std::string> StopAfter("stop-after",
                             cl::desc("Stop compilation after a specific pass"),
                             cl::value_desc("pass-name"),
@@ -244,6 +251,7 @@ static inline TargetOptions InitTargetOptionsFromCodeGenFlags() {
   Options.TrapFuncName = TrapFuncName;
   Options.PositionIndependentExecutable = EnablePIE;
   Options.NOPInsertion = NOPInsertion;
+  Options.ShuffleFunctions = ShuffleFunctions;
   Options.UseInitArray = UseInitArray;
   Options.DataSections = DataSections;
   Options.FunctionSections = FunctionSections;

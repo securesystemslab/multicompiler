@@ -399,6 +399,9 @@ void TargetPassConfig::addIRPasses() {
   // Prepare expensive constants for SelectionDAG.
   if (getOptLevel() != CodeGenOpt::None && !DisableConstantHoisting)
     addPass(createConstantHoistingPass());
+
+  if (TM->Options.ShuffleFunctions)
+    addPass(createShuffleFunctionsPass());
 }
 
 /// Turn exception handling constructs into something the code generators can

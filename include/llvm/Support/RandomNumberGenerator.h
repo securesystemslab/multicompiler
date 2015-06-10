@@ -34,6 +34,12 @@ public:
   /// Returns a random number in the range [0, Max).
   uint_fast64_t operator()();
 
+  /// Functions and types required by std::UniformRandomNumberGenerator.
+  typedef uint_fast64_t result_type;
+
+  static uint_fast64_t min() { return std::mt19937_64::min(); }
+  static uint_fast64_t max() { return std::mt19937_64::max(); }
+
 private:
   /// Seeds and salts the underlying RNG engine.
   ///

@@ -21,6 +21,7 @@ namespace llvm {
 
 class BasicBlockPass;
 class FunctionPass;
+class ModulePass;
 class Pass;
 class GetElementPtrInst;
 class PassInfo;
@@ -394,6 +395,12 @@ FunctionPass *createSeparateConstOffsetFromGEPPass();
 // LoadCombine - Combine loads into bigger loads.
 //
 BasicBlockPass *createLoadCombinePass();
+
+//===----------------------------------------------------------------------===//
+//
+// ShuffleFunctions - Randomly shuffle program functions.
+//
+ModulePass *createShuffleFunctionsPass();
 
 } // End llvm namespace
 
