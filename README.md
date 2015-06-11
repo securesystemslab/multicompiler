@@ -32,8 +32,14 @@ whenever using diversity options.
 
 `-mllvm -max-nops-per-instruction=X` - Insert at most X NOPs each time (default 1).
 
-### Schedule randomization
+### Schedule Randomization
 
 `-mllvm -sched-randomize` - Enable schedule randomization.
 
 `-mllvm -sched-randomize-percentage=X` - Randomize X% of the instruction schedule (default 50%).
+
+### Function Shuffling
+
+`-mllvm -shuffle-functions` - Enable function shuffling.
+
+With whole-program/link-time optimization, functions are shuffled globally. Otherwise, functions are shuffled inside each translation unit.
