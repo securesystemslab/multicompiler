@@ -40,6 +40,6 @@ whenever using diversity options.
 
 ### Function Shuffling
 
-`-mllvm -shuffle-functions` - Enable function shuffling.
+`-Xclang -shuffle-functions` - Enable function shuffling.
 
 With whole-program/link-time optimization, functions are shuffled globally. Otherwise, functions are shuffled inside each translation unit.
