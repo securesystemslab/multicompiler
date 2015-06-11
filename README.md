@@ -42,4 +42,5 @@ whenever using diversity options.
 
 `-Xclang -shuffle-functions` - Enable function shuffling.
 
-With whole-program/link-time optimization, functions are shuffled globally (not tested/supported). Otherwise, functions are shuffled inside each translation unit.
+Currently, functions are shuffled on a per-translation unit basis.
+Global function shuffling requires building the target program with LTO (link-time optimization).
