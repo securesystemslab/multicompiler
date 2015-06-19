@@ -16,23 +16,22 @@ define i32 @func3() {
   foo: ret i32 0
 }
 
+; SEED1: define i32 @func1() {
 ; SEED1: define i32 @func2() {
 ; SEED1: define i32 @func3() {
-; SEED1: define i32 @func1() {
 
-; SEED2: define i32 @func3() {
 ; SEED2: define i32 @func1() {
+; SEED2: define i32 @func3() {
 ; SEED2: define i32 @func2() {
 
-; SEED3: define i32 @func2() {
 ; SEED3: define i32 @func3() {
+; SEED3: define i32 @func2() {
 ; SEED3: define i32 @func1() {
 
-; SEED4: define i32 @func1() {
 ; SEED4: define i32 @func3() {
 ; SEED4: define i32 @func2() {
+; SEED4: define i32 @func1() {
 
 ; SEED5: define i32 @func2() {
 ; SEED5: define i32 @func3() {
 ; SEED5: define i32 @func1() {
-
