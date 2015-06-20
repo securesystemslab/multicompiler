@@ -50,12 +50,6 @@ public:
     return RNG::max();
   }
 
-  /// Functions and types required by std::UniformRandomNumberGenerator.
-  typedef uint_fast64_t result_type;
-
-  static constexpr uint_fast64_t min() { return std::mt19937_64::min(); }
-  static constexpr uint_fast64_t max() { return std::mt19937_64::max(); }
-
 private:
   /// Seeds and salts the underlying RNG engine.
   ///
