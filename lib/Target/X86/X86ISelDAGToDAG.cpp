@@ -71,6 +71,8 @@ namespace {
     unsigned Align;    // CP alignment.
     unsigned char SymbolFlags;  // X86II::MO_*
 
+    TrapInfo TI;
+
     X86ISelAddressMode()
         : BaseType(RegBase), Base_FrameIndex(0), Scale(1), IndexReg(), Disp(0),
           Segment(), GV(nullptr), CP(nullptr), BlockAddr(nullptr), ES(nullptr),
@@ -1110,6 +1112,11 @@ bool X86DAGToDAGISel::matchAddressRecursively(SDValue N, X86ISelAddressMode &AM,
   if (Depth > 5)
     return matchAddressBase(N, AM);
 
+  if (ConstantSDNode *Cst = dyn_cast<ConstantSDNode>(N))
+    if (const ConstantVTIndex *VTI =
+        dyn_cast<ConstantVTIndex>(Cst->getConstantIntValue()))
+      AM.TI = VTI->getTrapInfo();
+
   // If this is already a %rip relative address, we can only merge immediates
   // into it.  Instead of handling this in every case, we handle it here.
   // RIP relative addressing: %rip + 32-bit displacement!
@@ -1543,7 +1550,7 @@ bool X86DAGToDAGISel::selectMOV64Imm32(SDValue N, SDValue &Imm) {
     if ((uint32_t)ImmVal != (uint64_t)ImmVal)
       return false;
 
-    Imm = CurDAG->getTargetConstant(ImmVal, SDLoc(N), MVT::i64);
+    Imm = CurDAG->getTargetConstant(*CN->getConstantIntValue(), SDLoc(N), MVT::i64);
     return true;
   }
 
@@ -1663,6 +1670,9 @@ bool X86DAGToDAGISel::selectLEAAddr(SDValue N,
     return false;
 
   getAddressOperands(AM, SDLoc(N), Base, Scale, Index, Disp, Segment);
+
+  if (!AM.TI.isUnknown())
+    Disp.getNode()->setTrapInfo(AM.TI);
   return true;
 }
 

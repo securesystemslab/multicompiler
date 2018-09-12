@@ -138,8 +138,15 @@ SectionKind TargetLoweringObjectFile::getKindForGlobal(const GlobalValue *GV,
 
   // Early exit - functions should be always in text sections.
   const GlobalVariable *GVar = dyn_cast<GlobalVariable>(GV);
-  if (!GVar)
+  if (!GVar) {
+    if (const Function *F = dyn_cast<Function>(GV))
+      if (F->isTrampoline())
+        return SectionKind::getTexTramp();
     return SectionKind::getText();
+  }
+
+  if (GVar->hasTrampolines())
+    return SectionKind::getTexTramp();
 
   // Handle thread-local data first.
   if (GVar->isThreadLocal()) {
@@ -242,7 +249,8 @@ TargetLoweringObjectFile::SectionForGlobal(const GlobalValue *GV,
                                            SectionKind Kind, Mangler &Mang,
                                            const TargetMachine &TM) const {
   // Select section name.
-  if (GV->hasSection())
+  if (GV->hasSection() &&
+      !Kind.isTexTrap() && !Kind.isTexTrapText() && !Kind.isTexTramp())
     return getExplicitSectionGlobal(GV, Kind, Mang, TM);
 
 

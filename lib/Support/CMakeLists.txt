@@ -28,6 +28,12 @@ if( NOT MSVC )
   endif( MINGW )
 endif( NOT MSVC )
 
+# If libcrypto is available, link for RandomNumberGenerator
+if ( ${HAVE_OPENSSL} )
+  include_directories(${OPENSSL_INCLUDE_DIR})
+  set(system_libs ${system_libs} ${OPENSSL_LIBRARIES})
+endif()
+
 add_llvm_library(LLVMSupport
   APFloat.cpp
   APInt.cpp

@@ -1010,6 +1010,20 @@ public:
   /// returns the address of that location. Otherwise, returns nullptr.
   virtual Value *getSafeStackPointerLocation(IRBuilder<> &IRB) const;
 
+  /// Return true if the target stores unsafe stack pointer at a fixed offset
+  /// in some non-standard address space, and populates the address space and
+  /// offset as appropriate.
+  virtual bool getUnsafeStackPtrLocation(unsigned &/*AddressSpace*/,
+                                         unsigned &/*Offset*/) const {
+    return false;
+  }
+
+  /// Returns the maximal possible offset which can be used for loads / stores
+  /// from the global.
+  virtual unsigned getMaximalGlobalOffset() const {
+    return 0;
+  }
+
   /// Returns true if a cast between SrcAS and DestAS is a noop.
   virtual bool isNoopAddrSpaceCast(unsigned SrcAS, unsigned DestAS) const {
     return false;
@@ -2362,6 +2376,8 @@ public:
     SmallVector<SDValue, 32> OutVals;
     SmallVector<ISD::InputArg, 32> Ins;
 
+    TrapInfo trapInfo;
+
     CallLoweringInfo(SelectionDAG &DAG)
       : RetTy(nullptr), RetSExt(false), RetZExt(false), IsVarArg(false),
         IsInReg(false), DoesNotReturn(false), IsReturnValueUsed(true),
@@ -2450,6 +2466,11 @@ public:
 
     CallLoweringInfo &setIsPatchPoint(bool Value = true) {
       IsPatchPoint = Value;
+      return *this;
+    }
+
+    CallLoweringInfo &setTrapInfo(TrapInfo TI) {
+      trapInfo = TI;
       return *this;
     }
 

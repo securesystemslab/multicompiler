@@ -472,6 +472,15 @@ def CC_X86_64_AnyReg : CallingConv<[
   CCCustom<"CC_X86_AnyReg_Error">
 ]>;
 
+def CC_X86_64_ReadactorCookie : CallingConv<[
+  // The first argument is the cookie to check
+  CCIfType<[i64], CCAssignToReg<[R11]>>,
+
+  // Delegate to fastcall to handle all other types
+  CCDelegateTo<CC_X86_64_C>
+]>;
+
+
 //===----------------------------------------------------------------------===//
 // X86 C Calling Convention
 //===----------------------------------------------------------------------===//
@@ -791,6 +800,7 @@ def CC_X86_64 : CallingConv<[
   CCIfCC<"CallingConv::AnyReg", CCDelegateTo<CC_X86_64_AnyReg>>,
   CCIfCC<"CallingConv::X86_64_Win64", CCDelegateTo<CC_X86_Win64_C>>,
   CCIfCC<"CallingConv::X86_64_SysV", CCDelegateTo<CC_X86_64_C>>,
+  CCIfCC<"CallingConv::X86_64_ReadactorCookie", CCDelegateTo<CC_X86_64_ReadactorCookie>>,
   CCIfCC<"CallingConv::X86_VectorCall", CCDelegateTo<CC_X86_Win64_VectorCall>>,
   CCIfCC<"CallingConv::HHVM", CCDelegateTo<CC_X86_64_HHVM>>,
   CCIfCC<"CallingConv::HHVM_C", CCDelegateTo<CC_X86_64_HHVM_C>>,

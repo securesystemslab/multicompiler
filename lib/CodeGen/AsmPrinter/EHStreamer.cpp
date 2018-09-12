@@ -687,3 +687,344 @@ void EHStreamer::emitTypeInfos(unsigned TTypeEncoding) {
     Asm->EmitULEB128(TypeID);
   }
 }
+
+/// Emit landing pads and actions for call trampoline.
+///
+// FIXME: Don't know how to handle FilterIds and SjLj
+void EHStreamer::
+emitExceptionTableForTramp(const CallTrampolineInfo &Trampoline, MCSymbol *EndSym) {
+  const std::vector<const GlobalValue *> &TypeInfos = MMI->getTypeInfos();
+
+  // Sort the landing pads in order of their type ids.  This is used to fold
+  // duplicate actions.
+  SmallVector<const LandingPadInfo *, 1> LandingPads;
+  assert (Trampoline.LPadInfo &&
+              "Trying to emit except_table of a trampoline that has no landing pad!");
+
+
+  LandingPads.reserve(1);
+  LandingPads.push_back(Trampoline.LPadInfo);
+
+  // Compute the actions table and gather the first action index for each
+  // landing pad site.
+  SmallVector<ActionEntry, 32> Actions;
+  SmallVector<unsigned, 64> FirstActions;
+  unsigned SizeActions =
+      computeActionsTable(LandingPads, Actions, FirstActions);
+
+  CallSiteEntry CS;
+  if (FirstActions.size())
+    CS = {Trampoline.CallSym, EndSym, Trampoline.LPadInfo, FirstActions[0]};
+  else
+    CS = {Trampoline.CallSym, EndSym, Trampoline.LPadInfo, 0};
+
+  // Call sites.
+  bool HaveTTData = true;
+
+  unsigned SiteStartSize  = 4; // dwarf::DW_EH_PE_udata4
+  unsigned SiteLengthSize = 4; // dwarf::DW_EH_PE_udata4
+  unsigned LandingPadSize = 4; // dwarf::DW_EH_PE_udata4
+  unsigned CallSiteTableLength =
+      1 * (SiteStartSize + SiteLengthSize + LandingPadSize);
+
+
+  CallSiteTableLength += getULEB128Size(CS.Action);
+
+  // Type infos.
+  MCSection *LSDASection = Asm->getObjFileLowering().getLSDASection();
+  unsigned TTypeEncoding;
+  unsigned TypeFormatSize;
+
+  // Okay, we have actual filters or typeinfos to emit.  As such, we need to
+  // pick a type encoding for them.  We're about to emit a list of pointers to
+  // typeinfo objects at the end of the LSDA.  However, unless we're in static
+  // mode, this reference will require a relocation by the dynamic linker.
+  //
+  // Because of this, we have a couple of options:
+  //
+  //   1) If we are in -static mode, we can always use an absolute reference
+  //      from the LSDA, because the static linker will resolve it.
+  //
+  //   2) Otherwise, if the LSDA section is writable, we can output the direct
+  //      reference to the typeinfo and allow the dynamic linker to relocate
+  //      it.  Since it is in a writable section, the dynamic linker won't
+  //      have a problem.
+  //
+  //   3) Finally, if we're in PIC mode and the LDSA section isn't writable,
+  //      we need to use some form of indirection.  For example, on Darwin,
+  //      we can output a statically-relocatable reference to a dyld stub. The
+  //      offset to the stub is constant, but the contents are in a section
+  //      that is updated by the dynamic linker.  This is easy enough, but we
+  //      need to tell the personality function of the unwinder to indirect
+  //      through the dyld stub.
+  //
+  // FIXME: When (3) is actually implemented, we'll have to emit the stubs
+  // somewhere.  This predicate should be moved to a shared location that is
+  // in target-independent code.
+  //
+  TTypeEncoding = Asm->getObjFileLowering().getTTypeEncoding();
+  TypeFormatSize = Asm->GetSizeOfEncodedValue(TTypeEncoding);
+
+  // Begin the exception table.
+  // Sometimes we want not to emit the data into separate section (e.g. ARM
+  // EHABI). In this case LSDASection will be NULL.
+  if (LSDASection)
+    Asm->OutStreamer->SwitchSection(LSDASection);
+  Asm->EmitAlignment(2);
+
+  static StringMap<unsigned> NextID;
+
+  // Emit the LSDA.
+  MCSymbol *GCCETSym =
+      Asm->OutContext.getOrCreateSymbol(Twine("GCC_except_table")+
+                                        Twine(Asm->getFunctionNumber())+
+                                        "_" + Twine(NextID[Asm->MF->getName()]++));
+  Asm->OutStreamer->EmitLabel(GCCETSym);
+  Asm->OutStreamer->EmitLabel(Asm->getCurExceptionSym());
+
+  // Emit the LSDA header.
+  Asm->EmitEncodingByte(dwarf::DW_EH_PE_omit, "@LPStart");
+  Asm->EmitEncodingByte(TTypeEncoding, "@TType");
+
+  // The type infos need to be aligned. GCC does this by inserting padding just
+  // before the type infos. However, this changes the size of the exception
+  // table, so you need to take this into account when you output the exception
+  // table size. However, the size is output using a variable length encoding.
+  // So by increasing the size by inserting padding, you may increase the number
+  // of bytes used for writing the size. If it increases, say by one byte, then
+  // you now need to output one less byte of padding to get the type infos
+  // aligned. However this decreases the size of the exception table. This
+  // changes the value you have to output for the exception table size. Due to
+  // the variable length encoding, the number of bytes used for writing the
+  // length may decrease. If so, you then have to increase the amount of
+  // padding. And so on. If you look carefully at the GCC code you will see that
+  // it indeed does this in a loop, going on and on until the values stabilize.
+  // We chose another solution: don't output padding inside the table like GCC
+  // does, instead output it before the table.
+  unsigned SizeTypes = TypeInfos.size() * TypeFormatSize;
+  unsigned CallSiteTableLengthSize = getULEB128Size(CallSiteTableLength);
+  unsigned TTypeBaseOffset =
+      sizeof(int8_t) +                            // Call site format
+      CallSiteTableLengthSize +                   // Call site table length size
+      CallSiteTableLength +                       // Call site table length
+      SizeActions +                               // Actions size
+      SizeTypes;
+  unsigned TTypeBaseOffsetSize = getULEB128Size(TTypeBaseOffset);
+  unsigned TotalSize =
+      sizeof(int8_t) +                            // LPStart format
+      sizeof(int8_t) +                            // TType format
+      (HaveTTData ? TTypeBaseOffsetSize : 0) +    // TType base offset size
+      TTypeBaseOffset;                            // TType base offset
+  unsigned SizeAlign = (4 - TotalSize) & 3;
+
+  if (HaveTTData) {
+    // Account for any extra padding that will be added to the call site table
+    // length.
+    Asm->EmitULEB128(TTypeBaseOffset, "@TType base offset", SizeAlign);
+    SizeAlign = 0;
+  }
+
+  bool VerboseAsm = Asm->OutStreamer->isVerboseAsm();
+
+  // Itanium LSDA exception handling
+
+  // The call-site table is a list of all call sites that may throw an
+  // exception (including C++ 'throw' statements) in the procedure
+  // fragment. It immediately follows the LSDA header. Each entry indicates,
+  // for a given call, the first corresponding action record and corresponding
+  // landing pad.
+  //
+  // The table begins with the number of bytes, stored as an LEB128
+  // compressed, unsigned integer. The records immediately follow the record
+  // count. They are sorted in increasing call-site address. Each record
+  // indicates:
+  //
+  //   * The position of the call-site.
+  //   * The position of the landing pad.
+  //   * The first action record for that call site.
+  //
+  // A missing entry in the call-site table indicates that a call is not
+  // supposed to throw.
+
+  // Emit the landing pad call site table.
+  Asm->EmitEncodingByte(dwarf::DW_EH_PE_udata4, "Call site");
+
+  // Add extra padding if it wasn't added to the TType base offset.
+  Asm->EmitULEB128(CallSiteTableLength, "Call site table length", SizeAlign);
+
+  unsigned Entry = 0;
+  const CallSiteEntry &S = CS;
+
+  MCSymbol *BeginLabel = S.BeginLabel;
+  MCSymbol *EndLabel = S.EndLabel;
+  if (!EndLabel)
+    EndLabel = Asm->getFunctionEnd();
+
+  // Offset of the call site relative to the previous call site, counted in
+  // number of 16-byte bundles. The first call site is counted relative to
+  // the start of the procedure fragment.
+  if (VerboseAsm)
+    Asm->OutStreamer->AddComment(">> Call Site " + Twine(++Entry) + " <<");
+  Asm->EmitLabelDifference(BeginLabel, BeginLabel, 4);
+  if (VerboseAsm)
+    Asm->OutStreamer->AddComment(Twine("  Call between ") +
+                                 BeginLabel->getName() + " and " +
+                                 EndLabel->getName());
+  Asm->EmitLabelDifference(EndLabel, BeginLabel, 4);
+
+  // Offset of the landing pad, counted in 16-byte bundles relative to the
+  // @LPStart address.
+  if (!S.LPad) {
+    if (VerboseAsm)
+      Asm->OutStreamer->AddComment("    has no landing pad");
+    Asm->OutStreamer->EmitIntValue(0, 4/*size*/);
+  } else {
+    if (VerboseAsm)
+      Asm->OutStreamer->AddComment(Twine("    jumps to ") +
+                                   EndLabel->getName());
+    Asm->EmitLabelDifference(EndLabel, BeginLabel, 4);
+  }
+
+  // Offset of the first associated action record, relative to the start of
+  // the action table. This value is biased by 1 (1 indicates the start of
+  // the action table), and 0 indicates that there are no actions.
+  if (VerboseAsm) {
+    if (S.Action == 0)
+      Asm->OutStreamer->AddComment("  On action: cleanup");
+    else
+      Asm->OutStreamer->AddComment("  On action: " +
+                                   Twine((S.Action - 1) / 2 + 1));
+  }
+  Asm->EmitULEB128(S.Action);
+
+
+  // Emit the Action Table.
+  int AEntry = 0;
+  for (SmallVectorImpl<ActionEntry>::const_iterator
+           I = Actions.begin(), E = Actions.end(); I != E; ++I) {
+    const ActionEntry &Action = *I;
+
+    if (VerboseAsm) {
+      // Emit comments that decode the action table.
+      Asm->OutStreamer->AddComment(">> Action Record " + Twine(++AEntry) + " <<");
+    }
+
+    // Type Filter
+    //
+    //   Used by the runtime to match the type of the thrown exception to the
+    //   type of the catch clauses or the types in the exception specification.
+    if (VerboseAsm) {
+      if (Action.ValueForTypeID > 0)
+        Asm->OutStreamer->AddComment("  Catch TypeInfo " +
+                                     Twine(Action.ValueForTypeID));
+      else if (Action.ValueForTypeID < 0)
+        Asm->OutStreamer->AddComment("  Filter TypeInfo " +
+                                     Twine(Action.ValueForTypeID));
+      else
+        Asm->OutStreamer->AddComment("  Cleanup");
+    }
+    Asm->EmitSLEB128(Action.ValueForTypeID);
+
+    // Action Record
+    //
+    //   Self-relative signed displacement in bytes of the next action record,
+    //   or 0 if there is no next action record.
+    if (VerboseAsm) {
+      if (Action.NextAction == 0) {
+        Asm->OutStreamer->AddComment("  No further actions");
+      } else {
+        unsigned NextAction = AEntry + (Action.NextAction + 1) / 2;
+        Asm->OutStreamer->AddComment("  Continue to action "+Twine(NextAction));
+      }
+    }
+    Asm->EmitSLEB128(Action.NextAction);
+  }
+
+  emitTypeInfos(TTypeEncoding);
+
+  Asm->EmitAlignment(2);
+}
+
+void EHStreamer::computePadMapForTramp(
+    SmallVector<const LandingPadInfo *, 64> &LandingPads,
+    DenseMap<const MachineInstr *, const LandingPadInfo *> &CallPadMap) {
+
+  RangeMapType PadMap;
+  computePadMap(LandingPads, PadMap);
+
+  // The end label of the previous invoke or nounwind try-range.
+  MCSymbol *LastLabel = nullptr;
+
+  // Whether there is a potentially throwing instruction (currently this means
+  // an ordinary call) between the end of the previous try-range and now.
+  bool SawPotentiallyThrowing = false;
+
+  // Whether the last CallSite entry was for an invoke.
+  bool PreviousIsInvoke = false;
+
+  bool IsSJLJ = Asm->MAI->getExceptionHandlingType() == ExceptionHandling::SjLj;
+
+  const MachineInstr *LastCall = 0;
+  const LandingPadInfo *LastLandingPad = 0;
+
+  // Visit all instructions in order of address.
+  for (const auto &MBB : *Asm->MF) {
+    for (const auto &MI : MBB) {
+      if (!MI.isEHLabel()) {
+        if (MI.isCall()) {
+          SawPotentiallyThrowing |= !callToNoUnwindFunction(&MI);
+          LastCall = &MI;
+        }
+        continue;
+      }
+
+      // End of the previous try-range?
+      MCSymbol *BeginLabel = MI.getOperand(0).getMCSymbol();
+      if (BeginLabel == LastLabel) {
+        assert (LastCall && "Couldn't find valid call site in the try range!");
+        CallPadMap[LastCall] = LastLandingPad;
+        SawPotentiallyThrowing = false;
+        LastLandingPad = 0;
+        LastCall = 0;
+      }
+      // Beginning of a new try-range?
+      RangeMapType::const_iterator L = PadMap.find(BeginLabel);
+      if (L == PadMap.end())
+        // Nope, it was just some random label.
+        continue;
+
+      const PadRange &P = L->second;
+      const LandingPadInfo *LandingPad = LandingPads[P.PadIndex];
+      assert(BeginLabel == LandingPad->BeginLabels[P.RangeIndex] &&
+             "Inconsistent landing pad map!");
+
+      LastLandingPad = LandingPad;
+
+      // For Dwarf exception handling (SjLj handling doesn't use this). If some
+      // instruction between the previous try-range and this one may throw,
+      // create a call-site entry with no landing pad for the region between the
+      // try-ranges.
+      if (SawPotentiallyThrowing && Asm->MAI->usesCFIForEH()) {
+        PreviousIsInvoke = false;
+      }
+
+      LastLabel = LandingPad->EndLabels[P.RangeIndex];
+      assert(BeginLabel && LastLabel && "Invalid landing pad!");
+
+      if (!LandingPad->LandingPadLabel) {
+        // Create a gap.
+        PreviousIsInvoke = false;
+      } else {
+        // This try-range is for an invoke.
+        PreviousIsInvoke = true;
+      }
+    }
+  }
+
+  // If some instruction between the previous try-range and the end of the
+  // function may throw, create a call-site entry with no landing pad for the
+  // region following the try-range.
+  if (SawPotentiallyThrowing && !IsSJLJ && LastLabel != nullptr) {
+
+  }
+}

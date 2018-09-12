@@ -476,7 +476,9 @@ static BasicBlock *HandleCallsInBlockInlinedThroughInvoke(
     II->setDebugLoc(CI->getDebugLoc());
     II->setCallingConv(CI->getCallingConv());
     II->setAttributes(CI->getAttributes());
-    
+
+    II->setTrapInfo(CI->getTrapInfo());
+
     // Make sure that anything using the call now uses the invoke!  This also
     // updates the CallGraph if present, because it uses a WeakVH.
     CI->replaceAllUsesWith(II);

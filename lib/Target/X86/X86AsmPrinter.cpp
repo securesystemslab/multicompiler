@@ -695,6 +695,20 @@ void X86AsmPrinter::EmitEndOfAsmFile(Module &M) {
   }
 }
 
+const MCSymbolRefExpr *X86AsmPrinter::GetTrampolineSymref(const GlobalValue *GV) const {
+  MCSymbol *TargetSymbol = getSymbol(GV);
+
+  MCSymbolRefExpr::VariantKind RefKind = MCSymbolRefExpr::VK_None;
+
+  // Ripped this out of X86FastISel::fastLowerCall()
+  if (Subtarget->isTargetELF() &&
+      TM.getRelocationModel() == Reloc::PIC_ &&
+      GV->hasDefaultVisibility() && !GV->hasLocalLinkage()) {
+    RefKind = MCSymbolRefExpr::VK_PLT;
+  }
+  return MCSymbolRefExpr::create(TargetSymbol, RefKind, OutContext);
+}
+
 //===----------------------------------------------------------------------===//
 // Target Registry Stuff
 //===----------------------------------------------------------------------===//

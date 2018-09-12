@@ -3387,7 +3387,10 @@ bool llvm::isSafeToSpeculativelyExecute(const Value *V,
             Attribute::SanitizeThread) ||
         // Speculative load may load data from dirty regions.
         LI->getParent()->getParent()->hasFnAttribute(
-            Attribute::SanitizeAddress))
+            Attribute::SanitizeAddress) ||
+        // Cross check needs to not be executed speculatively
+        LI->getParent()->getParent()->hasFnAttribute(
+            Attribute::CrossCheck))
       return false;
     const DataLayout &DL = LI->getModule()->getDataLayout();
     return isDereferenceableAndAlignedPointer(

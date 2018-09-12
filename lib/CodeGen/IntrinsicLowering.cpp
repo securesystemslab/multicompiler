@@ -158,6 +158,20 @@ void IntrinsicLowering::AddPrototypes(Module &M) {
       case Intrinsic::exp2:
         EnsureFPIntrinsicsExist(M, F, "exp2f", "exp2", "exp2l");
         break;
+      case Intrinsic::hmac_ptr:
+        M.getOrInsertFunction("__llvm_hmac_ptr",
+                              Type::getInt8PtrTy(Context),
+                              Type::getInt64Ty(Context),
+                              Type::getInt8PtrTy(Context)->getPointerTo(),
+                              nullptr);
+        break;
+      case Intrinsic::check_ptr:
+        M.getOrInsertFunction("__llvm_check_ptr",
+                              Type::getInt1Ty(Context),
+                              Type::getInt8PtrTy(Context),
+                              Type::getInt8PtrTy(Context)->getPointerTo(),
+                              nullptr);
+        break;
       }
 }
 
@@ -577,6 +591,20 @@ void IntrinsicLowering::LowerIntrinsicCall(CallInst *CI) {
   case Intrinsic::lifetime_end:
     // Discard region information.
     break;
+  case Intrinsic::hmac_ptr: {
+    Value *Ops[2];
+    Ops[0] = CI->getArgOperand(0);
+    Ops[1] = CI->getArgOperand(1);
+    ReplaceCallWith("__llvm_hmac_ptr", CI, Ops, Ops+2, Ops[0]->getType());
+    break;
+  }
+  case Intrinsic::check_ptr: {
+    Value *Ops[2];
+    Ops[0] = CI->getArgOperand(0);
+    Ops[1] = CI->getArgOperand(1);
+    ReplaceCallWith("__llvm_check_ptr", CI, Ops, Ops+2, Ops[0]->getType());
+    break;
+  }
   }
 
   assert(CI->use_empty() &&

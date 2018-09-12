@@ -271,6 +271,9 @@ include(AddLLVMDefinitions)
 
 option(LLVM_ENABLE_PIC "Build Position-Independent Code" ON)
 option(LLVM_ENABLE_WARNINGS "Enable compiler warnings." ON)
+
+option(LLVM_ENABLE_OPENSSL "Use OpenSSL for random number generation." ON)
+
 option(LLVM_ENABLE_MODULES "Compile with C++ modules enabled." OFF)
 option(LLVM_ENABLE_CXX1Y "Compile with C++1y enabled." OFF)
 option(LLVM_ENABLE_LIBCXX "Use libc++ if available." OFF)
@@ -610,6 +613,11 @@ if(${CMAKE_SYSTEM_NAME} MATCHES "(FreeBSD|DragonFly)")
   include_directories("/usr/local/include")
   link_directories("/usr/local/lib")
 endif(${CMAKE_SYSTEM_NAME} MATCHES "(FreeBSD|DragonFly)")
+
+# Add OpenSSL include directory
+if ( (${CMAKE_SYSTEM_NAME} MATCHES Windows) AND ${HAVE_OPENSSL} )
+  include_directories(${OPENSSL_INCLUDE_DIR})
+endif()
 
 if( ${CMAKE_SYSTEM_NAME} MATCHES SunOS )
    SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -include llvm/Support/Solaris.h")

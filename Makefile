@@ -30,7 +30,7 @@ ifeq ($(BUILD_DIRS_ONLY),1)
   DIRS := lib/Support lib/TableGen utils tools/llvm-config
   OPTIONAL_DIRS := tools/clang/utils/TableGen
 else
-  DIRS := lib/Support lib/TableGen utils lib/IR lib tools/llvm-shlib \
+  DIRS := lib/Support lib/MultiCompiler lib/TableGen utils lib/IR lib tools/llvm-shlib \
           tools/llvm-config tools docs cmake unittests
   OPTIONAL_DIRS := projects bindings
 endif

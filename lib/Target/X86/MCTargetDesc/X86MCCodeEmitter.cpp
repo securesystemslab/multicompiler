@@ -14,6 +14,7 @@
 #include "MCTargetDesc/X86MCTargetDesc.h"
 #include "MCTargetDesc/X86BaseInfo.h"
 #include "MCTargetDesc/X86FixupKinds.h"
+#include "llvm/IR/TrapInfo.h"
 #include "llvm/MC/MCCodeEmitter.h"
 #include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCExpr.h"
@@ -372,6 +373,16 @@ void X86MCCodeEmitter::EmitMemModRMByte(const MCInst &MI, unsigned Op,
   unsigned BaseReg = Base.getReg();
   bool HasEVEX = (TSFlags & X86II::EncodingMask) == X86II::EVEX;
 
+  bool force32BitImm = false;
+  TrapInfo DispTI = MI.getTrapInfo();
+  if (!DispTI.isUnknown()) {
+    unsigned TrampSize = 5;
+    uint64_t MaxNumVFuncs = DispTI.getMaxNumVFuncs();
+    assert(MaxNumVFuncs <= (1 << 31)/TrampSize && "Must not have that many virtual functions!");
+    if (MaxNumVFuncs > (1 << 7)/TrampSize)
+      force32BitImm = true;
+  }
+
   // Handle %rip relative addressing.
   if (BaseReg == X86::RIP) {    // [disp32+RIP] in X86-64 mode
     assert(is64BitMode(STI) && "Rip-relative addressing requires 64-bit mode");
@@ -491,7 +502,7 @@ void X86MCCodeEmitter::EmitMemModRMByte(const MCInst &MI, unsigned Op,
     }
 
     // Otherwise, if the displacement fits in a byte, encode as [REG+disp8].
-    if (Disp.isImm()) {
+    if (Disp.isImm() && !force32BitImm) {
       if (!HasEVEX && isDisp8(Disp.getImm())) {
         EmitByte(ModRMByte(1, RegOpcodeField, BaseRegNo), CurByte, OS);
         EmitImmediate(Disp, MI.getLoc(), 1, FK_Data_1, CurByte, OS, Fixups);

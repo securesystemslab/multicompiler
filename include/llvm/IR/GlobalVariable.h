@@ -44,6 +44,7 @@ class GlobalVariable : public GlobalObject, public ilist_node<GlobalVariable> {
                                                // can change from its initial
                                                // value before global
                                                // initializers are run?
+  bool noCrossCheck : 1;                       // Can this global be cross-checked
 public:
   // allocate space for exactly one operand
   void *operator new(size_t s) {
@@ -144,6 +145,9 @@ public:
   void setExternallyInitialized(bool Val) {
     isExternallyInitializedConstant = Val;
   }
+
+  bool isNoCrossCheck() const { return noCrossCheck; }
+  void setNoCrossCheck(bool Val) { noCrossCheck = Val; }
 
   /// copyAttributesFrom - copy all additional attributes (those not needed to
   /// create a GlobalVariable) from the GlobalVariable Src to this one.

@@ -225,6 +225,14 @@ void LocalStackSlotPass::calculateFrameObjectOffsets(MachineFunction &Fn) {
       llvm_unreachable("Unexpected SSPLayoutKind.");
     }
 
+    if(multicompiler::ShuffleStackFrames) {
+      // Not sure how to hit this code on x86. If we do then some stack variables
+      // are not randomized as requested. The method PEI::calculateFrameObjectOffsets
+      // contains for code which may be reused to randomize these variables.
+      errs() << "Warning: stack frame layout of " << Fn.getFunction()->getName()
+             << " was not fully randomized\n";
+    }
+
     AssignProtectedObjSet(LargeArrayObjs, ProtectedObjs, MFI, StackGrowsDown,
                           Offset, MaxAlign);
     AssignProtectedObjSet(SmallArrayObjs, ProtectedObjs, MFI, StackGrowsDown,

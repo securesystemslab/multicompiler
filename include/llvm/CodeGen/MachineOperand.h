@@ -60,7 +60,8 @@ public:
     MO_RegisterLiveOut,   ///< Mask of live-out registers.
     MO_Metadata,          ///< Metadata reference (for debug info)
     MO_MCSymbol,          ///< MCSymbol reference (for debug/eh info)
-    MO_CFIIndex           ///< MCCFIInstruction index.
+    MO_CFIIndex,          ///< MCCFIInstruction index.
+    MO_TexTrapInfo        ///< TexTrap debug info for later emission
   };
 
 private:
@@ -258,6 +259,7 @@ public:
   bool isMetadata() const { return OpKind == MO_Metadata; }
   bool isMCSymbol() const { return OpKind == MO_MCSymbol; }
   bool isCFIIndex() const { return OpKind == MO_CFIIndex; }
+  bool isTexTrapInfo() const { return OpKind == MO_TexTrapInfo; }
 
   //===--------------------------------------------------------------------===//
   // Accessors for Register Operands
@@ -451,6 +453,11 @@ public:
   unsigned getCFIIndex() const {
     assert(isCFIIndex() && "Wrong MachineOperand accessor");
     return Contents.CFIIndex;
+  }
+
+  const MDNode *getTexTrapInfo() const {
+    assert(isTexTrapInfo() && "Wrong MachineOperand accessor");
+    return Contents.MD;
   }
 
   /// Return the offset from the symbol in this operand. This always returns 0
@@ -720,6 +727,12 @@ public:
   static MachineOperand CreateCFIIndex(unsigned CFIIndex) {
     MachineOperand Op(MachineOperand::MO_CFIIndex);
     Op.Contents.CFIIndex = CFIIndex;
+    return Op;
+  }
+
+  static MachineOperand CreateTexTrapInfo(const MDNode *TexTrapInfo) {
+    MachineOperand Op(MachineOperand::MO_TexTrapInfo);
+    Op.Contents.MD = TexTrapInfo;
     return Op;
   }
 

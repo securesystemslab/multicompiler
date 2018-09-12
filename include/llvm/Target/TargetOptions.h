@@ -98,14 +98,17 @@ namespace llvm {
           HonorSignDependentRoundingFPMathOption(false), NoZerosInBSS(false),
           GuaranteedTailCallOpt(false), StackAlignmentOverride(0),
           EnableFastISel(false), PositionIndependentExecutable(false),
-          NOPInsertion(false), ShuffleFunctions(false),
-          UseInitArray(false), DisableIntegratedAS(false),
+          NOPInsertion(false), UseInitArray(false), DisableIntegratedAS(false),
           CompressDebugSections(false), FunctionSections(false),
           DataSections(false), UniqueSectionNames(true), TrapUnreachable(false),
           EmulatedTLS(false), FloatABIType(FloatABI::Default),
           AllowFPOpFusion(FPOpFusion::Standard), Reciprocals(TargetRecip()),
-          JTType(JumpTable::Single), ThreadModel(ThreadModel::POSIX),
-          EABIVersion(EABI::Default), DebuggerTuning(DebuggerKind::Default) {}
+          JTType(JumpTable::Single), DebuggerTuning(DebuggerKind::Default),
+          JumpTablesROData(false), ExecJumpTables(false),
+          ThreadModel(ThreadModel::POSIX), EABIVersion(EABI::Default),
+          MarkVTables(false), PointerProtection(false),
+          PointerProtectionHMAC(false), CallPointerProtection(false),
+          CookieProtection(false) {}
 
     /// PrintMachineCode - This flag is enabled when the -print-machineinstrs
     /// option is specified on the command line, and should enable debugging
@@ -181,12 +184,8 @@ namespace llvm {
     /// if the relocation model is anything other than PIC.
     unsigned PositionIndependentExecutable : 1;
 
-    /// Randomly insert noop instructions to create fine-grained diversity
+    /// Attempt to insert NOPs
     unsigned NOPInsertion : 1;
-
-    /// Randomly shuffle program functions
-    /// FIXME: not sure if TargetOptions is the right place for this
-    unsigned ShuffleFunctions : 1;
 
     /// UseInitArray - Use .init_array instead of .ctors for static
     /// constructors.
@@ -246,6 +245,15 @@ namespace llvm {
     /// create for functions that have the jumptable attribute.
     JumpTable::JumpTableType JTType;
 
+    /// Which debugger to tune for.
+    DebuggerKind DebuggerTuning;
+
+    /// Emit jump tables in read-only data section, instead of inline
+    unsigned JumpTablesROData : 1;
+
+    /// Emit jump tables as branch instructions
+    unsigned ExecJumpTables : 1;
+
     /// ThreadModel - This flag specifies the type of threading model to assume
     /// for things like atomics
     ThreadModel::Model ThreadModel;
@@ -253,8 +261,23 @@ namespace llvm {
     /// EABIVersion - This flag specifies the EABI version
     EABI EABIVersion;
 
-    /// Which debugger to tune for.
-    DebuggerKind DebuggerTuning;
+    /// MarkVTables - This flag controls whether to emit a .textrap section
+    /// marking all vtable uses to allow vtable randomization at runtime.
+    unsigned MarkVTables : 1;
+
+    /// Protect all code pointers from reading by indirection through an
+    /// executable section.
+    unsigned PointerProtection : 1;
+
+    /// HMAC forward code pointers to avoid pointer swapping.
+    unsigned PointerProtectionHMAC : 1;
+
+    /// Protect return address pointers from reading by indirection through an
+    /// executable section.
+    unsigned CallPointerProtection : 1;
+
+    /// Authenticate all direct calls
+    unsigned CookieProtection : 1;
 
     /// Machine level options.
     MCTargetOptions MCOptions;

@@ -23,11 +23,13 @@
 #include "llvm/IR/InlineAsm.h"
 #include "llvm/Support/DataTypes.h"
 #include "llvm/Support/ErrorHandling.h"
+#include "llvm/Support/RandomNumberGenerator.h"
 
 namespace llvm {
 class AsmPrinterHandler;
 class BlockAddress;
 class ByteStreamer;
+class EHStreamer;
 class GCStrategy;
 class Constant;
 class ConstantArray;
@@ -55,6 +57,7 @@ class MCStreamer;
 class MCSubtargetInfo;
 class MCSymbol;
 class MCTargetOptions;
+class MCSymbolRefExpr;
 class MDNode;
 class DwarfDebug;
 class Mangler;
@@ -134,6 +137,10 @@ private:
   /// A vector of all debug/EH info emitters we should use. This vector
   /// maintains ownership of the emitters.
   SmallVector<HandlerInfo, 1> Handlers;
+
+  /// Vector of diversification handlers. These are seperate from Handlers since
+  /// they need to be enabled regardless of availability of debug info.
+  SmallVector<HandlerInfo, 1> DivHandlers;
 
   /// If the target supports dwarf debug info, this pointer is non-null.
   DwarfDebug *DD;
@@ -365,6 +372,10 @@ public:
   MCSymbol *GetBlockAddressSymbol(const BlockAddress *BA) const;
   MCSymbol *GetBlockAddressSymbol(const BasicBlock *BB) const;
 
+  /// Return the symbol for the specified trampoline target. Needs to be
+  /// machine-specific to handle PLT functions.
+  virtual const MCSymbolRefExpr *GetTrampolineSymref(const GlobalValue *GV) const;
+
   //===------------------------------------------------------------------===//
   // Emission Helper Routines.
   //===------------------------------------------------------------------===//
@@ -544,13 +555,26 @@ private:
   void EmitLinkage(const GlobalValue *GV, MCSymbol *GVSym) const;
 
   void EmitJumpTableEntry(const MachineJumpTableInfo *MJTI,
-                          const MachineBasicBlock *MBB, unsigned uid) const;
+                          const MachineBasicBlock *MBB, unsigned uid,
+                          bool JTInDiffSection) const;
   void EmitLLVMUsedList(const ConstantArray *InitList);
   /// Emit llvm.ident metadata in an '.ident' directive.
   void EmitModuleIdents(Module &M);
   void EmitXXStructorList(const DataLayout &DL, const Constant *List,
                           bool isCtor);
   GCMetadataPrinter *GetOrCreateGCPrinter(GCStrategy &C);
+
+protected:
+
+private:
+  // Need to keep the error handler streamer seperate so we don't emit duplicate
+  // debug info
+  EHStreamer *ES;
+
+  // RNG instance for this pass
+  std::unique_ptr<RandomNumberGenerator> RNG;
+
+  void EmitCallTrampolines();
 };
 }
 

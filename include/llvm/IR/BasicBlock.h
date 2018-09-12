@@ -59,6 +59,9 @@ private:
   InstListType InstList;
   Function *Parent;
 
+  int NOPInsertionPercentage;
+  double exeCount;
+
   void setParent(Function *parent);
   friend class SymbolTableListTraits<BasicBlock>;
 
@@ -314,6 +317,19 @@ public:
   /// \brief Return the landingpad instruction associated with the landing pad.
   LandingPadInst *getLandingPadInst();
   const LandingPadInst *getLandingPadInst() const;
+
+  int getNOPInsertionPercentage() const {
+    return NOPInsertionPercentage;
+  }
+  void setNOPInsertionPercentage(int NIP) {
+    NOPInsertionPercentage = NIP;
+  }
+  double getExeCount() const {
+    return exeCount;
+  }
+  void setExeCount(double ec) {
+    exeCount = ec;
+  }
 
 private:
   /// \brief Increment the internal refcount of the number of BlockAddresses

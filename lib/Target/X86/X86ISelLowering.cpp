@@ -48,6 +48,7 @@
 #include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCExpr.h"
 #include "llvm/MC/MCSymbol.h"
+#include "llvm/MultiCompiler/MultiCompilerOptions.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
@@ -1847,7 +1848,8 @@ X86TargetLowering::X86TargetLowering(const X86TargetMachine &TM,
   // FIXME: Use a CPU attribute to trigger this, not a CPU model.
   PredictableSelectIsExpensive = !Subtarget->isAtom();
   EnableExtLdPromotion = true;
-  setPrefFunctionAlignment(4); // 2^4 bytes.
+  setPrefFunctionAlignment(multicompiler::FunctionAlignment);
+  // setPrefFunctionAlignment(4); // 2^4 bytes.
 
   verifyIntrinsicTables();
 }
@@ -2517,6 +2519,7 @@ static bool mayTailCallThisCC(CallingConv::ID CC) {
   case CallingConv::C:
   case CallingConv::X86_64_Win64:
   case CallingConv::X86_64_SysV:
+  case CallingConv::X86_64_ReadactorCookie:
   // Callee pop conventions:
   case CallingConv::X86_ThisCall:
   case CallingConv::X86_StdCall:
@@ -3448,6 +3451,7 @@ X86TargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
 
       Callee = DAG.getTargetGlobalAddress(
           GV, dl, getPointerTy(DAG.getDataLayout()), G->getOffset(), OpFlags);
+      Callee.getNode()->setTrapInfo(G->getTrapInfo());
 
       // Add a wrapper if needed.
       if (WrapperKind != ISD::DELETED_NODE)
@@ -3540,10 +3544,13 @@ X86TargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
     // should be computed from returns not tail calls.  Consider a void
     // function making a tail call to a function returning int.
     MF.getFrameInfo()->setHasTailCall();
-    return DAG.getNode(X86ISD::TC_RETURN, dl, NodeTys, Ops);
+    Chain =  DAG.getNode(X86ISD::TC_RETURN, dl, NodeTys, Ops);
+    Chain.getNode()->setTrapInfo(CLI.trapInfo);
+    return Chain;
   }
 
   Chain = DAG.getNode(X86ISD::CALL, dl, NodeTys, Ops);
+  Chain.getNode()->setTrapInfo(CLI.trapInfo);
   InFlag = Chain.getValue(1);
 
   // Create the CALLSEQ_END node.
@@ -12107,6 +12114,7 @@ X86TargetLowering::LowerConstantPool(SDValue Op, SelectionDAG &DAG) const {
   auto PtrVT = getPointerTy(DAG.getDataLayout());
   SDValue Result = DAG.getTargetConstantPool(
       CP->getConstVal(), PtrVT, CP->getAlignment(), CP->getOffset(), OpFlag);
+  Result.getNode()->setTrapInfo(Op->getTrapInfo());
   SDLoc DL(CP);
   Result = DAG.getNode(WrapperKind, DL, PtrVT, Result);
   // With PIC, the address is actually $g + Offset.
@@ -12226,7 +12234,8 @@ X86TargetLowering::LowerBlockAddress(SDValue Op, SelectionDAG &DAG) const {
 
 SDValue
 X86TargetLowering::LowerGlobalAddress(const GlobalValue *GV, SDLoc dl,
-                                      int64_t Offset, SelectionDAG &DAG) const {
+                                      int64_t Offset, TrapInfo TI,
+                                      SelectionDAG &DAG) const {
   // Create the TargetGlobalAddress node, folding in the constant
   // offset if it is legal.
   unsigned char OpFlags =
@@ -12238,6 +12247,7 @@ X86TargetLowering::LowerGlobalAddress(const GlobalValue *GV, SDLoc dl,
       X86::isOffsetSuitableForCodeModel(Offset, M)) {
     // A direct static reference to a global.
     Result = DAG.getTargetGlobalAddress(GV, dl, PtrVT, Offset);
+    Result.getNode()->setTrapInfo(TI);
     Offset = 0;
   } else {
     Result = DAG.getTargetGlobalAddress(GV, dl, PtrVT, 0, OpFlags);
@@ -12264,9 +12274,11 @@ X86TargetLowering::LowerGlobalAddress(const GlobalValue *GV, SDLoc dl,
 
   // If there was a non-zero offset that we didn't fold, create an explicit
   // addition for it.
-  if (Offset != 0)
+  if (Offset != 0) {
     Result = DAG.getNode(ISD::ADD, dl, PtrVT, Result,
                          DAG.getConstant(Offset, dl, PtrVT));
+    Result.getNode()->setTrapInfo(TI);
+  }
 
   return Result;
 }
@@ -12275,7 +12287,8 @@ SDValue
 X86TargetLowering::LowerGlobalAddress(SDValue Op, SelectionDAG &DAG) const {
   const GlobalValue *GV = cast<GlobalAddressSDNode>(Op)->getGlobal();
   int64_t Offset = cast<GlobalAddressSDNode>(Op)->getOffset();
-  return LowerGlobalAddress(GV, SDLoc(Op), Offset, DAG);
+  TrapInfo TI = cast<GlobalAddressSDNode>(Op)->getTrapInfo();
+  return LowerGlobalAddress(GV, SDLoc(Op), Offset, TI, DAG);
 }
 
 static SDValue

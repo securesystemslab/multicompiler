@@ -11,9 +11,11 @@
 #define LLVM_LIB_TARGET_X86_X86ASMPRINTER_H
 
 #include "X86Subtarget.h"
+#include "llvm/IR/Module.h"
 #include "llvm/CodeGen/AsmPrinter.h"
 #include "llvm/CodeGen/FaultMaps.h"
 #include "llvm/CodeGen/StackMaps.h"
+#include "llvm/Support/RandomNumberGenerator.h"
 #include "llvm/Target/TargetMachine.h"
 
 // Implemented in X86MCInstLower.cpp
@@ -24,11 +26,13 @@ namespace {
 namespace llvm {
 class MCStreamer;
 class MCSymbol;
+class Function;
 
 class LLVM_LIBRARY_VISIBILITY X86AsmPrinter : public AsmPrinter {
   const X86Subtarget *Subtarget;
   StackMaps SM;
   FaultMaps FM;
+  StringMap<unsigned> NextID;
 
   // This utility class tracks the length of a stackmap instruction's 'shadow'.
   // It is used by the X86AsmPrinter to ensure that the stackmap shadow
@@ -124,6 +128,10 @@ class LLVM_LIBRARY_VISIBILITY X86AsmPrinter : public AsmPrinter {
   }
 
   bool runOnMachineFunction(MachineFunction &F) override;
+
+  /// Return the symbol for the specified trampoline target. Needs to be
+  /// machine-specific to handle PLT functions.
+  const MCSymbolRefExpr *GetTrampolineSymref(const GlobalValue *GV) const override;
 };
 
 } // end namespace llvm

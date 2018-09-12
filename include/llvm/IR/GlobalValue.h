@@ -20,6 +20,7 @@
 
 #include "llvm/IR/Constant.h"
 #include "llvm/IR/DerivedTypes.h"
+#include "llvm/Support/MD5.h"
 #include <system_error>
 
 namespace llvm {
@@ -70,7 +71,8 @@ protected:
       : Constant(PointerType::get(Ty, AddressSpace), VTy, Ops, NumOps),
         ValueType(Ty), Linkage(Linkage), Visibility(DefaultVisibility),
         UnnamedAddr(0), DllStorageClass(DefaultStorageClass),
-        ThreadLocal(NotThreadLocal), IntID((Intrinsic::ID)0U), Parent(nullptr) {
+        ThreadLocal(NotThreadLocal), Trampolines(0),
+        IntID((Intrinsic::ID)0U), Parent(nullptr) {
     setName(Name);
   }
 
@@ -85,6 +87,8 @@ protected:
   unsigned ThreadLocal : 3; // Is this symbol "Thread Local", if so, what is
                             // the desired model?
   static const unsigned GlobalValueSubClassDataBits = 19;
+
+  unsigned Trampolines : 1; // Is this global an array of trampolines?
 
 private:
   // Give subclasses access to what otherwise would be wasted padding.
@@ -130,6 +134,9 @@ public:
 
   bool hasUnnamedAddr() const { return UnnamedAddr; }
   void setUnnamedAddr(bool Val) { UnnamedAddr = Val; }
+
+  bool hasTrampolines() const { return Trampolines; }
+  void setTrampolines(bool Val) { Trampolines = Val; }
 
   bool hasComdat() const { return getComdat() != nullptr; }
   Comdat *getComdat();
@@ -310,6 +317,31 @@ public:
       return Name.substr(1);
     return Name;
   }
+
+  /// Return the modified name for a global value suitable to be
+  /// used as the key for a global lookup (e.g. profile or ThinLTO).
+  /// The value's original name is \c Name and has linkage of type
+  /// \c Linkage. The value is defined in module \c FileName.
+  static std::string getGlobalIdentifier(StringRef Name,
+                                         GlobalValue::LinkageTypes Linkage,
+                                         StringRef FileName);
+
+  /// Return the modified name for this global value suitable to be
+  /// used as the key for a global lookup (e.g. profile or ThinLTO).
+  std::string getGlobalIdentifier() const;
+
+  /// Declare a type to represent a global unique identifier for a global value.
+  /// This is a 64 bits hash that is used by PGO and ThinLTO to have a compact
+  /// unique way to identify a symbol.
+  using GUID = uint64_t;
+
+  /// Return a 64-bit global unique ID constructed from global value name
+  /// (i.e. returned by getGlobalIdentifier()).
+  static GUID getGUID(StringRef GlobalName) { return MD5Hash(GlobalName); }
+
+  /// Return a 64-bit global unique ID constructed from global value name
+  /// (i.e. returned by getGlobalIdentifier()).
+  GUID getGUID() const { return getGUID(getGlobalIdentifier()); }
 
 /// @name Materialization
 /// Materialization is used to construct functions only as they're needed. This

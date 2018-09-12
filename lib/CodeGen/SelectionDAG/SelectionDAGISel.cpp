@@ -2606,6 +2606,7 @@ SelectCodeCommon(SDNode *NodeToMatch, const unsigned char *MatcherTable,
   case ISD::RegisterMask:
   case ISD::HANDLENODE:
   case ISD::MDNODE_SDNODE:
+  case ISD::TEXTRAP_SDNODE:
   case ISD::TargetConstant:
   case ISD::TargetConstantFP:
   case ISD::TargetConstantPool:

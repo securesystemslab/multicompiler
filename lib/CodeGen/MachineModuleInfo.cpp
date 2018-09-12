@@ -250,6 +250,7 @@ void MachineModuleInfo::EndFunction() {
   CallsUnwindInit = false;
   HasEHFunclets = false;
   VariableDbgInfos.clear();
+  CallTrampolines.clear();
 }
 
 //===- Address of Block Management ----------------------------------------===//

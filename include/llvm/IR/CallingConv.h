@@ -168,6 +168,10 @@ namespace CallingConv {
     /// subtargets.
     X86_INTR = 83,
 
+    // ReadactorCookie - Calling convention that is just like C, but passes the
+    // cookie in a scratch reg
+    X86_64_ReadactorCookie = 84,
+
     /// The highest possible calling convention ID. Must be some 2^k - 1.
     MaxID = 1023
   };

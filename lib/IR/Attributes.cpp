@@ -261,6 +261,7 @@ std::string Attribute::getAsString(bool InAttrGrp) const {
     return "sspreq";
   if (hasAttribute(Attribute::StackProtectStrong))
     return "sspstrong";
+
   if (hasAttribute(Attribute::SafeStack))
     return "safestack";
   if (hasAttribute(Attribute::StructRet))
@@ -275,6 +276,12 @@ std::string Attribute::getAsString(bool InAttrGrp) const {
     return "zeroext";
   if (hasAttribute(Attribute::Cold))
     return "cold";
+  if (hasAttribute(Attribute::Trampoline))
+    return "trampoline";
+  if (hasAttribute(Attribute::CookieCheck))
+    return "cookie_check";
+  if (hasAttribute(Attribute::CrossCheck))
+    return "crosscheck";
 
   // FIXME: These should be output like this:
   //
@@ -452,6 +459,10 @@ uint64_t AttributeImpl::getAttrMask(Attribute::AttrKind Val) {
   case Attribute::NoRecurse:       return 1ULL << 48;
   case Attribute::InaccessibleMemOnly:         return 1ULL << 49;
   case Attribute::InaccessibleMemOrArgMemOnly: return 1ULL << 50;
+  // FIXME : NYO : Check the consistency of the changed enum numbers
+  case Attribute::Trampoline:      return 1ULL << 51;
+  case Attribute::CookieCheck:     return 1ULL << 52;
+  case Attribute::CrossCheck:      return 1ULL << 53;
   case Attribute::Dereferenceable:
     llvm_unreachable("dereferenceable attribute not supported in raw format");
     break;

@@ -1256,6 +1256,7 @@ static void changeToCall(InvokeInst *II) {
   NewCall->setCallingConv(II->getCallingConv());
   NewCall->setAttributes(II->getAttributes());
   NewCall->setDebugLoc(II->getDebugLoc());
+  NewCall->setTrapInfo(II->getTrapInfo());
   II->replaceAllUsesWith(NewCall);
 
   // Follow the call by a branch to the normal destination.

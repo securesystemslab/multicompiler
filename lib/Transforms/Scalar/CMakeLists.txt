@@ -43,7 +43,6 @@ add_llvm_library(LLVMScalarOpts
   ScalarReplAggregates.cpp
   Scalarizer.cpp
   SeparateConstOffsetFromGEP.cpp
-  ShuffleFunctions.cpp
   SimplifyCFGPass.cpp
   Sink.cpp
   SpeculativeExecution.cpp

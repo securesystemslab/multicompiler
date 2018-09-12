@@ -1267,12 +1267,15 @@ void Verifier::VerifyAttributeTypes(AttributeSet Attrs, unsigned Idx,
         I->getKindAsEnum() == Attribute::NoBuiltin ||
         I->getKindAsEnum() == Attribute::Cold ||
         I->getKindAsEnum() == Attribute::OptimizeNone ||
+        I->getKindAsEnum() == Attribute::Trampoline ||
         I->getKindAsEnum() == Attribute::JumpTable ||
         I->getKindAsEnum() == Attribute::Convergent ||
         I->getKindAsEnum() == Attribute::ArgMemOnly ||
         I->getKindAsEnum() == Attribute::NoRecurse ||
         I->getKindAsEnum() == Attribute::InaccessibleMemOnly ||
-        I->getKindAsEnum() == Attribute::InaccessibleMemOrArgMemOnly) {
+        I->getKindAsEnum() == Attribute::InaccessibleMemOrArgMemOnly ||
+        I->getKindAsEnum() == Attribute::CookieCheck ||
+        I->getKindAsEnum() == Attribute::CrossCheck) {
       if (!isFunction) {
         CheckFailed("Attribute '" + I->getAsString() +
                     "' only applies to functions!", V);
@@ -1527,6 +1530,8 @@ void Verifier::visitConstantExprsRecursively(const Constant *EntryC) {
 
     // Visit all sub-expressions.
     for (const Use &U : C->operands()) {
+      if (!U && isa<JumpTrampoline>(C))
+        break;
       const auto *OpC = dyn_cast<Constant>(U);
       if (!OpC)
         continue;

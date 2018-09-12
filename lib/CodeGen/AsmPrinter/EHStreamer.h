@@ -14,6 +14,7 @@
 #ifndef LLVM_LIB_CODEGEN_ASMPRINTER_EHSTREAMER_H
 #define LLVM_LIB_CODEGEN_ASMPRINTER_EHSTREAMER_H
 
+#include <llvm/CodeGen/MachineModuleInfo.h>
 #include "AsmPrinterHandler.h"
 #include "llvm/ADT/DenseMap.h"
 
@@ -110,6 +111,9 @@ protected:
   ///     catches in the function.  This tables is reversed indexed base 1.
   void emitExceptionTable();
 
+  void emitExceptionTableForTramp(const CallTrampolineInfo &Info,
+                                  MCSymbol *EndSym);
+
   virtual void emitTypeInfos(unsigned TTypeEncoding);
 
   // Helpers for for identifying what kind of clause an EH typeid or selector
@@ -131,6 +135,20 @@ public:
   /// Return `true' if this is a call to a function marked `nounwind'. Return
   /// `false' otherwise.
   static bool callToNoUnwindFunction(const MachineInstr *MI);
+
+  virtual void beginTrampoline(
+      const MachineFunction *MF, const CallTrampolineInfo &CTI) {}
+
+  virtual void prepareTrampolines(
+      SmallVector<const LandingPadInfo *, 64> &LandingPads,
+      DenseMap<const MachineInstr*, const LandingPadInfo *> &CallPadMap) {}
+
+  virtual void endTrampoline(
+      const CallTrampolineInfo &CTI, MCSymbol *EndSym) {}
+
+  void computePadMapForTramp(
+      SmallVector<const LandingPadInfo *, 64> &LandingPads,
+      DenseMap<const MachineInstr*, const LandingPadInfo *> &CallPadMap);
 };
 }
 

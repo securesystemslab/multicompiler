@@ -155,7 +155,8 @@ enum { BITCODE_CURRENT_EPOCH = 0 };
 
     TYPE_CODE_FUNCTION = 21,    // FUNCTION: [vararg, retty, paramty x N]
 
-    TYPE_CODE_TOKEN = 22        // TOKEN
+    TYPE_CODE_TOKEN = 22,       // TOKEN
+    TYPE_CODE_TRAMPOLINE = 23,   // TRAMPOLINE
   };
 
   enum OperandBundleTagCode {
@@ -251,8 +252,11 @@ enum { BITCODE_CURRENT_EPOCH = 0 };
     CST_CODE_CE_INBOUNDS_GEP = 20,// INBOUNDS_GEP:  [n x operands]
     CST_CODE_BLOCKADDRESS  = 21,  // CST_CODE_BLOCKADDRESS [fnty, fnval, bb#]
     CST_CODE_DATA          = 22,  // DATA:          [n x elements]
-    CST_CODE_INLINEASM     = 23   // INLINEASM:     [sideeffect|alignstack|
+    CST_CODE_INLINEASM     = 23,  // INLINEASM:     [sideeffect|alignstack|
                                   //                 asmdialect,asmstr,conststr]
+    CST_CODE_JUMPTRAMPOLINE = 24,  // CST_CODE_JUMPTRAMPOLINE [fnty, fnval]
+    CST_CODE_VT_INDEX      = 25,  // VT_INDEX:       [intval, classname, maxfuncs,
+                                  //                  methodpointer]
   };
 
   /// CastOpcodes - These are values used in the bitcode files to encode which
@@ -427,6 +431,7 @@ enum { BITCODE_CURRENT_EPOCH = 0 };
     // 53 is unused.
     // 54 is unused.
     FUNC_CODE_OPERAND_BUNDLE = 55, // OPERAND_BUNDLE: [tag#, value...]
+    FUNC_CODE_TRAP_INFO        = 56, // TRAP_INFO: [ClassName, MaxNumVFuncs]
   };
 
   enum UseListCodes {
@@ -485,7 +490,8 @@ enum { BITCODE_CURRENT_EPOCH = 0 };
     ATTR_KIND_SWIFT_ERROR = 47,
     ATTR_KIND_NO_RECURSE = 48,
     ATTR_KIND_INACCESSIBLEMEM_ONLY = 49,
-    ATTR_KIND_INACCESSIBLEMEM_OR_ARGMEMONLY = 50
+    ATTR_KIND_INACCESSIBLEMEM_OR_ARGMEMONLY = 50,
+    ATTR_KIND_CROSSCHECK = 51
   };
 
   enum ComdatSelectionKindCodes {

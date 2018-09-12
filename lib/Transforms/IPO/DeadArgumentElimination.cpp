@@ -271,6 +271,7 @@ bool DAE::DeleteDeadVarargs(Function &Fn) {
         cast<CallInst>(New)->setTailCall();
     }
     New->setDebugLoc(Call->getDebugLoc());
+    New->setTrapInfo(Call->getTrapInfo());
 
     Args.clear();
 
@@ -964,6 +965,7 @@ bool DAE::RemoveDeadStuffFromFunction(Function *F) {
         cast<CallInst>(New)->setTailCall();
     }
     New->setDebugLoc(Call->getDebugLoc());
+    New->setTrapInfo(Call->getTrapInfo());
 
     Args.clear();
 

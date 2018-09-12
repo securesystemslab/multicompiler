@@ -36,6 +36,7 @@
 #include "llvm/IR/TypeFinder.h"
 #include "llvm/IR/UseListOrder.h"
 #include "llvm/IR/ValueSymbolTable.h"
+#include "llvm/IR/Trampoline.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/Dwarf.h"
 #include "llvm/Support/ErrorHandling.h"
@@ -465,6 +466,7 @@ void TypePrinting::print(Type *Ty, raw_ostream &OS) {
   case Type::MetadataTyID:  OS << "metadata"; return;
   case Type::X86_MMXTyID:   OS << "x86_mmx"; return;
   case Type::TokenTyID:     OS << "token"; return;
+  case Type::TrampolineTyID: OS << "trampoline"; return;
   case Type::IntegerTyID:
     OS << 'i' << cast<IntegerType>(Ty)->getBitWidth();
     return;
@@ -1090,7 +1092,13 @@ static void WriteConstantInternal(raw_ostream &Out, const Constant *CV,
       Out << (CI->getZExtValue() ? "true" : "false");
       return;
     }
-    Out << CI->getValue();
+    if (isa<ConstantVTIndex>(CI))
+    {
+      Out << "vtindex[";
+      Out << CI->getValue();
+      Out << ']';
+    } else
+      Out << CI->getValue();
     return;
   }
 
@@ -1330,6 +1338,21 @@ static void WriteConstantInternal(raw_ostream &Out, const Constant *CV,
     if (CE->isCast()) {
       Out << " to ";
       TypePrinter.print(CE->getType(), Out);
+    }
+
+    Out << ')';
+    return;
+  }
+
+  if (const JumpTrampoline *JT = dyn_cast<JumpTrampoline>(CV)) {
+    Out << " (";
+
+    for (User::const_op_iterator OI=JT->op_begin(); OI != JT->op_end(); ++OI) {
+      TypePrinter.print((*OI)->getType(), Out);
+      Out << ' ';
+      WriteAsOperandInternal(Out, *OI, &TypePrinter, Machine, Context);
+      if (OI+1 != JT->op_end())
+        Out << ", ";
     }
 
     Out << ')';
@@ -2037,6 +2060,7 @@ public:
 
   void printTypeIdentities();
   void printGlobal(const GlobalVariable *GV);
+  void printTrampoline(const Trampoline *T);
   void printAlias(const GlobalAlias *GV);
   void printComdat(const Comdat *C);
   void printFunction(const Function *F);
@@ -2415,6 +2439,7 @@ void AssemblyWriter::printGlobal(const GlobalVariable *GV) {
   if (unsigned AddressSpace = GV->getType()->getAddressSpace())
     Out << "addrspace(" << AddressSpace << ") ";
   if (GV->isExternallyInitialized()) Out << "externally_initialized ";
+  if (GV->isNoCrossCheck()) Out << "nocrosscheck ";
   Out << (GV->isConstant() ? "constant " : "global ");
   TypePrinter.print(GV->getType()->getElementType(), Out);
 
@@ -2433,6 +2458,28 @@ void AssemblyWriter::printGlobal(const GlobalVariable *GV) {
     Out << ", align " << GV->getAlignment();
 
   printInfoComment(*GV);
+}
+
+void AssemblyWriter::printTrampoline(const Trampoline *T) {
+  WriteAsOperandInternal(Out, T, &TypePrinter, &Machine, T->getParent());
+  Out << " = ";
+
+  PrintLinkage(T->getLinkage(), Out);
+  if (T->hasUnnamedAddr())
+    Out << "unnamed_addr ";
+
+  TypePrinter.print(T->getType(), Out);
+
+  if (T->hasSection()) {
+    Out << ", section \"";
+    PrintEscapedString(T->getSection(), Out);
+    Out << '"';
+  }
+  maybePrintComdat(Out, *T);
+  if (T->getAlignment())
+    Out << ", align " << T->getAlignment();
+
+  printInfoComment(*T);
 }
 
 void AssemblyWriter::printAlias(const GlobalAlias *GA) {
@@ -3315,6 +3362,8 @@ void Value::print(raw_ostream &ROS, ModuleSlotTracker &MST,
       W.printGlobal(V);
     else if (const Function *F = dyn_cast<Function>(GV))
       W.printFunction(F);
+    else if (const Trampoline *T = dyn_cast<Trampoline>(GV))
+      W.printTrampoline(T);
     else
       W.printAlias(cast<GlobalAlias>(GV));
   } else if (const MetadataAsValue *V = dyn_cast<MetadataAsValue>(this)) {

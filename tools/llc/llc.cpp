@@ -29,6 +29,7 @@
 #include "llvm/IR/Verifier.h"
 #include "llvm/IRReader/IRReader.h"
 #include "llvm/MC/SubtargetFeature.h"
+#include "llvm/MultiCompiler/MultiCompilerOptions.h"
 #include "llvm/Pass.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"

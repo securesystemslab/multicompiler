@@ -23,6 +23,7 @@ namespace llvm {
   template <typename ValueSubClass> class SymbolTableListTraits;
   class BasicBlock;
   class Function;
+  class Trampoline;
   class NamedMDNode;
   class Module;
   class StringRef;
@@ -39,6 +40,7 @@ class ValueSymbolTable {
   friend class SymbolTableListTraits<Function>;
   friend class SymbolTableListTraits<GlobalVariable>;
   friend class SymbolTableListTraits<GlobalAlias>;
+  friend class SymbolTableListTraits<Trampoline>;
 /// @name Types
 /// @{
 public:

@@ -22,6 +22,7 @@
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Operator.h"
 #include "llvm/Support/ErrorHandling.h"
+#include "llvm/Support/Path.h"
 using namespace llvm;
 
 //===----------------------------------------------------------------------===//
@@ -99,6 +100,37 @@ void GlobalObject::copyAttributesFrom(const GlobalValue *Src) {
   }
 }
 
+std::string GlobalValue::getGlobalIdentifier(StringRef Name,
+                                             GlobalValue::LinkageTypes Linkage,
+                                             StringRef FileName) {
+
+  // Value names may be prefixed with a binary '1' to indicate
+  // that the backend should not modify the symbols due to any platform
+  // naming convention. Do not include that '1' in the PGO profile name.
+  if (Name[0] == '\1')
+    Name = Name.substr(1);
+
+  std::string NewName = Name;
+  if (llvm::GlobalValue::isLocalLinkage(Linkage)) {
+    // For local symbols, prepend the main file name to distinguish them.
+    // Do not include the full path in the file name since there's no guarantee
+    // that it will stay the same, e.g., if the files are checked out from
+    // version control in different locations.
+    if (FileName.empty())
+      NewName = NewName.insert(0, "<unknown>:");
+    else {
+      auto FileNameIter = sys::path::rbegin(FileName);
+      NewName = NewName.insert(0, FileNameIter->str() + ":");
+    }
+  }
+  return NewName;
+}
+
+std::string GlobalValue::getGlobalIdentifier() const {
+  return getGlobalIdentifier(getName(), getLinkage(),
+                             getParent()->getModuleIdentifier());
+}
+
 const char *GlobalValue::getSection() const {
   if (auto *GA = dyn_cast<GlobalAlias>(this)) {
     // In general we cannot compute this at the IR level, but we try.
@@ -129,6 +161,10 @@ bool GlobalValue::isDeclaration() const {
   // Functions are definitions if they have a body.
   if (const Function *F = dyn_cast<Function>(this))
     return F->empty() && !F->isMaterializable();
+
+  // Trampolines are definitions if they have a target
+  if (const JumpTrampoline *T = dyn_cast<JumpTrampoline>(this))
+    return T->getTarget() == nullptr;
 
   // Aliases are always definitions.
   assert(isa<GlobalAlias>(this));
@@ -188,7 +224,8 @@ GlobalVariable::GlobalVariable(Type *Ty, bool constant, LinkageTypes Link,
                    OperandTraits<GlobalVariable>::op_begin(this),
                    InitVal != nullptr, Link, Name, AddressSpace),
       isConstantGlobal(constant),
-      isExternallyInitializedConstant(isExternallyInitialized) {
+      isExternallyInitializedConstant(isExternallyInitialized),
+      noCrossCheck(false)  {
   setThreadLocalMode(TLMode);
   if (InitVal) {
     assert(InitVal->getType() == Ty &&
@@ -206,7 +243,8 @@ GlobalVariable::GlobalVariable(Module &M, Type *Ty, bool constant,
                    OperandTraits<GlobalVariable>::op_begin(this),
                    InitVal != nullptr, Link, Name, AddressSpace),
       isConstantGlobal(constant),
-      isExternallyInitializedConstant(isExternallyInitialized) {
+      isExternallyInitializedConstant(isExternallyInitialized),
+      noCrossCheck(false) {
   setThreadLocalMode(TLMode);
   if (InitVal) {
     assert(InitVal->getType() == Ty &&
@@ -260,6 +298,7 @@ void GlobalVariable::copyAttributesFrom(const GlobalValue *Src) {
   if (const GlobalVariable *SrcVar = dyn_cast<GlobalVariable>(Src)) {
     setThreadLocalMode(SrcVar->getThreadLocalMode());
     setExternallyInitialized(SrcVar->isExternallyInitialized());
+    setNoCrossCheck(SrcVar->isNoCrossCheck());
   }
 }
 

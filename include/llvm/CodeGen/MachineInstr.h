@@ -28,6 +28,7 @@
 #include "llvm/IR/DebugInfo.h"
 #include "llvm/IR/DebugLoc.h"
 #include "llvm/IR/InlineAsm.h"
+#include "llvm/IR/TrapInfo.h"
 #include "llvm/MC/MCInstrDesc.h"
 #include "llvm/Support/ArrayRecycler.h"
 #include "llvm/Target/TargetOpcodes.h"
@@ -68,7 +69,8 @@ public:
     FrameDestroy = 1 << 1,              // Instruction is used as a part of
                                         // function frame destruction code.
     BundledPred  = 1 << 2,              // Instruction has bundled predecessors.
-    BundledSucc  = 1 << 3               // Instruction has bundled successors.
+    BundledSucc  = 1 << 3,              // Instruction has bundled successors.
+    InsertedNOP  = 1 << 4
   };
 private:
   const MCInstrDesc *MCID;              // Instruction descriptor.
@@ -101,6 +103,7 @@ private:
   mmo_iterator MemRefs;
 
   DebugLoc debugLoc;                    // Source line information.
+  TrapInfo trapInfo;
 
   MachineInstr(const MachineInstr&) = delete;
   void operator=(const MachineInstr&) = delete;
@@ -245,6 +248,8 @@ public:
 
   /// Returns the debug location id of this MachineInstr.
   const DebugLoc &getDebugLoc() const { return debugLoc; }
+
+  TrapInfo getTrapInfo() const { return trapInfo; }
 
   /// Return the debug variable referenced by
   /// this DBG_VALUE instruction.
@@ -837,6 +842,12 @@ public:
     }
   }
 
+  //// isInsertedNOP - Return true if the instruction is an
+  //// artificially inserted NOP
+  bool isInsertedNOP() const {
+    return getFlag(InsertedNOP);
+  }
+
   /// Return the number of instructions inside the MI bundle, excluding the
   /// bundle header.
   ///
@@ -1166,6 +1177,11 @@ public:
   void setDebugLoc(DebugLoc dl) {
     debugLoc = std::move(dl);
     assert(debugLoc.hasTrivialDestructor() && "Expected trivial destructor");
+  }
+
+  void setTrapInfo(const TrapInfo ti) {
+    trapInfo = ti;
+    assert(trapInfo.hasTrivialDestructor() && "Expected trivial destructor");
   }
 
   /// Erase an operand  from an instruction, leaving it with one

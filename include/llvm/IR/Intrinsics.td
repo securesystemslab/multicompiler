@@ -653,6 +653,28 @@ def int_masked_scatter: Intrinsic<[],
 def int_bitset_test : Intrinsic<[llvm_i1_ty], [llvm_ptr_ty, llvm_metadata_ty],
                                 [IntrNoMem]>;
 
+//===-------------------------- Cookie Intrinsics -------------------------===//
+//
+
+def int_set_cookie : Intrinsic<[], [llvm_i64_ty],
+                               [], "llvm.set_cookie">;
+def int_check_cookie : Intrinsic<[llvm_i1_ty], [llvm_i64_ty],
+                                 [], "llvm.check_cookie">;
+
+//===--------------------- Pointer Masking Intrinsics ---------------------===//
+//
+// Note: these are corrently unused, as I'm testing with an external runtime
+// function. The RT function will either need to be inlined or we'll have to switch
+// back to intrinsics.
+
+def int_hmac_ptr : Intrinsic<[llvm_ptr_ty], [llvm_i16_ty, llvm_ptrptr_ty],
+                             [], "llvm.hmac_ptr">;
+def int_check_ptr : Intrinsic<[llvm_i1_ty], [llvm_ptr_ty, llvm_ptrptr_ty],
+                              [], "llvm.check_ptr">;
+def int_load_ptr_unsafe : Intrinsic<[llvm_ptr_ty], [llvm_ptr_ty],
+                              [], "llvm.load_ptr_unsafe">;
+
+
 //===----------------------------------------------------------------------===//
 // Target-specific intrinsics
 //===----------------------------------------------------------------------===//

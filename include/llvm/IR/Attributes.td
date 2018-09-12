@@ -160,6 +160,14 @@ def UWTable : EnumAttr<"uwtable">;
 /// Zero extended before/after call.
 def ZExt : EnumAttr<"zeroext">;
 
+/// Trampoline function
+def Trampoline : EnumAttr<"trampoline">;
+
+/// Cookie check function
+def CookieCheck : EnumAttr<"cookiecheck">;
+
+def CrossCheck : EnumAttr<"crosscheck">;
+
 /// Target-independent string attributes.
 def LessPreciseFPMAD : StrBoolAttr<"less-precise-fpmad">;
 def NoInfsFPMath : StrBoolAttr<"no-infs-fp-math">;

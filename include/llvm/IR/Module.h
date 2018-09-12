@@ -23,6 +23,7 @@
 #include "llvm/IR/GlobalAlias.h"
 #include "llvm/IR/GlobalVariable.h"
 #include "llvm/IR/Metadata.h"
+#include "llvm/IR/Trampoline.h"
 #include "llvm/Support/CBindingWrapping.h"
 #include "llvm/Support/CodeGen.h"
 #include "llvm/Support/DataTypes.h"
@@ -32,6 +33,7 @@ namespace llvm {
 class FunctionType;
 class GVMaterializer;
 class LLVMContext;
+class Pass;
 class RandomNumberGenerator;
 class StructType;
 
@@ -52,6 +54,24 @@ template<> struct ilist_traits<NamedMDNode>
 
 private:
   mutable ilist_node<NamedMDNode> Sentinel;
+};
+
+template<> struct ilist_traits<Trampoline>
+  : public SymbolTableListTraits<Trampoline> {
+
+  // createSentinel is used to get hold of the node that marks the end of the
+  // list... (same trick used here as in ilist_traits<Instruction>)
+  Trampoline *createSentinel() const {
+    return static_cast<Trampoline*>(&Sentinel);
+  }
+  static void destroySentinel(Trampoline*) {}
+
+  Trampoline *provideInitialHead() const { return createSentinel(); }
+  Trampoline *ensureHead(Trampoline*) const { return createSentinel(); }
+  static void noteHead(Trampoline*, Trampoline*) {}
+
+private:
+  mutable ilist_node<Trampoline> Sentinel;
 };
 
 /// A Module instance is used to store all the information related to an
@@ -75,6 +95,8 @@ public:
   typedef SymbolTableList<Function> FunctionListType;
   /// The type for the list of aliases.
   typedef SymbolTableList<GlobalAlias> AliasListType;
+  /// The type for the list of trampolines
+  typedef SymbolTableList<Trampoline> TrampolineListType;
   /// The type for the list of named metadata.
   typedef ilist<NamedMDNode> NamedMDListType;
   /// The type of the comdat "symbol" table.
@@ -104,6 +126,11 @@ public:
   typedef NamedMDListType::iterator             named_metadata_iterator;
   /// The named metadata constant iterators.
   typedef NamedMDListType::const_iterator const_named_metadata_iterator;
+
+  /// The Trampoline iterator.
+  typedef TrampolineListType::iterator                      trampoline_iterator;
+  /// The Trampoline constant iterator.
+  typedef TrampolineListType::const_iterator          const_trampoline_iterator;
 
   /// This enumeration defines the supported behaviors of module flags.
   enum ModFlagBehavior {
@@ -164,6 +191,7 @@ private:
   FunctionListType FunctionList;  ///< The Functions in the module
   AliasListType AliasList;        ///< The Aliases in the module
   NamedMDListType NamedMDList;    ///< The named metadata in the module
+  TrampolineListType TrampolineList; ///< The Trampolines in the module
   std::string GlobalScopeAsm;     ///< Inline Asm at global scope.
   ValueSymbolTable *ValSymTab;    ///< Symbol table for values
   ComdatSymTabType ComdatSymTab;  ///< Symbol table for COMDATs
@@ -231,7 +259,13 @@ public:
   /// when other randomness consuming passes are added or removed. In
   /// addition, the random stream will be reproducible across LLVM
   /// versions when the pass does not change.
-  RandomNumberGenerator *createRNG(const Pass* P) const;
+  RandomNumberGenerator *createRNG(const Pass* P = 0) const;
+
+  /// CFAR extension to RNG creation.  We would like to independently seed
+  /// different passes to allow individual pass decisions to be deterministic
+  /// while varying others. This allows the pass to pass in a custom seed
+  RandomNumberGenerator *createRNG(uint64_t Seed, const Pass* P = 0,
+                                   StringRef InputSalt = StringRef()) const;
 
 /// @}
 /// @name Module Level Mutators
@@ -483,6 +517,13 @@ public:
   NamedMDListType        &getNamedMDList()            { return NamedMDList; }
   static NamedMDListType Module::*getSublistAccess(NamedMDNode*) {
     return &Module::NamedMDList;
+  }
+  /// Get the Module's list of trampolines (constant).
+  const TrampolineListType   &getTrampolineList() const  { return TrampolineList; }
+  /// Get the Module's list of trampolines.
+  TrampolineListType         &getTrampolineList()        { return TrampolineList; }
+  static TrampolineListType Module::*getSublistAccess(Trampoline*) {
+    return &Module::TrampolineList;
   }
   /// Get the symbol table of global variable and function identifiers
   const ValueSymbolTable &getValueSymbolTable() const { return *ValSymTab; }

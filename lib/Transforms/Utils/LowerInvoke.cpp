@@ -63,6 +63,7 @@ bool LowerInvoke::runOnFunction(Function &F) {
       NewCall->setCallingConv(II->getCallingConv());
       NewCall->setAttributes(II->getAttributes());
       NewCall->setDebugLoc(II->getDebugLoc());
+      NewCall->setTrapInfo(II->getTrapInfo());
       II->replaceAllUsesWith(NewCall);
 
       // Insert an unconditional branch to the normal destination.

@@ -17,6 +17,7 @@
 #define LLVM_MC_MCREGISTERINFO_H
 
 #include "llvm/ADT/DenseMap.h"
+#include "llvm/MultiCompiler/MultiCompilerOptions.h"
 #include "llvm/Support/ErrorHandling.h"
 #include <cassert>
 
@@ -41,6 +42,7 @@ public:
   const uint16_t RegSize, Alignment; // Size & Alignment of register in bytes
   const int8_t CopyCost;
   const bool Allocatable;
+  mutable bool RegsShuffled;
 
   /// getID() - Return the register class ID number.
   ///

@@ -36,6 +36,7 @@ Type *Type::getPrimitiveType(LLVMContext &C, TypeID IDNumber) {
   case MetadataTyID  : return getMetadataTy(C);
   case X86_MMXTyID   : return getX86_MMXTy(C);
   case TokenTyID     : return getTokenTy(C);
+  case TrampolineTyID   : return getTrampolineTy(C);
   default:
     return nullptr;
   }
@@ -177,6 +178,7 @@ Type *Type::getX86_FP80Ty(LLVMContext &C) { return &C.pImpl->X86_FP80Ty; }
 Type *Type::getFP128Ty(LLVMContext &C) { return &C.pImpl->FP128Ty; }
 Type *Type::getPPC_FP128Ty(LLVMContext &C) { return &C.pImpl->PPC_FP128Ty; }
 Type *Type::getX86_MMXTy(LLVMContext &C) { return &C.pImpl->X86_MMXTy; }
+Type *Type::getTrampolineTy(LLVMContext &C) { return &C.pImpl->TrampolineTy; }
 
 IntegerType *Type::getInt1Ty(LLVMContext &C) { return &C.pImpl->Int1Ty; }
 IntegerType *Type::getInt8Ty(LLVMContext &C) { return &C.pImpl->Int8Ty; }
@@ -215,6 +217,10 @@ PointerType *Type::getPPC_FP128PtrTy(LLVMContext &C, unsigned AS) {
 
 PointerType *Type::getX86_MMXPtrTy(LLVMContext &C, unsigned AS) {
   return getX86_MMXTy(C)->getPointerTo(AS);
+}
+
+PointerType *Type::getTrampolinePtrTy(LLVMContext &C, unsigned AS) {
+  return getTrampolineTy(C)->getPointerTo(AS);
 }
 
 PointerType *Type::getIntNPtrTy(LLVMContext &C, unsigned N, unsigned AS) {
@@ -368,7 +374,23 @@ StructType *StructType::get(LLVMContext &Context, ArrayRef<Type*> ETypes,
 
 void StructType::setBody(ArrayRef<Type*> Elements, bool isPacked) {
   assert(isOpaque() && "Struct body already set!");
-  
+
+  setSubclassData(getSubclassData() | SCDB_HasBody);
+  if (isPacked)
+    setSubclassData(getSubclassData() | SCDB_Packed);
+
+  NumContainedTys = Elements.size();
+
+  if (Elements.empty()) {
+    ContainedTys = nullptr;
+    return;
+  }
+
+  ContainedTys = Elements.copy(getContext().pImpl->TypeAllocator).data();
+}
+
+void StructType::resetBody(ArrayRef<Type*> Elements, bool isPacked) {
+
   setSubclassData(getSubclassData() | SCDB_HasBody);
   if (isPacked)
     setSubclassData(getSubclassData() | SCDB_Packed);
@@ -569,6 +591,10 @@ StructType *Module::getTypeByName(StringRef Name) const {
   return getContext().pImpl->NamedStructTypes.lookup(Name);
 }
 
+StructType *StructType::getByName(llvm::LLVMContext &Context, llvm::StringRef Name) {
+  return Context.pImpl->NamedStructTypes.lookup(Name);
+}
+
 
 //===----------------------------------------------------------------------===//
 //                       CompositeType Implementation
@@ -642,7 +668,7 @@ ArrayType *ArrayType::get(Type *ElementType, uint64_t NumElements) {
 
 bool ArrayType::isValidElementType(Type *ElemTy) {
   return !ElemTy->isVoidTy() && !ElemTy->isLabelTy() &&
-         !ElemTy->isMetadataTy() && !ElemTy->isFunctionTy() &&
+         !ElemTy->isMetadataTy() &&
          !ElemTy->isTokenTy();
 }
 

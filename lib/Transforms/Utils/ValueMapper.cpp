@@ -16,6 +16,7 @@
 #include "llvm/IR/CallSite.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/Function.h"
+#include "llvm/IR/GlobalVariable.h"
 #include "llvm/IR/InlineAsm.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Metadata.h"
@@ -115,7 +116,12 @@ Value *llvm::MapValue(const Value *V, ValueToValueMapTy &VM, RemapFlags Flags,
   for (; OpNo != NumOperands; ++OpNo) {
     Value *Op = C->getOperand(OpNo);
     Mapped = MapValue(Op, VM, Flags, TypeMapper, Materializer);
-    if (Mapped != C) break;
+
+    // added check for null value in constant from llvm 3.9 to avoid LTO seg-fault
+    if (!Mapped)
+      return nullptr;
+    if (Mapped != Op)
+      break;
   }
   
   // See if the type mapper wants to remap the type as well.
@@ -140,9 +146,14 @@ Value *llvm::MapValue(const Value *V, ValueToValueMapTy &VM, RemapFlags Flags,
     Ops.push_back(cast<Constant>(Mapped));
   
     // Map the rest of the operands that aren't processed yet.
-    for (++OpNo; OpNo != NumOperands; ++OpNo)
-      Ops.push_back(MapValue(cast<Constant>(C->getOperand(OpNo)), VM,
-                             Flags, TypeMapper, Materializer));
+    for (++OpNo; OpNo != NumOperands; ++OpNo) {
+      // added check for null value in constant from llvm 3.9 to avoid LTO seg-fault
+      Mapped = MapValue(cast<Constant>(C->getOperand(OpNo)), VM, Flags,
+                        TypeMapper, Materializer);
+      if (!Mapped)
+        return nullptr;
+      Ops.push_back(cast<Constant>(Mapped));
+    }
   }
   Type *NewSrcTy = nullptr;
   if (TypeMapper)

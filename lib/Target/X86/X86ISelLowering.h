@@ -1020,7 +1020,8 @@ namespace llvm {
     SDValue LowerConstantPool(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerBlockAddress(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerGlobalAddress(const GlobalValue *GV, SDLoc dl,
-                               int64_t Offset, SelectionDAG &DAG) const;
+                               int64_t Offset, TrapInfo TI,
+                               SelectionDAG &DAG) const;
     SDValue LowerGlobalAddress(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerGlobalTLSAddress(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerExternalSymbol(SDValue Op, SelectionDAG &DAG) const;

@@ -1786,6 +1786,22 @@ fi
 AC_SUBST(LIBXML2_LIBS)
 AC_SUBST(LIBXML2_INC)
 
+dnl openssl is optional; used for RNG
+AC_ARG_WITH(openssl,
+  AS_HELP_STRING([--without-openssl],
+    [Do not use the openssl libcrypto library]),
+    AC_SUBST(LLVM_ENABLE_OPENSSL, [0]),
+    [
+      AC_SUBST(LLVM_ENABLE_OPENSSL, [1])
+      AC_CHECK_LIB(crypto, AES_ctr128_encrypt, [], [
+        echo "Error! You need to have openssl installed."
+        exit -1
+      ])
+    ])
+AC_DEFINE_UNQUOTED([LLVM_ENABLE_OPENSSL],$LLVM_ENABLE_OPENSSL,
+                   [Define if the openssl libcrypto library is enabled])
+
+
 dnl===-----------------------------------------------------------------------===
 dnl===
 dnl=== SECTION 6: Check for header files
@@ -1829,6 +1845,14 @@ if test "$LLVM_ENABLE_ZLIB" -eq 1 ; then
 else
   AC_SUBST(HAVE_LIBZ, 0)
 fi
+if test "$LLVM_ENABLE_OPENSSL" -eq 1 ; then
+  AC_CHECK_HEADERS([openssl/aes.h openssl/evp.h],
+                   AC_SUBST(HAVE_OPENSSL, 1),
+                   AC_SUBST(HAVE_OPENSSL, 0))
+else
+  AC_SUBST(HAVE_OPENSSL, 0)
+fi
+AC_DEFINE_UNQUOTED([HAVE_OPENSSL],$HAVE_OPENSSL,[Define if OpenSSL is available])
 
 dnl Try to find ffi.h.
 if test "$llvm_cv_enable_libffi" = "yes" ; then

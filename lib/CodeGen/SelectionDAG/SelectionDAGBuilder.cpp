@@ -3034,16 +3034,27 @@ void SelectionDAGBuilder::visitGetElementPtr(const User &I) {
       if (CI) {
         if (CI->isZero())
           continue;
-        APInt Offs = ElementSize * CI->getValue().sextOrTrunc(PtrSize);
-        SDValue OffsVal = VectorWidth ?
-          DAG.getConstant(Offs, dl, MVT::getVectorVT(PtrTy, VectorWidth)) :
-          DAG.getConstant(Offs, dl, PtrTy);
+        APInt OffsImm = ElementSize * CI->getValue().sextOrTrunc(PtrSize);
 
         // In an inbouds GEP with an offset that is nonnegative even when
         // interpreted as signed, assume there is no unsigned overflow.
         SDNodeFlags Flags;
-        if (Offs.isNonNegative() && cast<GEPOperator>(I).isInBounds())
+
+        if (OffsImm.isNonNegative() && cast<GEPOperator>(I).isInBounds())
           Flags.setNoUnsignedWrap(true);
+
+        ConstantInt *Offs;
+        MVT OffsVT = VectorWidth ? MVT::getVectorVT(PtrTy, VectorWidth) : PtrTy;
+
+        if (const ConstantVTIndex *VTI = dyn_cast<ConstantVTIndex>(Idx))
+          Offs = ConstantVTIndex::get(IntegerType::get(I.getContext(), PtrSize),
+                                      OffsImm.getSExtValue(), VTI->getTrapInfo());
+        else
+          Offs = ConstantInt::get(IntegerType::get(I.getContext(), PtrSize),
+                                  OffsImm.getSExtValue());
+
+        // Size of Offs and that of OffsVT (or its element) should be identical. 
+        SDValue OffsVal = DAG.getConstant(*Offs, dl, OffsVT);
 
         N = DAG.getNode(ISD::ADD, dl, N.getValueType(), N, OffsVal, &Flags);
         continue;
@@ -3297,6 +3308,11 @@ void SelectionDAGBuilder::visitStore(const StoreInst &I) {
                               SDValue(Src.getNode(), Src.getResNo() + i),
                               Add, MachinePointerInfo(PtrV, Offsets[i]),
                               isVolatile, isNonTemporal, Alignment, AAInfo);
+
+    TrapInfo TI = I.getTrapInfo();
+    // Only append method struct info to the first value
+    if (TI.isMethodPointer() && i == 0)
+      St.getNode()->setTrapInfo(I.getTrapInfo());
     Chains[ChainI] = St;
   }
 
@@ -5303,6 +5319,49 @@ SelectionDAGBuilder::visitIntrinsicCall(const CallInst &I, unsigned Intrinsic) {
     setValue(&I, N);
     return nullptr;
   }
+  case Intrinsic::check_cookie: {
+    CallingConv::ID CC = I.getCallingConv();
+    const MCPhysReg *ScratchRegs = TLI.getScratchRegisters(CC);
+    if (!ScratchRegs[0])
+      return nullptr;
+
+    MVT WordVT = MVT::getIntegerVT(64);
+
+    SDValue Chain = getRoot();
+
+    // Need to glue the CopyFromReg(R11) to the call so that it is added as an
+    // implicit def by InstrEmitter. This will grab the glue result of the last
+    // call result CopyFromReg node, if any, or the CallSeqEnd (I think).
+    SDValue Glue;
+    for (unsigned i = 0, e = Chain->getNumValues(); i != e; ++i)
+      if (Chain->getValueType(i) == MVT::Glue)
+        Glue = Chain.getValue(i);
+
+    MCPhysReg CookieReg = ScratchRegs[0];
+    SDValue CookieImmValue = getValue(I.getArgOperand(0));
+    SDValue CookieRegValue = DAG.getCopyFromReg(Chain, sdl, CookieReg, WordVT, Glue);
+
+    // const TargetRegisterClass *RC = TLI.getRegClassFor(WordVT);
+    // unsigned VirtReg = DAG.getMachineFunction().getRegInfo()
+    //   .createVirtualRegister(RC);
+
+    MachineFunction &MF = DAG.getMachineFunction();
+    MachineRegisterInfo &RegInfo = MF.getRegInfo();
+    unsigned VirtReg = cast<RegisterSDNode>(CookieRegValue.getOperand(1))->getReg();
+    RegInfo.addLiveIn(CookieReg, VirtReg);
+
+    // SDValue CookieRegValue = DAG.getRegister(VirtReg, WordVT);
+
+    EVT DestVT = MVT::getIntegerVT(1);
+    SDValue CCVal = DAG.getSetCC(sdl, DestVT, CookieRegValue,
+                                 CookieImmValue, ISD::SETEQ);
+    setValue(&I, CCVal);
+    return nullptr;
+  }
+  case Intrinsic::hmac_ptr:
+    return "__llvm_hmac_ptr";
+  case Intrinsic::check_ptr:
+    return "__llvm_check_ptr";
   }
 }
 
@@ -5415,7 +5474,7 @@ void SelectionDAGBuilder::LowerCallTo(ImmutableCallSite CS, SDValue Callee,
   TargetLowering::CallLoweringInfo CLI(DAG);
   CLI.setDebugLoc(getCurSDLoc()).setChain(getRoot())
     .setCallee(RetTy, FTy, Callee, std::move(Args), CS)
-    .setTailCall(isTailCall);
+    .setTailCall(isTailCall).setTrapInfo(CS->getTrapInfo());
   std::pair<SDValue, SDValue> Result = lowerInvokable(CLI, EHPadBB);
 
   if (Result.first.getNode())
@@ -6746,7 +6805,8 @@ std::pair<SDValue, SDValue> SelectionDAGBuilder::lowerCallOperands(
   TargetLowering::CallLoweringInfo CLI(DAG);
   CLI.setDebugLoc(getCurSDLoc()).setChain(getRoot())
     .setCallee(CS.getCallingConv(), ReturnTy, Callee, std::move(Args), NumArgs)
-    .setDiscardResult(CS->use_empty()).setIsPatchPoint(IsPatchPoint);
+    .setDiscardResult(CS->use_empty()).setIsPatchPoint(IsPatchPoint)
+    .setTrapInfo(CS->getTrapInfo());
 
   return lowerInvokable(CLI, EHPadBB);
 }

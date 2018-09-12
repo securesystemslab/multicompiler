@@ -17,6 +17,7 @@
 #include "llvm/CodeGen/RegisterClassInfo.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
+#include "llvm/IR/Module.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
@@ -35,6 +36,9 @@ RegisterClassInfo::RegisterClassInfo()
 void RegisterClassInfo::runOnMachineFunction(const MachineFunction &mf) {
   bool Update = false;
   MF = &mf;
+
+  if (!RNG)
+    RNG.reset(MF->getFunction()->getParent()->createRNG());
 
   // Allocate new array the first time we see a new target.
   if (MF->getSubtarget().getRegisterInfo() != TRI) {
@@ -178,4 +182,17 @@ unsigned RegisterClassInfo::computePSetLimit(unsigned Idx) const {
   unsigned NReserved = RC->getNumRegs() - getNumAllocatableRegs(RC);
   return TRI->getRegPressureSetLimit(*MF, Idx) -
          TRI->getRegClassWeight(RC).RegWeight * NReserved;
+}
+
+void RegisterClassInfo::randomize(const TargetRegisterClass *RC) const {
+  RCInfo &RCI = RegClass[RC->getID()];
+
+  // TODO: randomize CSRs seperately from scratch regs
+  RNG->shuffle(RCI.Order.get(), RCI.NumRegs);
+  DEBUG({
+    dbgs() << "AllocationOrderAfterRandomizing(" << TRI->getRegClassName(RC) << ") = [";
+    for (unsigned I = 0; I != RCI.NumRegs; ++I)
+      dbgs() << ' ' << PrintReg(RCI.Order[I], TRI);
+    dbgs() << (RCI.ProperSubClass ? " ] (sub-class)\n" : " ]\n");
+  });
 }

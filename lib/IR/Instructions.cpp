@@ -3008,6 +3008,9 @@ CastInst::castIsValid(Instruction::CastOps op, Value *S, Type *DstTy) {
   // Check for type sanity on the arguments
   Type *SrcTy = S->getType();
 
+  if (SrcTy->isTrampolineTy() && DstTy->isFunctionTy())
+    return true;
+
   if (!SrcTy->isFirstClassType() || !DstTy->isFirstClassType() ||
       SrcTy->isAggregateType() || DstTy->isAggregateType())
     return false;

@@ -22,6 +22,7 @@
 #include "llvm/Analysis/ScopedNoAliasAA.h"
 #include "llvm/Analysis/TargetLibraryInfo.h"
 #include "llvm/Analysis/TypeBasedAliasAnalysis.h"
+#include "llvm/DataRando/Passes.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/FunctionInfo.h"
 #include "llvm/IR/LegacyPassManager.h"
@@ -104,6 +105,10 @@ static cl::opt<bool> EnableNonLTOGlobalsModRef(
 static cl::opt<bool> EnableLoopLoadElim(
     "enable-loop-load-elim", cl::init(false), cl::Hidden,
     cl::desc("Enable the new, experimental LoopLoadElimination Pass"));
+
+static cl::opt<bool> HeapChecks(
+  "heap-checks", cl::init(false), cl::Hidden,
+  cl::desc("Add variant cross-checks for heap values"));
 
 PassManagerBuilder::PassManagerBuilder() {
     OptLevel = 2;
@@ -203,7 +208,7 @@ void PassManagerBuilder::populateModulePassManager(
     // creates a CGSCC pass manager, but we don't want to add extensions into
     // that pass manager. To prevent this we insert a no-op module pass to reset
     // the pass manager to get the same behavior as EP_OptimizerLast in non-O0
-    // builds. The function merging pass is 
+    // builds. The function merging pass is
     if (MergeFunctions)
       MPM.add(createMergeFunctionsPass());
     else if (!GlobalExtensions->empty() || !Extensions.empty())

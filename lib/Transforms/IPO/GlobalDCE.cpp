@@ -208,6 +208,11 @@ void GlobalDCE::GlobalIsNeeded(GlobalValue *G) {
   } else if (GlobalAlias *GA = dyn_cast<GlobalAlias>(G)) {
     // The target of a global alias is needed.
     MarkUsedGlobalsAsNeeded(GA->getAliasee());
+  } else if (JumpTrampoline *JT = dyn_cast<JumpTrampoline>(G)) {
+    // The target of a global alias is needed.
+    // The JT target can be null, when it is a booby trap.
+    if (JT->getTarget())
+      MarkUsedGlobalsAsNeeded(JT->getTarget());
   } else {
     // Otherwise this must be a function object.  We have to scan the body of
     // the function looking for constants and global values which are used as
@@ -231,6 +236,9 @@ void GlobalDCE::GlobalIsNeeded(GlobalValue *G) {
 void GlobalDCE::MarkUsedGlobalsAsNeeded(Constant *C) {
   if (GlobalValue *GV = dyn_cast<GlobalValue>(C))
     return GlobalIsNeeded(GV);
+
+  if (JumpTrampoline *JT = dyn_cast<JumpTrampoline>(C))
+    return GlobalIsNeeded(JT);
 
   // Loop over all of the operands of the constant, adding any globals they
   // use to the list of needed globals.

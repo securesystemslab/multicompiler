@@ -13,6 +13,7 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include <llvm/Support/Format.h>
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallString.h"
@@ -690,7 +691,7 @@ void MachineFrameInfo::print(const MachineFunction &MF, raw_ostream &OS) const{
   const TargetFrameLowering *FI = MF.getSubtarget().getFrameLowering();
   int ValOffset = (FI ? FI->getOffsetOfLocalArea() : 0);
 
-  OS << "Frame Objects:\n";
+  OS << "Frame Objects for " << MF.getName() << ":\n";
 
   for (unsigned i = 0, e = Objects.size(); i != e; ++i) {
     const StackObject &SO = Objects[i];
@@ -711,11 +712,16 @@ void MachineFrameInfo::print(const MachineFunction &MF, raw_ostream &OS) const{
       int64_t Off = SO.SPOffset - ValOffset;
       OS << ", at location [SP";
       if (Off > 0)
-        OS << "+" << Off;
+        OS << "+" << format_hex(Off, 5);
       else if (Off < 0)
-        OS << Off;
+        OS << "-" << format_hex(-Off, 5);
       OS << "]";
     }
+    if (SO.isSpillSlot || SO.isStatepointSpillSlot)
+      OS << ", spill_slot";
+    if (SO.Alloca)
+      OS << ", has_alloca:" << SO.Alloca->getName();
+
     OS << "\n";
   }
 }
@@ -745,6 +751,8 @@ unsigned MachineJumpTableInfo::getEntrySize(const DataLayout &TD) const {
     return 4;
   case MachineJumpTableInfo::EK_Inline:
     return 0;
+  case MachineJumpTableInfo::EK_Branch:
+    return 8; // FIXME: Hypermizer
   }
   llvm_unreachable("Unknown jump table encoding!");
 }
@@ -764,6 +772,7 @@ unsigned MachineJumpTableInfo::getEntryAlignment(const DataLayout &TD) const {
   case MachineJumpTableInfo::EK_Custom32:
     return TD.getABIIntegerTypeAlignment(32);
   case MachineJumpTableInfo::EK_Inline:
+  case MachineJumpTableInfo::EK_Branch:
     return 1;
   }
   llvm_unreachable("Unknown jump table encoding!");

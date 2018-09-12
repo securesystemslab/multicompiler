@@ -17,6 +17,8 @@
 #define LLVM_ADT_APINT_H
 
 #include "llvm/ADT/ArrayRef.h"
+#include "llvm/ADT/DenseMapInfo.h"
+#include "llvm/ADT/Hashing.h"
 #include "llvm/Support/Compiler.h"
 #include "llvm/Support/MathExtras.h"
 #include <cassert>
@@ -27,7 +29,6 @@
 namespace llvm {
 class FoldingSetNodeID;
 class StringRef;
-class hash_code;
 class raw_ostream;
 
 template <typename T> class SmallVectorImpl;
@@ -89,7 +90,7 @@ class APInt {
     APINT_WORD_SIZE = static_cast<unsigned int>(sizeof(uint64_t))
   };
 
-  friend struct DenseMapAPIntKeyInfo;
+  friend struct DenseMapInfo<APInt>;
 
   /// \brief Fast internal constructor
   ///
@@ -1910,6 +1911,27 @@ inline APInt Not(const APInt &APIVal) { return ~APIVal; }
 // See friend declaration above. This additional declaration is required in
 // order to compile LLVM with IBM xlC compiler.
 hash_code hash_value(const APInt &Arg);
+
+template<>
+struct DenseMapInfo<APInt> {
+  static inline APInt getEmptyKey() {
+    APInt V(nullptr, 0);
+    V.VAL = 0;
+    return V;
+  }
+  static inline APInt getTombstoneKey() {
+    APInt V(nullptr, 0);
+    V.VAL = 1;
+    return V;
+  }
+  static unsigned getHashValue(const APInt &Key) {
+    return static_cast<unsigned>(hash_value(Key));
+  }
+  static bool isEqual(const APInt &LHS, const APInt &RHS) {
+    return LHS.getBitWidth() == RHS.getBitWidth() && LHS == RHS;
+  }
+};
+
 } // End of llvm namespace
 
 #endif

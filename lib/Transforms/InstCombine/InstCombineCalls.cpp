@@ -2292,6 +2292,7 @@ bool InstCombiner::transformConstExprCastCall(CallSite CS) {
     cast<CallInst>(NC)->setCallingConv(CI->getCallingConv());
     cast<CallInst>(NC)->setAttributes(NewCallerPAL);
   }
+  NC->setTrapInfo(Caller->getTrapInfo());
 
   // Insert a cast of the return type as necessary.
   Value *NV = NC;
@@ -2476,6 +2477,7 @@ InstCombiner::transformCallThroughTrampoline(CallSite CS,
           setCallingConv(cast<CallInst>(Caller)->getCallingConv());
         cast<CallInst>(NewCaller)->setAttributes(NewPAL);
       }
+      NewCaller->setTrapInfo(Caller->getTrapInfo());
 
       return NewCaller;
     }

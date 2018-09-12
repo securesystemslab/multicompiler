@@ -33,6 +33,7 @@
 #include "llvm/Analysis/ScopedNoAliasAA.h"
 #include "llvm/Analysis/TypeBasedAliasAnalysis.h"
 #include "llvm/CodeGen/Passes.h"
+#include "llvm/DataRando/Passes.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/IRPrintingPasses.h"
 #include "llvm/Transforms/IPO.h"
@@ -74,6 +75,7 @@ namespace {
       (void) llvm::createConstantMergePass();
       (void) llvm::createConstantPropagationPass();
       (void) llvm::createCostModelAnalysisPass();
+      (void) llvm::createDataChecksPass();
       (void) llvm::createDeadArgEliminationPass();
       (void) llvm::createDeadCodeEliminationPass();
       (void) llvm::createDeadInstEliminationPass();
@@ -138,7 +140,6 @@ namespace {
       (void) llvm::createSCCPPass();
       (void) llvm::createSafeStackPass();
       (void) llvm::createScalarReplAggregatesPass();
-      (void) llvm::createShuffleFunctionsPass();
       (void) llvm::createSingleLoopExtractorPass();
       (void) llvm::createStripSymbolsPass();
       (void) llvm::createStripNonDebugSymbolsPass();

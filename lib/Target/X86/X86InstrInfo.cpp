@@ -35,7 +35,6 @@
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/Support/RandomNumberGenerator.h"
 #include "llvm/Target/TargetOptions.h"
 #include <limits>
 
@@ -2647,6 +2646,7 @@ X86InstrInfo::convertToThreeAddressWithLEA(unsigned MIOpc,
 
   MachineInstrBuilder MIB = BuildMI(*MFI, MBBI, MI->getDebugLoc(),
                                     get(Opc), leaOutReg);
+  MIB->setTrapInfo(MI->getTrapInfo());
   switch (MIOpc) {
   default: llvm_unreachable("Unreachable!");
   case X86::SHL16ri: {
@@ -2988,6 +2988,7 @@ X86InstrInfo::convertToThreeAddress(MachineFunction::iterator &MFI,
   }
 
   MFI->insert(MBBI, NewMI);          // Insert the new inst
+  NewMI->setTrapInfo(MI->getTrapInfo());
   return NewMI;
 }
 

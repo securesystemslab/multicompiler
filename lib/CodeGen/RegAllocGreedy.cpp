@@ -618,11 +618,20 @@ unsigned RAGreedy::tryAssign(LiveInterval &VirtReg,
                              SmallVectorImpl<unsigned> &NewVRegs) {
   Order.rewind();
   unsigned PhysReg;
-  while ((PhysReg = Order.next()))
-    if (!Matrix->checkInterference(VirtReg, PhysReg))
+  while ((PhysReg = Order.next())) {
+    if (multicompiler::RandomizePhysRegs && VirtReg.empty()) {
+      unsigned Cost = TRI->getCostPerUse(PhysReg);
+      if (Cost == 0)
+        break;
+    } else if (!Matrix->checkInterference(VirtReg, PhysReg))
       break;
+  }
   if (!PhysReg || Order.isHint())
     return PhysReg;
+
+  // // With randomization enabled, don't prioritize hints or low-cost registers.
+  // if (multicompiler::RandomizeRegisters)
+  //   return PhysReg;
 
   // PhysReg is available, but there may be a better choice.
 

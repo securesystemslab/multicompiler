@@ -223,6 +223,8 @@ MCSection *TargetLoweringObjectFileELF::getExplicitSectionGlobal(
 /// Return the section prefix name used by options FunctionsSections and
 /// DataSections.
 static StringRef getSectionPrefixForGlobal(SectionKind Kind) {
+  if (Kind.isTexTramp())
+    return ".tramp.";
   if (Kind.isText())
     return ".text";
   if (Kind.isReadOnly())
@@ -235,6 +237,12 @@ static StringRef getSectionPrefixForGlobal(SectionKind Kind) {
     return ".tbss";
   if (Kind.isData())
     return ".data";
+  if (Kind.isTexTrap())
+    return ".textrap.";
+  if (Kind.isTexTrapText())
+    return ".textrap.";
+  if (Kind.isTexTramp())
+    return ".text.xvtable.";
   assert(Kind.isReadOnlyWithRel() && "Unknown section kind");
   return ".data.rel.ro";
 }
@@ -290,7 +298,8 @@ selectELFSectionForGlobal(MCContext &Ctx, const GlobalValue *GV,
   }
 
   if (EmitUniqueSection && UniqueSectionNames) {
-    Name.push_back('.');
+    if (!Kind.isTexTrapText())
+      Name.push_back('.');
     TM.getNameWithPrefix(Name, GV, Mang, true);
   }
   unsigned UniqueID = ~0;
@@ -298,6 +307,7 @@ selectELFSectionForGlobal(MCContext &Ctx, const GlobalValue *GV,
     UniqueID = *NextUniqueID;
     (*NextUniqueID)++;
   }
+
   return Ctx.getELFSection(Name, getELFSectionType(Name, Kind), Flags,
                            EntrySize, Group, UniqueID);
 }
@@ -311,12 +321,22 @@ MCSection *TargetLoweringObjectFileELF::SelectSectionForGlobal(
   // global value to a uniqued section specifically for it.
   bool EmitUniqueSection = false;
   if (!(Flags & ELF::SHF_MERGE) && !Kind.isCommon()) {
-    if (Kind.isText())
+    if (Kind.isText() || Kind.isTexTrapText())
       EmitUniqueSection = TM.getFunctionSections();
-    else
+    else // specifically excluding SectionKind::TexTramp, since they need to be
+         // uniqued as data
       EmitUniqueSection = TM.getDataSections();
   }
   EmitUniqueSection |= GV->hasComdat();
+
+  if (!EmitUniqueSection) {
+    if (Kind.isTexTrap())
+      return TexTrapSection;
+    if (Kind.isTexTrapText())
+      return TexTrapSection;
+    if (Kind.isTexTramp())
+      return TexTrampSection;
+  }
 
   return selectELFSectionForGlobal(getContext(), GV, Kind, Mang, TM,
                                    EmitUniqueSection, Flags, &NextUniqueID);
@@ -568,6 +588,9 @@ MCSection *TargetLoweringObjectFileMachO::SelectSectionForGlobal(
   // Handle thread local data.
   if (Kind.isThreadBSS()) return TLSBSSSection;
   if (Kind.isThreadData()) return TLSDataSection;
+
+  if (Kind.isTexTramp())
+    return TexTrampSection;
 
   if (Kind.isText())
     return GV->isWeakForLinker() ? TextCoalSection : TextSection;

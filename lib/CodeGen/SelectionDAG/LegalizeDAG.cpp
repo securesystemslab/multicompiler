@@ -3758,19 +3758,24 @@ bool SelectionDAGLegalize::ExpandNode(SDNode *Node) {
                                Index, Table);
 
     EVT MemVT = EVT::getIntegerVT(*DAG.getContext(), EntrySize * 8);
-    SDValue LD = DAG.getExtLoad(
-        ISD::SEXTLOAD, dl, PTy, Chain, Addr,
-        MachinePointerInfo::getJumpTable(DAG.getMachineFunction()), MemVT,
-        false, false, false, 0);
-    Addr = LD;
-    if (TM.getRelocationModel() == Reloc::PIC_) {
-      // For PIC, the sequence is:
-      // BRIND(load(Jumptable + index) + RelocBase)
-      // RelocBase can be JumpTable, GOT or some sort of global base.
-      Addr = DAG.getNode(ISD::ADD, dl, PTy, Addr,
-                          TLI.getPICJumpTableRelocBase(Table, DAG));
+
+    if (TM.Options.ExecJumpTables) {
+      Tmp1 = DAG.getNode(ISD::BRIND, dl, MVT::Other, Chain, Addr);
+    } else {
+      SDValue LD = DAG.getExtLoad(ISD::SEXTLOAD, dl, PTy, Chain, Addr,
+                                  MachinePointerInfo::getJumpTable(
+                                      DAG.getMachineFunction()), MemVT,
+                                  false, false, false, 0);
+      Addr = LD;
+      if (TM.getRelocationModel() == Reloc::PIC_) {
+        // For PIC, the sequence is:
+        // BRIND(load(Jumptable + index) + RelocBase)
+        // RelocBase can be JumpTable, GOT or some sort of global base.
+        Addr = DAG.getNode(ISD::ADD, dl, PTy, Addr,
+                           TLI.getPICJumpTableRelocBase(Table, DAG));
+      }
+      Tmp1 = DAG.getNode(ISD::BRIND, dl, MVT::Other, LD.getValue(1), Addr);
     }
-    Tmp1 = DAG.getNode(ISD::BRIND, dl, MVT::Other, LD.getValue(1), Addr);
     Results.push_back(Tmp1);
     break;
   }

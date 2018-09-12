@@ -69,6 +69,10 @@ static cl::opt<bool> EnablePRE("enable-pre",
                                cl::init(true), cl::Hidden);
 static cl::opt<bool> EnableLoadPRE("enable-load-pre", cl::init(true));
 
+static cl::opt<bool>
+DisableLoadWideningForStruct("disable-lw-for-struct", cl::init(false),
+                             cl::ZeroOrMore);
+
 // Maximum allowed recursion depth.
 static cl::opt<uint32_t>
 MaxRecurseDepth("max-recurse-depth", cl::Hidden, cl::init(1000), cl::ZeroOrMore,
@@ -1059,6 +1063,28 @@ static int AnalyzeLoadFromClobberingLoad(Type *LoadTy, Value *LoadPtr,
   uint64_t DepSize = DL.getTypeSizeInBits(DepLI->getType());
   int R = AnalyzeLoadFromClobberingWrite(LoadTy, LoadPtr, DepPtr, DepSize, DL);
   if (R != -1) return R;
+
+  // Do not widen loads that read from a may-randomized struct field. Widening
+  // such loads may cause variants to falsely diverge.
+  if (DisableLoadWideningForStruct) {
+    DEBUG(dbgs() << "Disable Load Widening for Struct" << '\n');
+    auto StripedLoadPtr = LoadPtr->stripPointerCasts();
+    if (auto GEP = dyn_cast<GetElementPtrInst>(StripedLoadPtr)) {
+      auto ElemTy = GEP->getSourceElementType();
+      auto ElemIntTy = dyn_cast<IntegerType>(ElemTy);
+      // To cover the case where a pointer of struct is converted to a generic pointer.
+      // There's potential performance loss here because the pointer can also be an array.
+      if (ElemTy->isStructTy() || (ElemIntTy && ElemIntTy->getBitWidth() == 8))
+        return -1;
+    } else if (auto GEP = dyn_cast<GEPOperator>(StripedLoadPtr)) {
+      auto ElemTy = GEP->getSourceElementType();
+      auto ElemIntTy = dyn_cast<IntegerType>(ElemTy);
+      // To cover the case where a pointer of struct is converted to a generic pointer.
+      // There's potential performance loss here because the pointer can also be an array.
+      if (ElemTy->isStructTy() || (ElemIntTy && ElemIntTy->getBitWidth() == 8))
+        return -1;
+    }
+  }
 
   // If we have a load/load clobber an DepLI can be widened to cover this load,
   // then we should widen it!

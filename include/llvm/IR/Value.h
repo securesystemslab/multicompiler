@@ -33,6 +33,9 @@ class GlobalAlias;
 class GlobalObject;
 class GlobalValue;
 class GlobalVariable;
+class Trampoline;
+class JumpTrampoline;
+class CallTrampoline;
 class InlineAsm;
 class Instruction;
 class LLVMContext;
@@ -711,15 +714,33 @@ template <> struct isa_impl<GlobalAlias, Value> {
   }
 };
 
+template <> struct isa_impl<Trampoline, Value> {
+  static inline bool doit(const Value &Val) {
+    return isa<JumpTrampoline>(Val) || isa<CallTrampoline>(Val);
+  }
+};
+
+template <> struct isa_impl<JumpTrampoline, Value> {
+  static inline bool doit(const Value &Val) {
+    return Val.getValueID() == Value::JumpTrampolineVal;
+  }
+};
+
+template <> struct isa_impl<CallTrampoline, Value> {
+  static inline bool doit(const Value &Val) {
+    return Val.getValueID() == Value::CallTrampolineVal;
+  }
+};
+
 template <> struct isa_impl<GlobalValue, Value> {
   static inline bool doit(const Value &Val) {
-    return isa<GlobalObject>(Val) || isa<GlobalAlias>(Val);
+    return isa<GlobalObject>(Val) || isa<GlobalAlias>(Val) || isa<Trampoline>(Val);
   }
 };
 
 template <> struct isa_impl<GlobalObject, Value> {
   static inline bool doit(const Value &Val) {
-    return isa<GlobalVariable>(Val) || isa<Function>(Val);
+    return isa<GlobalVariable>(Val) || isa<Function>(Val) || isa<Trampoline>(Val);
   }
 };
 

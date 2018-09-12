@@ -787,7 +787,7 @@ bool LLParser::ParseGlobal(const std::string &Name, LocTy NameLoc,
                  "symbol with local linkage must have default visibility");
 
   unsigned AddrSpace;
-  bool IsConstant, IsExternallyInitialized;
+  bool IsConstant, IsExternallyInitialized, NoCrossCheck;
   LocTy IsExternallyInitializedLoc;
   LocTy TyLoc;
 
@@ -796,6 +796,7 @@ bool LLParser::ParseGlobal(const std::string &Name, LocTy NameLoc,
       ParseOptionalToken(lltok::kw_externally_initialized,
                          IsExternallyInitialized,
                          &IsExternallyInitializedLoc) ||
+      ParseOptionalToken(lltok::kw_nocrosscheck, NoCrossCheck) ||
       ParseGlobalType(IsConstant) ||
       ParseType(Ty, TyLoc))
     return true;
@@ -856,6 +857,7 @@ bool LLParser::ParseGlobal(const std::string &Name, LocTy NameLoc,
   GV->setVisibility((GlobalValue::VisibilityTypes)Visibility);
   GV->setDLLStorageClass((GlobalValue::DLLStorageClassTypes)DLLStorageClass);
   GV->setExternallyInitialized(IsExternallyInitialized);
+  GV->setNoCrossCheck(NoCrossCheck);
   GV->setThreadLocalMode(TLM);
   GV->setUnnamedAddr(UnnamedAddr);
 
@@ -995,6 +997,7 @@ bool LLParser::ParseFnAttributeValuePairs(AttrBuilder &B,
     case lltok::kw_builtin: B.addAttribute(Attribute::Builtin); break;
     case lltok::kw_cold: B.addAttribute(Attribute::Cold); break;
     case lltok::kw_convergent: B.addAttribute(Attribute::Convergent); break;
+    case lltok::kw_crosscheck: B.addAttribute(Attribute::CrossCheck); break;
     case lltok::kw_inaccessiblememonly:
       B.addAttribute(Attribute::InaccessibleMemOnly); break;
     case lltok::kw_inaccessiblemem_or_argmemonly:
@@ -1418,11 +1421,13 @@ bool LLParser::ParseOptionalReturnAttrs(AttrBuilder &B) {
     case lltok::kw_argmemonly:
     case lltok::kw_builtin:
     case lltok::kw_cold:
+    case lltok::kw_crosscheck:
     case lltok::kw_inlinehint:
     case lltok::kw_jumptable:
     case lltok::kw_minsize:
     case lltok::kw_naked:
     case lltok::kw_nobuiltin:
+    case lltok::kw_nocrosscheck:
     case lltok::kw_noduplicate:
     case lltok::kw_noimplicitfloat:
     case lltok::kw_noinline:

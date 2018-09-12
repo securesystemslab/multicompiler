@@ -484,6 +484,7 @@ class IRLinker {
 
   void linkGlobalInit(GlobalVariable &Dst, GlobalVariable &Src);
   bool linkFunctionBody(Function &Dst, Function &Src);
+  void linkTrampolineBody(JumpTrampoline &Dst, JumpTrampoline &Src);
   void linkAliasBody(GlobalAlias &Dst, GlobalAlias &Src);
   bool linkGlobalValueBody(GlobalValue &Dst, GlobalValue &Src);
 
@@ -491,6 +492,7 @@ class IRLinker {
   /// into the destination module.
   GlobalVariable *copyGlobalVariableProto(const GlobalVariable *SGVar);
   Function *copyFunctionProto(const Function *SF);
+  Trampoline *copyTrampolineProto(const JumpTrampoline *ST);
   GlobalValue *copyGlobalAliasProto(const GlobalAlias *SGA);
 
   void linkNamedMDNodes();
@@ -644,13 +646,20 @@ void IRLinker::materializeInitFor(GlobalValue *New, GlobalValue *Old,
   } else if (auto *V = dyn_cast<GlobalVariable>(New)) {
     if (V->hasInitializer())
       return;
+  } else if (isa<JumpTrampoline>(New)) {
+    if (New->getNumOperands() == 0)
+      return;
   } else {
     auto *A = cast<GlobalAlias>(New);
     if (A->getAliasee())
       return;
   }
 
-  if (ForAlias || shouldLink(New, *Old))
+  // We have to special case trampolines here because the trampoline itself
+  // needs to be materialized as long as it is referenced.
+  // TODO(SJC): See if there's a better way to make sure the trampoline will be
+  // linked in.
+  if (ForAlias || shouldLink(New, *Old) || isa<JumpTrampoline>(New))
     linkGlobalValueBody(*New, *Old);
 }
 
@@ -737,6 +746,12 @@ Function *IRLinker::copyFunctionProto(const Function *SF) {
                           GlobalValue::ExternalLinkage, SF->getName(), &DstM);
 }
 
+/// Link the function in the source module into the destination module if
+/// needed, setting up mapping information.
+Trampoline *IRLinker::copyTrampolineProto(const JumpTrampoline *ST) {
+  return JumpTrampoline::Create(ST->getLinkage(), ST->getName(), &DstM);
+}
+
 /// Set up prototypes for any aliases that come over from the source module.
 GlobalValue *IRLinker::copyGlobalAliasProto(const GlobalAlias *SGA) {
   // If there is no linkage to be performed or we're linking from the source,
@@ -754,6 +769,8 @@ GlobalValue *IRLinker::copyGlobalValueProto(const GlobalValue *SGV,
     NewGV = copyGlobalVariableProto(SGVar);
   } else if (auto *SF = dyn_cast<Function>(SGV)) {
     NewGV = copyFunctionProto(SF);
+  } else if (auto *ST = dyn_cast<JumpTrampoline>(SGV)) {
+    NewGV = copyTrampolineProto(ST);
   } else {
     if (ForDefinition)
       NewGV = copyGlobalAliasProto(cast<GlobalAlias>(SGV));
@@ -1194,6 +1211,18 @@ bool IRLinker::linkFunctionBody(Function &Dst, Function &Src) {
   return false;
 }
 
+void IRLinker::linkTrampolineBody(JumpTrampoline &Dst, JumpTrampoline &Src) {
+  GlobalValue *Target = Src.getTarget();
+  if (!Target) {
+    Dst.setTarget(nullptr);
+    return;
+  }
+
+  Constant *Val =
+    MapValue(Target, ValueMap, ValueMapperFlags, &TypeMap, &GValMaterializer);
+  Dst.setTarget(Val);
+}
+
 void IRLinker::linkAliasBody(GlobalAlias &Dst, GlobalAlias &Src) {
   Constant *Aliasee = Src.getAliasee();
   Constant *Val = MapValue(Aliasee, AliasValueMap, ValueMapperFlags, &TypeMap,
@@ -1206,6 +1235,10 @@ bool IRLinker::linkGlobalValueBody(GlobalValue &Dst, GlobalValue &Src) {
     return linkFunctionBody(cast<Function>(Dst), *F);
   if (auto *GVar = dyn_cast<GlobalVariable>(&Src)) {
     linkGlobalInit(cast<GlobalVariable>(Dst), *GVar);
+    return false;
+  }
+  if (auto *T = dyn_cast<JumpTrampoline>(&Src)) {
+    linkTrampolineBody(*dyn_cast<JumpTrampoline>(&Dst), *T);
     return false;
   }
   linkAliasBody(cast<GlobalAlias>(Dst), cast<GlobalAlias>(Src));

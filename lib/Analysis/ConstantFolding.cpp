@@ -738,9 +738,11 @@ static Constant *SymbolicallyEvaluateGEP(Type *SrcTy, ArrayRef<Constant *> Ops,
   Type *IntPtrTy = DL.getIntPtrType(Ptr->getType());
   Type *ResultElementTy = ResultTy->getPointerElementType();
 
+  TrapInfo TI;
+
   // If this is a constant expr gep that is effectively computing an
   // "offsetof", fold it into 'cast int Size to T*' instead of 'gep 0, 0, 12'
-  for (unsigned i = 1, e = Ops.size(); i != e; ++i)
+  for (unsigned i = 1, e = Ops.size(); i != e; ++i) {
     if (!isa<ConstantInt>(Ops[i])) {
 
       // If this is "gep i8* Ptr, (sub 0, V)", fold this as:
@@ -761,6 +763,9 @@ static Constant *SymbolicallyEvaluateGEP(Type *SrcTy, ArrayRef<Constant *> Ops,
       }
       return nullptr;
     }
+    if (ConstantVTIndex *VTI = dyn_cast<ConstantVTIndex>(Ops[i]))
+      TI = VTI->getTrapInfo();
+  }
 
   unsigned BitWidth = DL.getTypeSizeInBits(IntPtrTy);
   APInt Offset =
@@ -836,7 +841,11 @@ static Constant *SymbolicallyEvaluateGEP(Type *SrcTy, ArrayRef<Constant *> Ops,
         // size (rounding down), to compute the index at this level.
         APInt NewIdx = Offset.udiv(ElemSize);
         Offset -= NewIdx * ElemSize;
-        NewIdxs.push_back(ConstantInt::get(IntPtrTy, NewIdx));
+        if (!TI.isUnknown()) {
+          NewIdxs.push_back(ConstantVTIndex::get(IntPtrTy, NewIdx, TI));
+        } else {
+          NewIdxs.push_back(ConstantInt::get(IntPtrTy, NewIdx));
+        }
       }
       Ty = ATy->getElementType();
     } else if (StructType *STy = dyn_cast<StructType>(Ty)) {

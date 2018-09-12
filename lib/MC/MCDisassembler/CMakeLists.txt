@@ -3,4 +3,7 @@ add_llvm_library(LLVMMCDisassembler
   MCRelocationInfo.cpp
   MCExternalSymbolizer.cpp
   MCDisassembler.cpp
+
+  DEPENDS
+  intrinsics_gen
   )

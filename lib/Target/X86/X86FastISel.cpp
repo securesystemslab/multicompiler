@@ -1009,6 +1009,7 @@ bool X86FastISel::X86SelectRet(const Instruction *I) {
   if (CC != CallingConv::C &&
       CC != CallingConv::Fast &&
       CC != CallingConv::X86_FastCall &&
+      CC != CallingConv::X86_64_SysV &&
       CC != CallingConv::X86_64_SysV)
     return false;
 
@@ -3154,6 +3155,9 @@ bool X86FastISel::fastLowerCall(CallLoweringInfo &CLI) {
   // Add implicit physical register uses to the call.
   for (auto Reg : OutRegs)
     MIB.addReg(Reg, RegState::Implicit);
+
+  if (CLI.CS)
+    MIB->setTrapInfo((*CLI.CS)->getTrapInfo());
 
   // Issue CALLSEQ_END
   unsigned NumBytesForCalleeToPop =

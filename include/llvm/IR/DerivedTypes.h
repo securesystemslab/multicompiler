@@ -251,6 +251,10 @@ public:
   /// element type.
   static StructType *get(Type *elt1, ...) LLVM_END_WITH_NULL;
 
+  /// Return the type with the specified name, or null if there is none by that
+  /// name.
+  static StructType *getByName(LLVMContext &Context, StringRef Name);
+
   bool isPacked() const { return (getSubclassData() & SCDB_Packed) != 0; }
 
   /// isLiteral - Return true if this type is uniqued by structural
@@ -279,6 +283,7 @@ public:
 
   /// setBody - Specify a body for an opaque identified type.
   void setBody(ArrayRef<Type*> Elements, bool isPacked = false);
+  void resetBody(ArrayRef<Type*> Elements, bool isPacked = false);
   void setBody(Type *elt1, ...) LLVM_END_WITH_NULL;
 
   /// isValidElementType - Return true if the specified type is valid as a

@@ -46,25 +46,6 @@ class LLVMContext;
 class Type;
 class Value;
 
-struct DenseMapAPIntKeyInfo {
-  static inline APInt getEmptyKey() {
-    APInt V(nullptr, 0);
-    V.VAL = 0;
-    return V;
-  }
-  static inline APInt getTombstoneKey() {
-    APInt V(nullptr, 0);
-    V.VAL = 1;
-    return V;
-  }
-  static unsigned getHashValue(const APInt &Key) {
-    return static_cast<unsigned>(hash_value(Key));
-  }
-  static bool isEqual(const APInt &LHS, const APInt &RHS) {
-    return LHS.getBitWidth() == RHS.getBitWidth() && LHS == RHS;
-  }
-};
-
 struct DenseMapAPFloatKeyInfo {
   static inline APFloat getEmptyKey() { return APFloat(APFloat::Bogus, 1); }
   static inline APFloat getTombstoneKey() { return APFloat(APFloat::Bogus, 2); }
@@ -915,8 +896,11 @@ public:
   LLVMContext::YieldCallbackTy YieldCallback;
   void *YieldOpaqueHandle;
 
-  typedef DenseMap<APInt, ConstantInt *, DenseMapAPIntKeyInfo> IntMapTy;
+  typedef DenseMap<APInt, ConstantInt *> IntMapTy;
   IntMapTy IntConstants;
+
+  typedef DenseMap<std::pair<APInt, TrapInfo>, ConstantVTIndex *> VTIndexMapTy;
+  VTIndexMapTy VTIndexConstants;
 
   typedef DenseMap<APFloat, ConstantFP *, DenseMapAPFloatKeyInfo> FPMapTy;
   FPMapTy FPConstants;
@@ -971,7 +955,7 @@ public:
 
   // Basic type instances.
   Type VoidTy, LabelTy, HalfTy, FloatTy, DoubleTy, MetadataTy, TokenTy;
-  Type X86_FP80Ty, FP128Ty, PPC_FP128Ty, X86_MMXTy;
+  Type X86_FP80Ty, FP128Ty, PPC_FP128Ty, X86_MMXTy, TrampolineTy;
   IntegerType Int1Ty, Int8Ty, Int16Ty, Int32Ty, Int64Ty, Int128Ty;
 
   

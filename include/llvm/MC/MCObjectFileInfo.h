@@ -148,6 +148,13 @@ protected:
   /// FaultMap section.
   MCSection *FaultMapSection;
 
+  /// TexTrap section (for diversity information).
+  MCSection *TexTrapSection;
+
+  /// TexTrampSection - Section directive for executable trampolines.
+  ///
+  MCSection *TexTrampSection;
+
   /// EH frame section.
   ///
   /// It is initialized on demand so it can be overwritten (with uniquing).
@@ -281,6 +288,10 @@ public:
 
   MCSection *getStackMapSection() const { return StackMapSection; }
   MCSection *getFaultMapSection() const { return FaultMapSection; }
+
+  MCSection *getTexTrapSection() const { return TexTrapSection; }
+
+  MCSection *getTexTrampSection() const { return TexTrampSection; }
 
   // ELF specific sections.
   MCSection *getDataRelROSection() const { return DataRelROSection; }

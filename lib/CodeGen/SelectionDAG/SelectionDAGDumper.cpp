@@ -80,6 +80,7 @@ std::string SDNode::getOperationName(const SelectionDAG *G) const {
   case ISD::READCYCLECOUNTER:           return "ReadCycleCounter";
   case ISD::SRCVALUE:                   return "SrcValue";
   case ISD::MDNODE_SDNODE:              return "MDNode";
+  case ISD::TEXTRAP_SDNODE:             return "TexTrap";
   case ISD::EntryToken:                 return "EntryToken";
   case ISD::TokenFactor:                return "TokenFactor";
   case ISD::AssertSext:                 return "AssertSext";
@@ -420,7 +421,10 @@ void SDNode::print_details(raw_ostream &OS, const SelectionDAG *G) const {
     }
     OS << ">";
   } else if (const ConstantSDNode *CSDN = dyn_cast<ConstantSDNode>(this)) {
-    OS << '<' << CSDN->getAPIntValue() << '>';
+    if (isa<ConstantVTIndex>(CSDN->getConstantIntValue()))
+      OS << "<VTI: " << CSDN->getAPIntValue() << '>';
+    else
+      OS << '<' << CSDN->getAPIntValue() << '>';
   } else if (const ConstantFPSDNode *CSDN = dyn_cast<ConstantFPSDNode>(this)) {
     if (&CSDN->getValueAPF().getSemantics()==&APFloat::IEEEsingle)
       OS << '<' << CSDN->getValueAPF().convertToFloat() << '>';
@@ -485,6 +489,11 @@ void SDNode::print_details(raw_ostream &OS, const SelectionDAG *G) const {
     else
       OS << "<null>";
   } else if (const MDNodeSDNode *MD = dyn_cast<MDNodeSDNode>(this)) {
+    if (MD->getMD())
+      OS << "<" << MD->getMD() << ">";
+    else
+      OS << "<null>";
+  } else if (const TexTrapSDNode *MD = dyn_cast<TexTrapSDNode>(this)) {
     if (MD->getMD())
       OS << "<" << MD->getMD() << ">";
     else
@@ -567,6 +576,11 @@ void SDNode::print_details(raw_ostream &OS, const SelectionDAG *G) const {
     OS << ':' << L->getLine();
     if (unsigned C = L->getColumn())
       OS << ':' << C;
+  }
+
+  TrapInfo ti = getTrapInfo();
+  if (G && !ti.isUnknown()) {
+    OS << " trapinfo";
   }
 }
 

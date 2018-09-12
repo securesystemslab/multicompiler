@@ -271,12 +271,13 @@ MCOperand X86MCInstLower::LowerSymbolOperand(const MachineOperand &MO,
     Expr = MCBinaryExpr::createSub(Expr,
                             MCSymbolRefExpr::create(MF.getPICBaseSymbol(), Ctx),
                                    Ctx);
-    if (MO.isJTI()) {
+    if (MO.isJTI() && !TM.Options.JumpTablesROData) {
       assert(MAI.doesSetDirectiveSuppressesReloc());
       // If .set directive is supported, use it to reduce the number of
-      // relocations the assembler will generate for differences between
-      // local labels. This is only safe when the symbols are in the same
-      // section so we are restricting it to jumptable references.
+      // relocations the assembler will generate for differences between local
+      // labels. This is only safe when the symbols are in the same section so
+      // we are restricting it to jumptable references that are not in a
+      // seperate RO data section.
       MCSymbol *Label = Ctx.createTempSymbol();
       AsmPrinter.OutStreamer->EmitAssignment(Label, Expr);
       Expr = MCSymbolRefExpr::create(Label, Ctx);
@@ -431,11 +432,15 @@ X86MCInstLower::LowerMachineOperand(const MachineInstr *MI,
   case MachineOperand::MO_RegisterMask:
     // Ignore call clobbers.
     return None;
+  case MachineOperand::MO_TexTrapInfo:
+    // Ignore textrap debug info.
+    return None;
   }
 }
 
 void X86MCInstLower::Lower(const MachineInstr *MI, MCInst &OutMI) const {
   OutMI.setOpcode(MI->getOpcode());
+  OutMI.setTrapInfo(MI->getTrapInfo());
 
   for (const MachineOperand &MO : MI->operands())
     if (auto MaybeMCOp = LowerMachineOperand(MI, MO))
@@ -1433,6 +1438,34 @@ void X86AsmPrinter::EmitInstruction(const MachineInstr *MI) {
         CS << ">";
         OutStreamer->AddComment(CS.str());
       }
+    }
+    break;
+
+  case X86::CALL64pcrel32:
+  case X86::CALLpcrel32:
+  case X86::CALL64r:
+  case X86::CALL32r:
+  case X86::CALL64m:
+  case X86::CALL32m:
+    if (TM.Options.CallPointerProtection) {
+      MCSymbol *CallSym = OutContext.createTempSymbol("__llvm_pp_call");
+
+      MCInst JmpToTramp;
+      JmpToTramp.setOpcode(X86::JMP_4);
+      const MCSymbolRefExpr *TargetSymRef =
+        MCSymbolRefExpr::create(CallSym, MCSymbolRefExpr::VK_None,
+                                OutContext);
+      JmpToTramp.addOperand(MCOperand::createExpr(TargetSymRef));
+      EmitAndCountInstruction(JmpToTramp);
+
+      MCSymbol *ReturnSym = OutContext.createTempSymbol("__llvm_pp_ret");
+      OutStreamer->EmitLabel(ReturnSym);
+
+      MCInst TmpInst;
+      MCInstLowering.Lower(MI, TmpInst);
+      MF->getMMI().AddCallTrampoline(
+          CallTrampolineInfo(CallSym, ReturnSym, MI, TmpInst));
+      return;
     }
     break;
   }

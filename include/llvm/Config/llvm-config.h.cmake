@@ -105,4 +105,7 @@
 /* Define if we link Polly to the tools */
 #cmakedefine LINK_POLLY_INTO_TOOLS
 
+/* Define if OpenSSL should be used for random number generation */
+#cmakedefine01 LLVM_ENABLE_OPENSSL
+
 #endif

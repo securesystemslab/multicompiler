@@ -19,6 +19,7 @@
 
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/BitVector.h"
+#include "llvm/Support/RandomNumberGenerator.h"
 #include "llvm/Target/TargetRegisterInfo.h"
 
 namespace llvm {
@@ -63,14 +64,22 @@ class RegisterClassInfo {
 
   std::unique_ptr<unsigned[]> PSetLimits;
 
+  // RNG instance for this pass
+  std::unique_ptr<RandomNumberGenerator> RNG;
+
   // Compute all information about RC.
   void compute(const TargetRegisterClass *RC) const;
+
+  // Randomize the RC register ordering
+  void randomize(const TargetRegisterClass *RC) const;
 
   // Return an up-to-date RCInfo for RC.
   const RCInfo &get(const TargetRegisterClass *RC) const {
     const RCInfo &RCI = RegClass[RC->getID()];
     if (Tag != RCI.Tag)
       compute(RC);
+    if (multicompiler::RandomizePhysRegs)
+      randomize(RC);
     return RCI;
   }
 

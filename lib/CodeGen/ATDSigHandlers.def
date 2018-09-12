@@ -1,0 +1,38 @@
+//===- ATDSigHandlers.def - Signal Handlers in ATDs --------------*- C++ -*-===//
+//
+//  This file is a list of user-defined signal handler functions in ATDs
+//  (thttpd, apache). Please add user-defined signal handlers, if any,
+//  to white-list the handlers from stack-to-heap promotion.
+//
+//  Author: Yeoul Na
+//  Date: Feb 22, 2017
+//
+//===----------------------------------------------------------------------===//
+
+#ifndef WHITELIST
+#define WHITELIST(X)
+#endif
+
+// thttpd
+WHITELIST(handle_chld)
+WHITELIST(handle_arlm)
+WHITELIST(handle_hup)
+WHITELIST(handle_usr1)
+WHITELIST(handle_usr2)
+WHITELIST(handle_term)
+
+// apache
+WHITELIST(daemon_signal_handler)
+WHITELIST(sig_coredump)
+WHITELIST(sig_term)
+WHITELIST(restart)
+WHITELIST(dummy_signal_handler)
+WHITELIST(check_signal)
+WHITELIST(just_die)
+WHITELIST(stop_listening)
+WHITELIST(setterm)
+WHITELIST(interrupted)
+WHITELIST(output_results)
+WHITELIST(htdbm_interrupted)
+
+#undef WHITELIST

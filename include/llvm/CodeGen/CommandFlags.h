@@ -198,20 +198,13 @@ EnablePIE("enable-pie",
           cl::init(false));
 
 cl::opt<bool>
+NOPInsertion("nop-insertion",
+             cl::desc("Randomly add NOPs."),
+             cl::init(false));
+
+cl::opt<bool>
 UseCtors("use-ctors",
              cl::desc("Use .ctors instead of .init_array."),
-             cl::init(false));
-
-cl::opt<bool>
-NOPInsertion("nop-insertion",
-             cl::desc("Randomly add noop instructions to create fine-grained diversity."),
-             cl::init(false));
-
-// FIXME: The ShuffleFunctions pass also gets its own command line flag,
-// called "shuffle-functions-pass" to avoid overlap.
-cl::opt<bool>
-ShuffleFunctions("shuffle-functions",
-             cl::desc("Randomly shuffle program functions."),
              cl::init(false));
 
 cl::opt<std::string> StopAfter("stop-after",
@@ -279,6 +272,42 @@ DebuggerTuningOpt("debugger-tune",
                                  "SCE targets (e.g. PS4)"),
                       clEnumValEnd));
 
+cl::opt<bool>
+JumpTablesROData("jump-table-rodata",
+                 cl::desc("Emit jump tables in a read-only data section, instead of inline in code."),
+                 cl::init(false));
+
+cl::opt<bool>
+ExecJumpTables("jump-tables-exec",
+               cl::desc("Emit jump tables as branch instructions."),
+               cl::init(false));
+
+cl::opt<bool>
+PointerProtection("pointer-protection",
+                  cl::desc("Protect function pointers from memory disclosure."),
+                  cl::init(false));
+
+cl::opt<bool>
+PointerProtectionHMAC("pointer-protection-hmac",
+                      cl::desc("Protect function pointers from memory disclosure with HMACs."),
+                      cl::init(false));
+
+cl::opt<bool>
+CallPointerProtection("call-pointer-protection",
+                      cl::desc("Protect return pointers from memory disclosure."),
+                      cl::init(false));
+
+cl::opt<bool>
+CookieProtection("cookie-protection",
+                 cl::desc("Authenticate direct calls."),
+                 cl::init(false));
+
+cl::opt<bool>
+MarkVTables("mark-vtables",
+            cl::desc("Mark VTables in .textrap."),
+            cl::init(false));
+
+
 // Common utility function tightly tied to the options listed here. Initializes
 // a TargetOptions object with CodeGen flags and returns it.
 static inline TargetOptions InitTargetOptionsFromCodeGenFlags() {
@@ -305,6 +334,14 @@ static inline TargetOptions InitTargetOptionsFromCodeGenFlags() {
 
   Options.MCOptions = InitMCTargetOptionsFromFlags();
   Options.JTType = JTableType;
+  Options.JumpTablesROData = JumpTablesROData;
+  Options.ExecJumpTables = ExecJumpTables;
+  Options.NOPInsertion = NOPInsertion;
+  Options.PointerProtection = PointerProtection;
+  Options.PointerProtectionHMAC = PointerProtectionHMAC;
+  Options.CallPointerProtection = CallPointerProtection;
+  Options.CookieProtection = CookieProtection;
+  Options.MarkVTables = MarkVTables;
 
   Options.ThreadModel = TMModel;
   Options.EABIVersion = EABIVersion;

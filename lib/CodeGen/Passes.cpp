@@ -28,6 +28,8 @@
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
+#include "llvm/MultiCompiler/MultiCompilerOptions.h"
+#include "llvm/Target/TargetOptions.h"
 #include "llvm/Transforms/Instrumentation.h"
 #include "llvm/Transforms/Scalar.h"
 #include "llvm/Transforms/Utils/SymbolRewriter.h"
@@ -476,9 +478,23 @@ void TargetPassConfig::addCodeGenPrepare() {
 void TargetPassConfig::addISelPrepare() {
   addPreISel();
 
+  // Randomize globals
+  addPass(createGlobalRandomizationPass());
+
   // Add both the safe stack and the stack protection passes: each of them will
   // only protect functions that have corresponding attributes.
+
   addPass(createSafeStackPass(TM));
+  addPass(createStackToHeapPromotionPass(TM));
+  addPass(createStackElementPaddingPass(TM));
+
+  if (TM->Options.PointerProtection) {
+    addPass(createPointerProtectionPass(TM->Options.PointerProtectionHMAC));
+  }
+
+  if (TM->Options.CookieProtection)
+    addPass(createCookieProtectionPass());
+
   addPass(createStackProtectorPass(TM));
 
   if (PrintISelInput)
@@ -542,6 +558,9 @@ void TargetPassConfig::addMachinePasses() {
     addPass(&LocalStackSlotAllocationID, false);
   }
 
+  if (TM->Options.MarkVTables)
+    addPass(&MarkVTablesID);
+
   // Run pre-ra passes.
   addPreRegAlloc();
 
@@ -590,9 +609,6 @@ void TargetPassConfig::addMachinePasses() {
     if (PrintGCInfo)
       addPass(createGCInfoPrinter(dbgs()), false, false);
   }
-
-  if (TM->Options.NOPInsertion)
-    addPass(&NOPInsertionID);
 
   // Basic block placement.
   if (getOptLevel() != CodeGenOpt::None)

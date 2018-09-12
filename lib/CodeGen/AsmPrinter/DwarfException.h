@@ -59,6 +59,16 @@ public:
 
   /// Gather and emit post-function exception information.
   void endFunction(const MachineFunction *) override;
+
+  void beginTrampoline(const MachineFunction *MF,
+                       const CallTrampolineInfo &) override;
+
+  void prepareTrampolines(
+      SmallVector<const LandingPadInfo *, 64> &LandingPads,
+      DenseMap<const MachineInstr*, const LandingPadInfo *> &CallPadMap) override;
+
+  /// Gather and emit post-trampoline exception information.
+  void endTrampoline(const CallTrampolineInfo &, MCSymbol *) override;
 };
 
 class LLVM_LIBRARY_VISIBILITY ARMException : public DwarfCFIExceptionBase {

@@ -161,7 +161,7 @@ MachineBasicBlock::SkipPHIsAndLabels(MachineBasicBlock::iterator I) {
 
 MachineBasicBlock::iterator MachineBasicBlock::getFirstTerminator() {
   iterator B = begin(), E = end(), I = E;
-  while (I != B && ((--I)->isTerminator() || I->isDebugValue()))
+  while (I != B && ((--I)->isTerminator() || I->isDebugValue() || I->isInsertedNOP()))
     ; /*noop */
   while (I != E && !I->isTerminator())
     ++I;
@@ -170,7 +170,7 @@ MachineBasicBlock::iterator MachineBasicBlock::getFirstTerminator() {
 
 MachineBasicBlock::instr_iterator MachineBasicBlock::getFirstInstrTerminator() {
   instr_iterator B = instr_begin(), E = instr_end(), I = E;
-  while (I != B && ((--I)->isTerminator() || I->isDebugValue()))
+  while (I != B && ((--I)->isTerminator() || I->isDebugValue() || I->isInsertedNOP()))
     ; /*noop */
   while (I != E && !I->isTerminator())
     ++I;

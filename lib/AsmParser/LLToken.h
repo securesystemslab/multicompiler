@@ -106,6 +106,7 @@ namespace lltok {
 
     // Attributes:
     kw_attributes,
+    kw_nocrosscheck,
     kw_alwaysinline,
     kw_argmemonly,
     kw_sanitize_address,
@@ -114,6 +115,7 @@ namespace lltok {
     kw_inalloca,
     kw_cold,
     kw_convergent,
+    kw_crosscheck,
     kw_dereferenceable,
     kw_dereferenceable_or_null,
     kw_inaccessiblememonly,

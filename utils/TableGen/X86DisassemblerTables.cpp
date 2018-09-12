@@ -879,6 +879,30 @@ void DisassemblerTables::setTableFields(ModRMDecision     &decision,
                                            newInfo.name == "XCHG64ar"))
           continue; // special case for XCHG*ar and NOOP
 
+        if(previousInfo.name == "NOOP2" && (newInfo.name == "XCHG16ar" ||
+                                           newInfo.name == "XCHG32ar" ||
+                                           newInfo.name == "XCHG32ar64" ||
+                                           newInfo.name == "XCHG64ar"))
+          continue; // special case for XCHG*ar and NOOP
+
+        if(previousInfo.name == "NOOP3" && (newInfo.name == "NOOPL" ||
+					   newInfo.name == "NOOP4" ||
+					   newInfo.name == "NOOP5" ||
+					   newInfo.name == "NOOP6" ))
+          continue;
+
+	if(previousInfo.name == "NOOP4" && (newInfo.name == "NOOPL" ||
+					   newInfo.name == "NOOP5" ||
+					   newInfo.name == "NOOP6" ))
+	  continue;
+
+	if(previousInfo.name == "NOOP5" && (newInfo.name == "NOOP6" ||
+					    newInfo.name == "NOOPL"))
+	  continue;
+
+	if(previousInfo.name == "NOOP6" && (newInfo.name == "NOOPL"))
+	  continue;
+
         if (outranks(previousInfo.insnContext, newInfo.insnContext))
           continue;
 

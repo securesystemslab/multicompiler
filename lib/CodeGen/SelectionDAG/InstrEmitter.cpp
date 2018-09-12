@@ -64,6 +64,8 @@ static unsigned countOperands(SDNode *Node, unsigned NumExpUses,
     --N;
   if (N && Node->getOperand(N - 1).getValueType() == MVT::Other)
     --N; // Ignore chain if it exists.
+  if (N && Node->getOperand(N - 1).getValueType() == MVT::TexTrap)
+    --N; // Ignore textrap metadata if it exists.
 
   // Count RegisterSDNode and RegisterMaskSDNode operands for NumImpUses.
   NumImpUses = N - NumExpUses;
@@ -381,6 +383,9 @@ void InstrEmitter::AddOperand(MachineInstrBuilder &MIB,
                        IsDebug, IsClone, IsCloned);
   } else if (ConstantSDNode *C = dyn_cast<ConstantSDNode>(Op)) {
     MIB.addImm(C->getSExtValue());
+    if (const ConstantVTIndex *VTI =
+        dyn_cast<ConstantVTIndex>(C->getConstantIntValue()))
+      MIB->setTrapInfo(VTI->getTrapInfo());
   } else if (ConstantFPSDNode *F = dyn_cast<ConstantFPSDNode>(Op)) {
     MIB.addFPImm(F->getConstantFPValue());
   } else if (RegisterSDNode *R = dyn_cast<RegisterSDNode>(Op)) {
@@ -394,6 +399,8 @@ void InstrEmitter::AddOperand(MachineInstrBuilder &MIB,
   } else if (GlobalAddressSDNode *TGA = dyn_cast<GlobalAddressSDNode>(Op)) {
     MIB.addGlobalAddress(TGA->getGlobal(), TGA->getOffset(),
                          TGA->getTargetFlags());
+    if (!TGA->getTrapInfo().isUnknown())
+      MIB->setTrapInfo(TGA->getTrapInfo());
   } else if (BasicBlockSDNode *BBNode = dyn_cast<BasicBlockSDNode>(Op)) {
     MIB.addMBB(BBNode->getBasicBlock());
   } else if (FrameIndexSDNode *FI = dyn_cast<FrameIndexSDNode>(Op)) {
@@ -561,6 +568,9 @@ void InstrEmitter::EmitSubregNode(SDNode *Node,
     if (Opc == TargetOpcode::SUBREG_TO_REG) {
       const ConstantSDNode *SD = cast<ConstantSDNode>(N0);
       MIB.addImm(SD->getZExtValue());
+      if (const ConstantVTIndex *VTI =
+          dyn_cast<ConstantVTIndex>(SD->getConstantIntValue()))
+        MIB->setTrapInfo(VTI->getTrapInfo());
     } else
       AddOperand(MIB, N0, 0, nullptr, VRBaseMap, /*IsDebug=*/false,
                  IsClone, IsCloned);
@@ -807,6 +817,10 @@ EmitMachineNode(SDNode *Node, bool IsClone, bool IsCloned,
   // Transfer all of the memory reference descriptions of this instruction.
   MIB.setMemRefs(cast<MachineSDNode>(Node)->memoperands_begin(),
                  cast<MachineSDNode>(Node)->memoperands_end());
+
+  TrapInfo TI = Node->getTrapInfo();
+  if (!TI.isUnknown())
+    MIB->setTrapInfo(TI);
 
   // Insert the instruction into position in the block. This needs to
   // happen before any custom inserter hook is called so that the

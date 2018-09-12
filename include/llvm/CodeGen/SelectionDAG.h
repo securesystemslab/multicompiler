@@ -894,6 +894,10 @@ public:
   /// provided type. Use getNode to set a custom SDLoc.
   SDValue getBitcast(EVT VT, SDValue V);
 
+  /// getTexTrapNode - Return an MDNodeSDNode which holds an MDNode describing a
+  /// some textrap info.
+  SDValue getTexTrapNode(const MDNode *MD);
+
   /// Return an AddrSpaceCastSDNode.
   SDValue getAddrSpaceCast(SDLoc dl, EVT VT, SDValue Ptr,
                            unsigned SrcAS, unsigned DestAS);

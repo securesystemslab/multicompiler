@@ -1,7 +1,8 @@
 set(LLVM_EXPORTED_SYMBOL_FILE ${CMAKE_CURRENT_SOURCE_DIR}/gold.exports)
 
 if( LLVM_ENABLE_PIC AND LLVM_BINUTILS_INCDIR )
-  include_directories( ${LLVM_BINUTILS_INCDIR} )
+    include_directories(${CMAKE_SOURCE_DIR}/projects/svf/include)
+    include_directories( ${LLVM_BINUTILS_INCDIR} ${CMAKE_SOURCE_DIR}/projects/poolalloc/include )
 
   # Because off_t is used in the public API, the largefile parts are required for
   # ABI compatibility.
@@ -12,6 +13,8 @@ if( LLVM_ENABLE_PIC AND LLVM_BINUTILS_INCDIR )
      Linker
      BitWriter
      IPO
+     DataRando
+     DataStructure_static
      )
 
   add_llvm_loadable_module(LLVMgold

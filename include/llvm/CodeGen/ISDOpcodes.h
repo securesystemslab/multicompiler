@@ -643,6 +643,10 @@ namespace ISD {
     /// reference metadata in the IR.
     MDNODE_SDNODE,
 
+    /// TEXTRAP_SDNODE - This is a node that holdes a MDNode*, which is used to
+    /// reference textrap info in the IR.
+    TEXTRAP_SDNODE,
+
     /// PCMARKER - This corresponds to the pcmarker intrinsic.
     PCMARKER,
 

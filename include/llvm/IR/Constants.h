@@ -27,6 +27,7 @@
 #include "llvm/IR/Constant.h"
 #include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/OperandTraits.h"
+#include "llvm/IR/TrapInfo.h"
 
 namespace llvm {
 
@@ -48,7 +49,6 @@ class ConstantInt : public Constant {
   void anchor() override;
   void *operator new(size_t, unsigned) = delete;
   ConstantInt(const ConstantInt &) = delete;
-  ConstantInt(IntegerType *Ty, const APInt& V);
   APInt Val;
 
   friend class Constant;
@@ -56,6 +56,8 @@ class ConstantInt : public Constant {
   Value *handleOperandChangeImpl(Value *From, Value *To, Use *U);
 
 protected:
+  ConstantInt(IntegerType *Ty, const APInt& V, ValueTy VT = ConstantIntVal);
+
   // allocate space for exactly zero operands
   void *operator new(size_t s) {
     return User::operator new(s, 0);
@@ -222,7 +224,8 @@ public:
 
   /// @brief Methods to support type inquiry through isa, cast, and dyn_cast.
   static bool classof(const Value *V) {
-    return V->getValueID() == ConstantIntVal;
+    return V->getValueID() == ConstantIntVal ||
+           V->getValueID() == ConstantVTIndexVal;
   }
 };
 
@@ -1286,6 +1289,56 @@ public:
   /// Methods for support type inquiry through isa, cast, and dyn_cast:
   static bool classof(const Value *V) {
     return V->getValueID() == UndefValueVal;
+  }
+};
+
+//===----------------------------------------------------------------------===//
+/// This class is used to mark vtable indices with proper metadata for
+/// rewriting. Marking every instruction which uses them was too fragile...
+/// @brief Class for vtable indices.
+class ConstantVTIndex : public ConstantInt {
+  void anchor() override;
+  void *operator new(size_t, unsigned)  = delete;
+  ConstantVTIndex(const ConstantVTIndex &)  = delete;
+  ConstantVTIndex(IntegerType *Ty, const APInt& V, TrapInfo TI);
+  TrapInfo trapInfo;
+protected:
+  // allocate space for exactly zero operands
+  void *operator new(size_t s) {
+    return User::operator new(s, 0);
+  }
+public:
+  /// If Ty is a vector type, return a Constant with a splat of the given
+  /// value. Otherwise return a ConstantVTIndex for the given value.
+  static Constant *get(Type *Ty, uint64_t V, TrapInfo TI);
+
+  /// Return a ConstantVTIndex with the specified integer value for the specified
+  /// type. If the type is wider than 64 bits, the value will be zero-extended
+  /// to fit the type, unless isSigned is true, in which case the value will
+  /// be interpreted as a 64-bit signed integer and sign-extended to fit
+  /// the type.
+  /// @brief Get a ConstantVTIndex for a specific value.
+  static ConstantVTIndex *get(IntegerType *Ty, uint64_t V, TrapInfo TI);
+
+  /// Return a ConstantVTIndex with the specified value and an implied Type. The
+  /// type is the integer type that corresponds to the bit width of the value.
+  static ConstantVTIndex *get(LLVMContext &Context, const APInt &V, TrapInfo TI);
+
+  /// Return a ConstantVTIndex constructed from the string strStart with the given
+  /// radix.
+  static ConstantVTIndex *get(IntegerType *Ty, StringRef Str,
+                              uint8_t radix, TrapInfo TI);
+
+  /// If Ty is a vector type, return a Constant with a splat of the given
+  /// value. Otherwise return a ConstantVTIndex for the given value.
+  static Constant *get(Type* Ty, const APInt& V, TrapInfo TI);
+
+  /// getTrapInfo - Return the trap information for this index.
+  TrapInfo getTrapInfo() const { return trapInfo; }
+
+  /// @brief Methods to support type inquiry through isa, cast, and dyn_cast.
+  static bool classof(const Value *V) {
+    return V->getValueID() == ConstantVTIndexVal;
   }
 };
 

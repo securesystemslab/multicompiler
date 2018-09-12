@@ -590,6 +590,11 @@ namespace llvm {
   ///
   FunctionPass *createStackProtectorPass(const TargetMachine *TM);
 
+
+  FunctionPass *createStackToHeapPromotionPass(const TargetMachine *TM);
+
+  Pass *createStackElementPaddingPass(const TargetMachine *tli);
+
   /// createMachineVerifierPass - This pass verifies cenerated machine code
   /// instructions for correctness.
   ///
@@ -643,6 +648,13 @@ namespace llvm {
   /// LiveDebugValues pass
   extern char &LiveDebugValuesID;
 
+  /// MarkVTables - This pass marks VTable derefs while still in SSA form so we
+  /// can follow def-use chains.
+  extern char &MarkVTablesID;
+
+  /// MarkVTablesIR - This pass marks virtual method pointer uses in IR.
+  extern char &MarkVTablesIRID;
+
   /// createJumpInstrTables - This pass creates jump-instruction tables.
   ModulePass *createJumpInstrTablesPass();
 
@@ -654,6 +666,19 @@ namespace llvm {
   /// memory accesses to target specific intrinsics.
   ///
   FunctionPass *createInterleavedAccessPass(const TargetMachine *TM);
+
+  /// createGlobalRandomizationPass - This pass randomizes the ordering of
+  /// global variables and adds random padding between globals.
+  ModulePass *createGlobalRandomizationPass();
+
+  /// createPointerProtection - This pass creates pointer protection tables.
+  ModulePass *createPointerProtectionPass(bool HMACForwardPointers);
+
+  /// createCookieProtectionPass - This pass adds cookies to direct function
+  /// calls to prevent reuse from an indirect branch.
+  ///
+  ModulePass *createCookieProtectionPass();
+
 } // End llvm namespace
 
 /// Target machine pass initializer for passes with dependencies. Use with

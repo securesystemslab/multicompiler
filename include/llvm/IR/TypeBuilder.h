@@ -327,6 +327,401 @@ public:
   }
 };
 
+template<typename R, typename A1, typename A2, typename A3, typename A4,
+         typename A5, typename A6, bool cross>
+class TypeBuilder<R(A1, A2, A3, A4, A5, A6), cross> {
+public:
+  static FunctionType *get(LLVMContext &Context) {
+    Type *params[] = {
+      TypeBuilder<A1, cross>::get(Context),
+      TypeBuilder<A2, cross>::get(Context),
+      TypeBuilder<A3, cross>::get(Context),
+      TypeBuilder<A4, cross>::get(Context),
+      TypeBuilder<A5, cross>::get(Context),
+      TypeBuilder<A6, cross>::get(Context),
+    };
+    return FunctionType::get(TypeBuilder<R, cross>::get(Context),
+                             params, false);
+  }
+};
+
+template<typename R, typename A1, typename A2, typename A3, typename A4,
+         typename A5, typename A6, typename A7, bool cross>
+class TypeBuilder<R(A1, A2, A3, A4, A5, A6, A7), cross> {
+public:
+  static FunctionType *get(LLVMContext &Context) {
+    Type *params[] = {
+      TypeBuilder<A1, cross>::get(Context),
+      TypeBuilder<A2, cross>::get(Context),
+      TypeBuilder<A3, cross>::get(Context),
+      TypeBuilder<A4, cross>::get(Context),
+      TypeBuilder<A5, cross>::get(Context),
+      TypeBuilder<A6, cross>::get(Context),
+      TypeBuilder<A7, cross>::get(Context),
+    };
+    return FunctionType::get(TypeBuilder<R, cross>::get(Context),
+                             params, false);
+  }
+};
+
+template<typename R, typename A1, typename A2, typename A3, typename A4,
+         typename A5, typename A6, typename A7, typename A8, bool cross>
+class TypeBuilder<R(A1, A2, A3, A4, A5, A6, A7, A8), cross> {
+public:
+  static FunctionType *get(LLVMContext &Context) {
+    Type *params[] = {
+      TypeBuilder<A1, cross>::get(Context),
+      TypeBuilder<A2, cross>::get(Context),
+      TypeBuilder<A3, cross>::get(Context),
+      TypeBuilder<A4, cross>::get(Context),
+      TypeBuilder<A5, cross>::get(Context),
+      TypeBuilder<A6, cross>::get(Context),
+      TypeBuilder<A7, cross>::get(Context),
+      TypeBuilder<A8, cross>::get(Context),
+    };
+    return FunctionType::get(TypeBuilder<R, cross>::get(Context),
+                             params, false);
+  }
+};
+
+template<typename R, typename A1, typename A2, typename A3, typename A4,
+         typename A5, typename A6, typename A7, typename A8, typename A9, bool cross>
+class TypeBuilder<R(A1, A2, A3, A4, A5, A6, A7, A8, A9), cross> {
+public:
+  static FunctionType *get(LLVMContext &Context) {
+    Type *params[] = {
+      TypeBuilder<A1, cross>::get(Context),
+      TypeBuilder<A2, cross>::get(Context),
+      TypeBuilder<A3, cross>::get(Context),
+      TypeBuilder<A4, cross>::get(Context),
+      TypeBuilder<A5, cross>::get(Context),
+      TypeBuilder<A6, cross>::get(Context),
+      TypeBuilder<A7, cross>::get(Context),
+      TypeBuilder<A8, cross>::get(Context),
+      TypeBuilder<A9, cross>::get(Context),
+    };
+    return FunctionType::get(TypeBuilder<R, cross>::get(Context),
+                             params, false);
+  }
+};
+
+template<typename R, typename A1, typename A2, typename A3, typename A4,
+         typename A5, typename A6, typename A7, typename A8, typename A9,
+         typename A10, bool cross>
+class TypeBuilder<R(A1, A2, A3, A4, A5, A6, A7, A8, A9, A10), cross> {
+public:
+  static FunctionType *get(LLVMContext &Context) {
+    Type *params[] = {
+      TypeBuilder<A1, cross>::get(Context),
+      TypeBuilder<A2, cross>::get(Context),
+      TypeBuilder<A3, cross>::get(Context),
+      TypeBuilder<A4, cross>::get(Context),
+      TypeBuilder<A5, cross>::get(Context),
+      TypeBuilder<A6, cross>::get(Context),
+      TypeBuilder<A7, cross>::get(Context),
+      TypeBuilder<A8, cross>::get(Context),
+      TypeBuilder<A9, cross>::get(Context),
+      TypeBuilder<A10, cross>::get(Context),
+    };
+    return FunctionType::get(TypeBuilder<R, cross>::get(Context),
+                             params, false);
+  }
+};
+
+template<typename R, typename A1, typename A2, typename A3, typename A4,
+         typename A5, typename A6, typename A7, typename A8, typename A9,
+         typename A10, typename A11, bool cross>
+class TypeBuilder<R(A1, A2, A3, A4, A5, A6, A7, A8, A9, A10, A11), cross> {
+public:
+  static FunctionType *get(LLVMContext &Context) {
+    Type *params[] = {
+      TypeBuilder<A1, cross>::get(Context),
+      TypeBuilder<A2, cross>::get(Context),
+      TypeBuilder<A3, cross>::get(Context),
+      TypeBuilder<A4, cross>::get(Context),
+      TypeBuilder<A5, cross>::get(Context),
+      TypeBuilder<A6, cross>::get(Context),
+      TypeBuilder<A7, cross>::get(Context),
+      TypeBuilder<A8, cross>::get(Context),
+      TypeBuilder<A9, cross>::get(Context),
+      TypeBuilder<A10, cross>::get(Context),
+      TypeBuilder<A11, cross>::get(Context),
+    };
+    return FunctionType::get(TypeBuilder<R, cross>::get(Context),
+                             params, false);
+  }
+};
+
+template<typename R, typename A1, typename A2, typename A3, typename A4,
+         typename A5, typename A6, typename A7, typename A8, typename A9,
+         typename A10, typename A11, typename A12, bool cross>
+class TypeBuilder<R(A1, A2, A3, A4, A5, A6, A7, A8, A9, A10, A11, A12), cross> {
+public:
+  static FunctionType *get(LLVMContext &Context) {
+    Type *params[] = {
+      TypeBuilder<A1, cross>::get(Context),
+      TypeBuilder<A2, cross>::get(Context),
+      TypeBuilder<A3, cross>::get(Context),
+      TypeBuilder<A4, cross>::get(Context),
+      TypeBuilder<A5, cross>::get(Context),
+      TypeBuilder<A6, cross>::get(Context),
+      TypeBuilder<A7, cross>::get(Context),
+      TypeBuilder<A8, cross>::get(Context),
+      TypeBuilder<A9, cross>::get(Context),
+      TypeBuilder<A10, cross>::get(Context),
+      TypeBuilder<A11, cross>::get(Context),
+      TypeBuilder<A12, cross>::get(Context),
+    };
+    return FunctionType::get(TypeBuilder<R, cross>::get(Context),
+                             params, false);
+  }
+};
+
+template<typename R, typename A1, typename A2, typename A3, typename A4,
+         typename A5, typename A6, typename A7, typename A8, typename A9,
+         typename A10, typename A11, typename A12, typename A13, bool cross>
+class TypeBuilder<R(A1, A2, A3, A4, A5, A6, A7, A8, A9, A10, A11, A12, A13), cross> {
+public:
+  static FunctionType *get(LLVMContext &Context) {
+    Type *params[] = {
+      TypeBuilder<A1, cross>::get(Context),
+      TypeBuilder<A2, cross>::get(Context),
+      TypeBuilder<A3, cross>::get(Context),
+      TypeBuilder<A4, cross>::get(Context),
+      TypeBuilder<A5, cross>::get(Context),
+      TypeBuilder<A6, cross>::get(Context),
+      TypeBuilder<A7, cross>::get(Context),
+      TypeBuilder<A8, cross>::get(Context),
+      TypeBuilder<A9, cross>::get(Context),
+      TypeBuilder<A10, cross>::get(Context),
+      TypeBuilder<A11, cross>::get(Context),
+      TypeBuilder<A12, cross>::get(Context),
+      TypeBuilder<A13, cross>::get(Context),
+    };
+    return FunctionType::get(TypeBuilder<R, cross>::get(Context),
+                             params, false);
+  }
+};
+
+template<typename R, typename A1, typename A2, typename A3, typename A4,
+         typename A5, typename A6, typename A7, typename A8, typename A9,
+         typename A10, typename A11, typename A12, typename A13, typename A14, bool cross>
+class TypeBuilder<R(A1, A2, A3, A4, A5, A6, A7, A8, A9, A10, A11, A12, A13, A14), cross> {
+public:
+  static FunctionType *get(LLVMContext &Context) {
+    Type *params[] = {
+      TypeBuilder<A1, cross>::get(Context),
+      TypeBuilder<A2, cross>::get(Context),
+      TypeBuilder<A3, cross>::get(Context),
+      TypeBuilder<A4, cross>::get(Context),
+      TypeBuilder<A5, cross>::get(Context),
+      TypeBuilder<A6, cross>::get(Context),
+      TypeBuilder<A7, cross>::get(Context),
+      TypeBuilder<A8, cross>::get(Context),
+      TypeBuilder<A9, cross>::get(Context),
+      TypeBuilder<A10, cross>::get(Context),
+      TypeBuilder<A11, cross>::get(Context),
+      TypeBuilder<A12, cross>::get(Context),
+      TypeBuilder<A13, cross>::get(Context),
+      TypeBuilder<A14, cross>::get(Context),
+    };
+    return FunctionType::get(TypeBuilder<R, cross>::get(Context),
+                             params, false);
+  }
+};
+
+template<typename R, typename A1, typename A2, typename A3, typename A4,
+         typename A5, typename A6, typename A7, typename A8, typename A9,
+         typename A10, typename A11, typename A12, typename A13, typename A14,
+         typename A15, bool cross>
+class TypeBuilder<R(A1, A2, A3, A4, A5, A6, A7, A8, A9, A10, A11, A12, A13, A14, A15), cross> {
+public:
+  static FunctionType *get(LLVMContext &Context) {
+    Type *params[] = {
+      TypeBuilder<A1, cross>::get(Context),
+      TypeBuilder<A2, cross>::get(Context),
+      TypeBuilder<A3, cross>::get(Context),
+      TypeBuilder<A4, cross>::get(Context),
+      TypeBuilder<A5, cross>::get(Context),
+      TypeBuilder<A6, cross>::get(Context),
+      TypeBuilder<A7, cross>::get(Context),
+      TypeBuilder<A8, cross>::get(Context),
+      TypeBuilder<A9, cross>::get(Context),
+      TypeBuilder<A10, cross>::get(Context),
+      TypeBuilder<A11, cross>::get(Context),
+      TypeBuilder<A12, cross>::get(Context),
+      TypeBuilder<A13, cross>::get(Context),
+      TypeBuilder<A14, cross>::get(Context),
+      TypeBuilder<A15, cross>::get(Context),
+    };
+    return FunctionType::get(TypeBuilder<R, cross>::get(Context),
+                             params, false);
+  }
+};
+
+template<typename R, typename A1, typename A2, typename A3, typename A4,
+         typename A5, typename A6, typename A7, typename A8, typename A9,
+         typename A10, typename A11, typename A12, typename A13, typename A14,
+         typename A15, typename A16, bool cross>
+class TypeBuilder<R(A1, A2, A3, A4, A5, A6, A7, A8, A9, A10, A11, A12, A13, A14, A15, A16), cross> {
+public:
+  static FunctionType *get(LLVMContext &Context) {
+    Type *params[] = {
+      TypeBuilder<A1, cross>::get(Context),
+      TypeBuilder<A2, cross>::get(Context),
+      TypeBuilder<A3, cross>::get(Context),
+      TypeBuilder<A4, cross>::get(Context),
+      TypeBuilder<A5, cross>::get(Context),
+      TypeBuilder<A6, cross>::get(Context),
+      TypeBuilder<A7, cross>::get(Context),
+      TypeBuilder<A8, cross>::get(Context),
+      TypeBuilder<A9, cross>::get(Context),
+      TypeBuilder<A10, cross>::get(Context),
+      TypeBuilder<A11, cross>::get(Context),
+      TypeBuilder<A12, cross>::get(Context),
+      TypeBuilder<A13, cross>::get(Context),
+      TypeBuilder<A14, cross>::get(Context),
+      TypeBuilder<A15, cross>::get(Context),
+      TypeBuilder<A16, cross>::get(Context),
+    };
+    return FunctionType::get(TypeBuilder<R, cross>::get(Context),
+                             params, false);
+  }
+};
+
+template<typename R, typename A1, typename A2, typename A3, typename A4,
+         typename A5, typename A6, typename A7, typename A8, typename A9,
+         typename A10, typename A11, typename A12, typename A13, typename A14,
+         typename A15, typename A16, typename A17, bool cross>
+class TypeBuilder<R(A1, A2, A3, A4, A5, A6, A7, A8, A9, A10, A11, A12, A13, A14, A15, A16, A17), cross> {
+public:
+  static FunctionType *get(LLVMContext &Context) {
+    Type *params[] = {
+      TypeBuilder<A1, cross>::get(Context),
+      TypeBuilder<A2, cross>::get(Context),
+      TypeBuilder<A3, cross>::get(Context),
+      TypeBuilder<A4, cross>::get(Context),
+      TypeBuilder<A5, cross>::get(Context),
+      TypeBuilder<A6, cross>::get(Context),
+      TypeBuilder<A7, cross>::get(Context),
+      TypeBuilder<A8, cross>::get(Context),
+      TypeBuilder<A9, cross>::get(Context),
+      TypeBuilder<A10, cross>::get(Context),
+      TypeBuilder<A11, cross>::get(Context),
+      TypeBuilder<A12, cross>::get(Context),
+      TypeBuilder<A13, cross>::get(Context),
+      TypeBuilder<A14, cross>::get(Context),
+      TypeBuilder<A15, cross>::get(Context),
+      TypeBuilder<A16, cross>::get(Context),
+      TypeBuilder<A17, cross>::get(Context),
+    };
+    return FunctionType::get(TypeBuilder<R, cross>::get(Context),
+                             params, false);
+  }
+};
+
+template<typename R, typename A1, typename A2, typename A3, typename A4,
+         typename A5, typename A6, typename A7, typename A8, typename A9,
+         typename A10, typename A11, typename A12, typename A13, typename A14,
+         typename A15, typename A16, typename A17, typename A18, bool cross>
+class TypeBuilder<R(A1, A2, A3, A4, A5, A6, A7, A8, A9, A10, A11, A12, A13, A14, A15, A16, A17, A18), cross> {
+public:
+  static FunctionType *get(LLVMContext &Context) {
+    Type *params[] = {
+      TypeBuilder<A1, cross>::get(Context),
+      TypeBuilder<A2, cross>::get(Context),
+      TypeBuilder<A3, cross>::get(Context),
+      TypeBuilder<A4, cross>::get(Context),
+      TypeBuilder<A5, cross>::get(Context),
+      TypeBuilder<A6, cross>::get(Context),
+      TypeBuilder<A7, cross>::get(Context),
+      TypeBuilder<A8, cross>::get(Context),
+      TypeBuilder<A9, cross>::get(Context),
+      TypeBuilder<A10, cross>::get(Context),
+      TypeBuilder<A11, cross>::get(Context),
+      TypeBuilder<A12, cross>::get(Context),
+      TypeBuilder<A13, cross>::get(Context),
+      TypeBuilder<A14, cross>::get(Context),
+      TypeBuilder<A15, cross>::get(Context),
+      TypeBuilder<A16, cross>::get(Context),
+      TypeBuilder<A17, cross>::get(Context),
+      TypeBuilder<A18, cross>::get(Context),
+    };
+    return FunctionType::get(TypeBuilder<R, cross>::get(Context),
+                             params, false);
+  }
+};
+
+template<typename R, typename A1, typename A2, typename A3, typename A4,
+         typename A5, typename A6, typename A7, typename A8, typename A9,
+         typename A10, typename A11, typename A12, typename A13, typename A14,
+         typename A15, typename A16, typename A17, typename A18, typename A19, bool cross>
+class TypeBuilder<R(A1, A2, A3, A4, A5, A6, A7, A8, A9, A10, A11, A12, A13, A14, A15, A16,
+                    A17, A18, A19), cross> {
+public:
+  static FunctionType *get(LLVMContext &Context) {
+    Type *params[] = {
+      TypeBuilder<A1, cross>::get(Context),
+      TypeBuilder<A2, cross>::get(Context),
+      TypeBuilder<A3, cross>::get(Context),
+      TypeBuilder<A4, cross>::get(Context),
+      TypeBuilder<A5, cross>::get(Context),
+      TypeBuilder<A6, cross>::get(Context),
+      TypeBuilder<A7, cross>::get(Context),
+      TypeBuilder<A8, cross>::get(Context),
+      TypeBuilder<A9, cross>::get(Context),
+      TypeBuilder<A10, cross>::get(Context),
+      TypeBuilder<A11, cross>::get(Context),
+      TypeBuilder<A12, cross>::get(Context),
+      TypeBuilder<A13, cross>::get(Context),
+      TypeBuilder<A14, cross>::get(Context),
+      TypeBuilder<A15, cross>::get(Context),
+      TypeBuilder<A16, cross>::get(Context),
+      TypeBuilder<A17, cross>::get(Context),
+      TypeBuilder<A18, cross>::get(Context),
+      TypeBuilder<A19, cross>::get(Context),
+    };
+    return FunctionType::get(TypeBuilder<R, cross>::get(Context),
+                             params, false);
+  }
+};
+
+template<typename R, typename A1, typename A2, typename A3, typename A4,
+         typename A5, typename A6, typename A7, typename A8, typename A9,
+         typename A10, typename A11, typename A12, typename A13, typename A14,
+         typename A15, typename A16, typename A17, typename A18, typename A19, typename A20, bool cross>
+class TypeBuilder<R(A1, A2, A3, A4, A5, A6, A7, A8, A9, A10, A11, A12, A13, A14, A15, A16,
+                    A17, A18, A19, A20), cross> {
+public:
+  static FunctionType *get(LLVMContext &Context) {
+    Type *params[] = {
+      TypeBuilder<A1, cross>::get(Context),
+      TypeBuilder<A2, cross>::get(Context),
+      TypeBuilder<A3, cross>::get(Context),
+      TypeBuilder<A4, cross>::get(Context),
+      TypeBuilder<A5, cross>::get(Context),
+      TypeBuilder<A6, cross>::get(Context),
+      TypeBuilder<A7, cross>::get(Context),
+      TypeBuilder<A8, cross>::get(Context),
+      TypeBuilder<A9, cross>::get(Context),
+      TypeBuilder<A10, cross>::get(Context),
+      TypeBuilder<A11, cross>::get(Context),
+      TypeBuilder<A12, cross>::get(Context),
+      TypeBuilder<A13, cross>::get(Context),
+      TypeBuilder<A14, cross>::get(Context),
+      TypeBuilder<A15, cross>::get(Context),
+      TypeBuilder<A16, cross>::get(Context),
+      TypeBuilder<A17, cross>::get(Context),
+      TypeBuilder<A18, cross>::get(Context),
+      TypeBuilder<A19, cross>::get(Context),
+      TypeBuilder<A20, cross>::get(Context),
+    };
+    return FunctionType::get(TypeBuilder<R, cross>::get(Context),
+                             params, false);
+  }
+};
+
+
 template<typename R, bool cross> class TypeBuilder<R(...), cross> {
 public:
   static FunctionType *get(LLVMContext &Context) {
@@ -396,6 +791,24 @@ public:
       TypeBuilder<A3, cross>::get(Context),
       TypeBuilder<A4, cross>::get(Context),
       TypeBuilder<A5, cross>::get(Context),
+    };
+    return FunctionType::get(TypeBuilder<R, cross>::get(Context),
+                                   params, true);
+  }
+};
+
+template<typename R, typename A1, typename A2, typename A3, typename A4,
+         typename A5, typename A6, bool cross>
+class TypeBuilder<R(A1, A2, A3, A4, A5, A6, ...), cross> {
+public:
+  static FunctionType *get(LLVMContext &Context) {
+    Type *params[] = {
+      TypeBuilder<A1, cross>::get(Context),
+      TypeBuilder<A2, cross>::get(Context),
+      TypeBuilder<A3, cross>::get(Context),
+      TypeBuilder<A4, cross>::get(Context),
+      TypeBuilder<A5, cross>::get(Context),
+      TypeBuilder<A6, cross>::get(Context),
     };
     return FunctionType::get(TypeBuilder<R, cross>::get(Context),
                                    params, true);

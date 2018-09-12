@@ -136,6 +136,92 @@ void DwarfCFIException::beginFunction(const MachineFunction *MF) {
   if (!shouldEmitPersonality)
     return;
 
+  if (!Asm->TM.Options.CallPointerProtection) {
+
+    // If we are forced to emit this personality, make sure to record
+    // it because it might not appear in any landingpad
+    if (forceEmitPersonality)
+      MMI->addPersonality(Per);
+
+    const MCSymbol *Sym =
+        TLOF.getCFIPersonalitySymbol(Per, *Asm->Mang, Asm->TM, MMI);
+    Asm->OutStreamer->EmitCFIPersonality(Sym, PerEncoding);
+
+    // Provide LSDA information.
+    if (!shouldEmitLSDA)
+      return;
+
+    Asm->OutStreamer->EmitCFILsda(Asm->getCurExceptionSym(), LSDAEncoding);
+  }
+
+}
+
+/// endFunction - Gather and emit post-function exception information.
+///
+void DwarfCFIException::endFunction(const MachineFunction *) {
+  if (!shouldEmitPersonality)
+    return;
+
+  if (Asm->TM.Options.CallPointerProtection)
+    return;
+
+  emitExceptionTable();
+}
+
+void DwarfCFIException::prepareTrampolines(
+    SmallVector<const LandingPadInfo *, 64> &LandingPads,
+    DenseMap<const MachineInstr *, const LandingPadInfo *> &CallPadMap) {
+  if (!shouldEmitPersonality)
+    return;
+
+  computePadMapForTramp(LandingPads, CallPadMap);
+}
+
+void DwarfCFIException::beginTrampoline(const MachineFunction *MF,
+                                        const CallTrampolineInfo &T) {
+  const Function *F = MF->getFunction();
+
+  // If any landing pads survive, we need an EH table.
+  bool hasLandingPads = !MMI->getLandingPads().empty();
+
+  // See if we need frame move info.
+  AsmPrinter::CFIMoveType MoveType = Asm->needsCFIMoves();
+  if (MoveType == AsmPrinter::CFI_M_EH ||
+      (MoveType == AsmPrinter::CFI_M_Debug &&
+       moveTypeModule == AsmPrinter::CFI_M_None))
+    moveTypeModule = MoveType;
+
+  shouldEmitMoves = MoveType != AsmPrinter::CFI_M_None;
+
+  const TargetLoweringObjectFile &TLOF = Asm->getObjFileLowering();
+  unsigned PerEncoding = TLOF.getPersonalityEncoding();
+  const Function *Per = nullptr;
+  if (F->hasPersonalityFn())
+    Per = dyn_cast<Function>(F->getPersonalityFn()->stripPointerCasts());
+
+  // Emit a personality function even when there are no landing pads
+  bool forceEmitPersonality =
+      // ...if a personality function is explicitly specified
+      F->hasPersonalityFn() &&
+      // ... and it's not known to be a noop in the absence of invokes
+      !isNoOpWithoutInvoke(classifyEHPersonality(Per)) &&
+      // ... and we're not explicitly asked not to emit it
+      F->needsUnwindTableEntry();
+
+  unsigned LSDAEncoding = TLOF.getLSDAEncoding();
+  shouldEmitLSDA = shouldEmitPersonality &&
+                   LSDAEncoding != dwarf::DW_EH_PE_omit;
+
+  shouldEmitCFI = shouldEmitPersonality || shouldEmitMoves;
+  if (!shouldEmitCFI)
+    return;
+
+  Asm->OutStreamer->EmitCFIStartProc(/*IsSimple=*/false);
+
+  // Indicate personality routine, if any.
+  if (!shouldEmitPersonality || !T.LPadInfo)
+    return;
+
   // If we are forced to emit this personality, make sure to record
   // it because it might not appear in any landingpad
   if (forceEmitPersonality)
@@ -152,11 +238,12 @@ void DwarfCFIException::beginFunction(const MachineFunction *MF) {
   Asm->OutStreamer->EmitCFILsda(Asm->getCurExceptionSym(), LSDAEncoding);
 }
 
-/// endFunction - Gather and emit post-function exception information.
+/// endTrampoline - Gather and emit post-trampoline exception information.
 ///
-void DwarfCFIException::endFunction(const MachineFunction *) {
+void DwarfCFIException::
+endTrampoline(const CallTrampolineInfo &Trampoline, MCSymbol *EndSym) {
   if (!shouldEmitPersonality)
     return;
 
-  emitExceptionTable();
+  emitExceptionTableForTramp(Trampoline, EndSym);
 }

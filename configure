@@ -745,6 +745,7 @@ CLANG_SRC_ROOT
 BINUTILS_INCDIR
 ENABLE_TERMINFO
 INTERNAL_PREFIX
+LLVM_ENABLE_RNG
 ifGNUmake
 LN_S
 NM
@@ -791,8 +792,10 @@ USE_INTEL_JITEVENTS
 XML2CONFIG
 LIBXML2_LIBS
 LIBXML2_INC
+LLVM_ENABLE_OPENSSL
 HAVE_PTHREAD
 HAVE_LIBZ
+HAVE_OPENSSL
 HUGE_VAL_SANITY
 MMAP_FILE
 SHLIBEXT
@@ -1474,6 +1477,7 @@ Optional Features:
                           YES)
   --enable-libedit        Use libedit if available (default is YES)
   --enable-libffi         Check for the presence of libffi (default is NO)
+  --enable-rng            Enable random number generation (default is YES)
 
 Optional Packages:
   --with-PACKAGE[=ARG]    use PACKAGE [ARG=yes]
@@ -1508,6 +1512,7 @@ Optional Packages:
                           Tell OProfile >= 0.9.4 how to symbolize JIT output
   --with-intel-jitevents  Notify Intel JIT profiling API of generated code
 
+  --without-openssl       Do not use the openssl libcrypto library
 
 Some influential environment variables:
   CC          C compiler command
@@ -6060,6 +6065,32 @@ else
 fi
 
 INTERNAL_PREFIX=$withval
+
+
+# Check whether --enable-rng was given.
+if test "${enable_rng+set}" = set; then
+  enableval=$enable_rng;
+else
+  enableval=default
+fi
+
+case "$enableval" in
+  yes) LLVM_ENABLE_RNG=1
+ ;;
+  no)  LLVM_ENABLE_RNG=0
+ ;;
+  default) LLVM_ENABLE_RNG=1
+ ;;
+  *) { { echo "$as_me:$LINENO: error: Invalid setting for --enable-rng. Use \"yes\" or \"no\"" >&5
+echo "$as_me: error: Invalid setting for --enable-rng. Use \"yes\" or \"no\"" >&2;}
+   { (exit 1); exit 1; }; } ;;
+esac
+
+cat >>confdefs.h <<_ACEOF
+#define LLVM_ENABLE_RNG $LLVM_ENABLE_RNG
+_ACEOF
+
+
 
 
 
@@ -10702,6 +10733,117 @@ fi
 
 
 
+# Check whether --with-openssl was given.
+if test "${with_openssl+set}" = set; then
+  withval=$with_openssl; LLVM_ENABLE_OPENSSL=0
+
+else
+
+      LLVM_ENABLE_OPENSSL=1
+
+
+{ echo "$as_me:$LINENO: checking for AES_ctr128_encrypt in -lcrypto" >&5
+echo $ECHO_N "checking for AES_ctr128_encrypt in -lcrypto... $ECHO_C" >&6; }
+if test "${ac_cv_lib_crypto_AES_ctr128_encrypt+set}" = set; then
+  echo $ECHO_N "(cached) $ECHO_C" >&6
+else
+  ac_check_lib_save_LIBS=$LIBS
+LIBS="-lcrypto  $LIBS"
+cat >conftest.$ac_ext <<_ACEOF
+/* confdefs.h.  */
+_ACEOF
+cat confdefs.h >>conftest.$ac_ext
+cat >>conftest.$ac_ext <<_ACEOF
+/* end confdefs.h.  */
+
+/* Override any GCC internal prototype to avoid an error.
+   Use char because int might match the return type of a GCC
+   builtin and then its argument prototype would still apply.  */
+#ifdef __cplusplus
+extern "C"
+#endif
+char AES_ctr128_encrypt ();
+int
+main ()
+{
+return AES_ctr128_encrypt ();
+  ;
+  return 0;
+}
+_ACEOF
+rm -f conftest.$ac_objext conftest$ac_exeext
+if { (ac_try="$ac_link"
+case "(($ac_try" in
+  *\"* | *\`* | *\\*) ac_try_echo=\$ac_try;;
+  *) ac_try_echo=$ac_try;;
+esac
+eval "echo \"\$as_me:$LINENO: $ac_try_echo\"") >&5
+  (eval "$ac_link") 2>conftest.er1
+  ac_status=$?
+  grep -v '^ *+' conftest.er1 >conftest.err
+  rm -f conftest.er1
+  cat conftest.err >&5
+  echo "$as_me:$LINENO: \$? = $ac_status" >&5
+  (exit $ac_status); } &&
+	 { ac_try='test -z "$ac_c_werror_flag" || test ! -s conftest.err'
+  { (case "(($ac_try" in
+  *\"* | *\`* | *\\*) ac_try_echo=\$ac_try;;
+  *) ac_try_echo=$ac_try;;
+esac
+eval "echo \"\$as_me:$LINENO: $ac_try_echo\"") >&5
+  (eval "$ac_try") 2>&5
+  ac_status=$?
+  echo "$as_me:$LINENO: \$? = $ac_status" >&5
+  (exit $ac_status); }; } &&
+	 { ac_try='test -s conftest$ac_exeext'
+  { (case "(($ac_try" in
+  *\"* | *\`* | *\\*) ac_try_echo=\$ac_try;;
+  *) ac_try_echo=$ac_try;;
+esac
+eval "echo \"\$as_me:$LINENO: $ac_try_echo\"") >&5
+  (eval "$ac_try") 2>&5
+  ac_status=$?
+  echo "$as_me:$LINENO: \$? = $ac_status" >&5
+  (exit $ac_status); }; }; then
+  ac_cv_lib_crypto_AES_ctr128_encrypt=yes
+else
+  echo "$as_me: failed program was:" >&5
+sed 's/^/| /' conftest.$ac_ext >&5
+
+	ac_cv_lib_crypto_AES_ctr128_encrypt=no
+fi
+
+rm -f core conftest.err conftest.$ac_objext \
+      conftest$ac_exeext conftest.$ac_ext
+LIBS=$ac_check_lib_save_LIBS
+fi
+{ echo "$as_me:$LINENO: result: $ac_cv_lib_crypto_AES_ctr128_encrypt" >&5
+echo "${ECHO_T}$ac_cv_lib_crypto_AES_ctr128_encrypt" >&6; }
+if test $ac_cv_lib_crypto_AES_ctr128_encrypt = yes; then
+  cat >>confdefs.h <<_ACEOF
+#define HAVE_LIBCRYPTO 1
+_ACEOF
+
+  LIBS="-lcrypto $LIBS"
+
+else
+
+        echo "Error! You need to have openssl installed."
+        exit -1
+
+fi
+
+
+fi
+
+
+cat >>confdefs.h <<_ACEOF
+#define LLVM_ENABLE_OPENSSL $LLVM_ENABLE_OPENSSL
+_ACEOF
+
+
+
+
 
 
 
@@ -12864,6 +13006,190 @@ else
   HAVE_LIBZ=0
 
 fi
+if test "$LLVM_ENABLE_OPENSSL" -eq 1 ; then
+
+
+for ac_header in openssl/aes.h openssl/evp.h
+do
+as_ac_Header=`echo "ac_cv_header_$ac_header" | $as_tr_sh`
+if { as_var=$as_ac_Header; eval "test \"\${$as_var+set}\" = set"; }; then
+  { echo "$as_me:$LINENO: checking for $ac_header" >&5
+echo $ECHO_N "checking for $ac_header... $ECHO_C" >&6; }
+if { as_var=$as_ac_Header; eval "test \"\${$as_var+set}\" = set"; }; then
+  echo $ECHO_N "(cached) $ECHO_C" >&6
+fi
+ac_res=`eval echo '${'$as_ac_Header'}'`
+	       { echo "$as_me:$LINENO: result: $ac_res" >&5
+echo "${ECHO_T}$ac_res" >&6; }
+else
+  # Is the header compilable?
+{ echo "$as_me:$LINENO: checking $ac_header usability" >&5
+echo $ECHO_N "checking $ac_header usability... $ECHO_C" >&6; }
+cat >conftest.$ac_ext <<_ACEOF
+/* confdefs.h.  */
+_ACEOF
+cat confdefs.h >>conftest.$ac_ext
+cat >>conftest.$ac_ext <<_ACEOF
+/* end confdefs.h.  */
+$ac_includes_default
+#include <$ac_header>
+_ACEOF
+rm -f conftest.$ac_objext
+if { (ac_try="$ac_compile"
+case "(($ac_try" in
+  *\"* | *\`* | *\\*) ac_try_echo=\$ac_try;;
+  *) ac_try_echo=$ac_try;;
+esac
+eval "echo \"\$as_me:$LINENO: $ac_try_echo\"") >&5
+  (eval "$ac_compile") 2>conftest.er1
+  ac_status=$?
+  grep -v '^ *+' conftest.er1 >conftest.err
+  rm -f conftest.er1
+  cat conftest.err >&5
+  echo "$as_me:$LINENO: \$? = $ac_status" >&5
+  (exit $ac_status); } &&
+	 { ac_try='test -z "$ac_c_werror_flag" || test ! -s conftest.err'
+  { (case "(($ac_try" in
+  *\"* | *\`* | *\\*) ac_try_echo=\$ac_try;;
+  *) ac_try_echo=$ac_try;;
+esac
+eval "echo \"\$as_me:$LINENO: $ac_try_echo\"") >&5
+  (eval "$ac_try") 2>&5
+  ac_status=$?
+  echo "$as_me:$LINENO: \$? = $ac_status" >&5
+  (exit $ac_status); }; } &&
+	 { ac_try='test -s conftest.$ac_objext'
+  { (case "(($ac_try" in
+  *\"* | *\`* | *\\*) ac_try_echo=\$ac_try;;
+  *) ac_try_echo=$ac_try;;
+esac
+eval "echo \"\$as_me:$LINENO: $ac_try_echo\"") >&5
+  (eval "$ac_try") 2>&5
+  ac_status=$?
+  echo "$as_me:$LINENO: \$? = $ac_status" >&5
+  (exit $ac_status); }; }; then
+  ac_header_compiler=yes
+else
+  echo "$as_me: failed program was:" >&5
+sed 's/^/| /' conftest.$ac_ext >&5
+
+	ac_header_compiler=no
+fi
+
+rm -f core conftest.err conftest.$ac_objext conftest.$ac_ext
+{ echo "$as_me:$LINENO: result: $ac_header_compiler" >&5
+echo "${ECHO_T}$ac_header_compiler" >&6; }
+
+# Is the header present?
+{ echo "$as_me:$LINENO: checking $ac_header presence" >&5
+echo $ECHO_N "checking $ac_header presence... $ECHO_C" >&6; }
+cat >conftest.$ac_ext <<_ACEOF
+/* confdefs.h.  */
+_ACEOF
+cat confdefs.h >>conftest.$ac_ext
+cat >>conftest.$ac_ext <<_ACEOF
+/* end confdefs.h.  */
+#include <$ac_header>
+_ACEOF
+if { (ac_try="$ac_cpp conftest.$ac_ext"
+case "(($ac_try" in
+  *\"* | *\`* | *\\*) ac_try_echo=\$ac_try;;
+  *) ac_try_echo=$ac_try;;
+esac
+eval "echo \"\$as_me:$LINENO: $ac_try_echo\"") >&5
+  (eval "$ac_cpp conftest.$ac_ext") 2>conftest.er1
+  ac_status=$?
+  grep -v '^ *+' conftest.er1 >conftest.err
+  rm -f conftest.er1
+  cat conftest.err >&5
+  echo "$as_me:$LINENO: \$? = $ac_status" >&5
+  (exit $ac_status); } >/dev/null; then
+  if test -s conftest.err; then
+    ac_cpp_err=$ac_c_preproc_warn_flag
+    ac_cpp_err=$ac_cpp_err$ac_c_werror_flag
+  else
+    ac_cpp_err=
+  fi
+else
+  ac_cpp_err=yes
+fi
+if test -z "$ac_cpp_err"; then
+  ac_header_preproc=yes
+else
+  echo "$as_me: failed program was:" >&5
+sed 's/^/| /' conftest.$ac_ext >&5
+
+  ac_header_preproc=no
+fi
+
+rm -f conftest.err conftest.$ac_ext
+{ echo "$as_me:$LINENO: result: $ac_header_preproc" >&5
+echo "${ECHO_T}$ac_header_preproc" >&6; }
+
+# So?  What about this header?
+case $ac_header_compiler:$ac_header_preproc:$ac_c_preproc_warn_flag in
+  yes:no: )
+    { echo "$as_me:$LINENO: WARNING: $ac_header: accepted by the compiler, rejected by the preprocessor!" >&5
+echo "$as_me: WARNING: $ac_header: accepted by the compiler, rejected by the preprocessor!" >&2;}
+    { echo "$as_me:$LINENO: WARNING: $ac_header: proceeding with the compiler's result" >&5
+echo "$as_me: WARNING: $ac_header: proceeding with the compiler's result" >&2;}
+    ac_header_preproc=yes
+    ;;
+  no:yes:* )
+    { echo "$as_me:$LINENO: WARNING: $ac_header: present but cannot be compiled" >&5
+echo "$as_me: WARNING: $ac_header: present but cannot be compiled" >&2;}
+    { echo "$as_me:$LINENO: WARNING: $ac_header:     check for missing prerequisite headers?" >&5
+echo "$as_me: WARNING: $ac_header:     check for missing prerequisite headers?" >&2;}
+    { echo "$as_me:$LINENO: WARNING: $ac_header: see the Autoconf documentation" >&5
+echo "$as_me: WARNING: $ac_header: see the Autoconf documentation" >&2;}
+    { echo "$as_me:$LINENO: WARNING: $ac_header:     section \"Present But Cannot Be Compiled\"" >&5
+echo "$as_me: WARNING: $ac_header:     section \"Present But Cannot Be Compiled\"" >&2;}
+    { echo "$as_me:$LINENO: WARNING: $ac_header: proceeding with the preprocessor's result" >&5
+echo "$as_me: WARNING: $ac_header: proceeding with the preprocessor's result" >&2;}
+    { echo "$as_me:$LINENO: WARNING: $ac_header: in the future, the compiler will take precedence" >&5
+echo "$as_me: WARNING: $ac_header: in the future, the compiler will take precedence" >&2;}
+    ( cat <<\_ASBOX
+## ------------------------------------ ##
+## Report this to http://llvm.org/bugs/ ##
+## ------------------------------------ ##
+_ASBOX
+     ) | sed "s/^/$as_me: WARNING:     /" >&2
+    ;;
+esac
+{ echo "$as_me:$LINENO: checking for $ac_header" >&5
+echo $ECHO_N "checking for $ac_header... $ECHO_C" >&6; }
+if { as_var=$as_ac_Header; eval "test \"\${$as_var+set}\" = set"; }; then
+  echo $ECHO_N "(cached) $ECHO_C" >&6
+else
+  eval "$as_ac_Header=\$ac_header_preproc"
+fi
+ac_res=`eval echo '${'$as_ac_Header'}'`
+	       { echo "$as_me:$LINENO: result: $ac_res" >&5
+echo "${ECHO_T}$ac_res" >&6; }
+
+fi
+if test `eval echo '${'$as_ac_Header'}'` = yes; then
+  cat >>confdefs.h <<_ACEOF
+#define `echo "HAVE_$ac_header" | $as_tr_cpp` 1
+_ACEOF
+ HAVE_OPENSSL=1
+
+else
+  HAVE_OPENSSL=0
+
+fi
+
+done
+
+else
+  HAVE_OPENSSL=0
+
+fi
+
+cat >>confdefs.h <<_ACEOF
+#define HAVE_OPENSSL $HAVE_OPENSSL
+_ACEOF
+
 
 if test "$llvm_cv_enable_libffi" = "yes" ; then
 
@@ -18717,6 +19043,7 @@ CLANG_SRC_ROOT!$CLANG_SRC_ROOT$ac_delim
 BINUTILS_INCDIR!$BINUTILS_INCDIR$ac_delim
 ENABLE_TERMINFO!$ENABLE_TERMINFO$ac_delim
 INTERNAL_PREFIX!$INTERNAL_PREFIX$ac_delim
+LLVM_ENABLE_RNG!$LLVM_ENABLE_RNG$ac_delim
 ifGNUmake!$ifGNUmake$ac_delim
 LN_S!$LN_S$ac_delim
 NM!$NM$ac_delim
@@ -18763,8 +19090,10 @@ USE_INTEL_JITEVENTS!$USE_INTEL_JITEVENTS$ac_delim
 XML2CONFIG!$XML2CONFIG$ac_delim
 LIBXML2_LIBS!$LIBXML2_LIBS$ac_delim
 LIBXML2_INC!$LIBXML2_INC$ac_delim
+LLVM_ENABLE_OPENSSL!$LLVM_ENABLE_OPENSSL$ac_delim
 HAVE_PTHREAD!$HAVE_PTHREAD$ac_delim
 HAVE_LIBZ!$HAVE_LIBZ$ac_delim
+HAVE_OPENSSL!$HAVE_OPENSSL$ac_delim
 HUGE_VAL_SANITY!$HUGE_VAL_SANITY$ac_delim
 MMAP_FILE!$MMAP_FILE$ac_delim
 SHLIBEXT!$SHLIBEXT$ac_delim
@@ -18826,11 +19155,54 @@ ENABLE_VISIBILITY_INLINES_HIDDEN!$ENABLE_VISIBILITY_INLINES_HIDDEN$ac_delim
 RPATH!$RPATH$ac_delim
 RDYNAMIC!$RDYNAMIC$ac_delim
 program_prefix!$program_prefix$ac_delim
+_ACEOF
+
+  if test `sed -n "s/.*$ac_delim\$/X/p" conf$$subs.sed | grep -c X` = 19; then
+    break
+  elif $ac_last_try; then
+    { { echo "$as_me:$LINENO: error: could not make $CONFIG_STATUS" >&5
+echo "$as_me: error: could not make $CONFIG_STATUS" >&2;}
+   { (exit 1); exit 1; }; }
+  else
+    ac_delim="$ac_delim!$ac_delim _$ac_delim!! "
+  fi
+done
+
+ac_eof=`sed -n '/^CEOF[0-9]*$/s/CEOF/0/p' conf$$subs.sed`
+if test -n "$ac_eof"; then
+  ac_eof=`echo "$ac_eof" | sort -nru | sed 1q`
+  ac_eof=`expr $ac_eof + 1`
+fi
+
+cat >>$CONFIG_STATUS <<_ACEOF
+cat >"\$tmp/subs-3.sed" <<\CEOF$ac_eof
+/@[a-zA-Z_][a-zA-Z_0-9]*@/!b end
+_ACEOF
+sed '
+s/[,\\&]/\\&/g; s/@/@|#_!!_#|/g
+s/^/s,@/; s/!/@,|#_!!_#|/
+:n
+t n
+s/'"$ac_delim"'$/,g/; t
+s/$/\\/; p
+N; s/^.*\n//; s/[,\\&]/\\&/g; s/@/@|#_!!_#|/g; b n
+' >>$CONFIG_STATUS <conf$$subs.sed
+rm -f conf$$subs.sed
+cat >>$CONFIG_STATUS <<_ACEOF
+:end
+s/|#_!!_#|//g
+CEOF$ac_eof
+_ACEOF
+
+
+ac_delim='%!_!# '
+for ac_last_try in false false false false false :; do
+  cat >conf$$subs.sed <<_ACEOF
 LIBOBJS!$LIBOBJS$ac_delim
 LTLIBOBJS!$LTLIBOBJS$ac_delim
 _ACEOF
 
-  if test `sed -n "s/.*$ac_delim\$/X/p" conf$$subs.sed | grep -c X` = 19; then
+  if test `sed -n "s/.*$ac_delim\$/X/p" conf$$subs.sed | grep -c X` = 2; then
     break
   elif $ac_last_try; then
     { { echo "$as_me:$LINENO: error: could not make $CONFIG_STATUS" >&5

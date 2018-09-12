@@ -32,6 +32,7 @@
 #include "llvm/CodeGen/ValueTypes.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DebugLoc.h"
+#include "llvm/IR/TrapInfo.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/Support/DataTypes.h"
 #include "llvm/Support/MathExtras.h"
@@ -421,6 +422,8 @@ private:
   /// The number of entries in the Operand/Value list.
   unsigned short NumOperands, NumValues;
 
+  TrapInfo trapInfo;
+
   // The ordering of the SDNodes. It roughly corresponds to the ordering of the
   // original LLVM instructions.
   // This is used for turning off scheduling, because we'll forgo
@@ -524,6 +527,13 @@ public:
   /// Set source location info.  Try to avoid this, putting
   /// it in the constructor is preferable.
   void setDebugLoc(DebugLoc dl) { debugLoc = std::move(dl); }
+
+  /// getTrapInfo - Return the source location info.
+  const TrapInfo getTrapInfo() const { return trapInfo; }
+
+  /// setTrapInfo - Set source location info.  Try to avoid this, putting
+  /// it in the constructor is preferable.
+  void setTrapInfo(const TrapInfo ti) { trapInfo = ti; }
 
   /// This class provides iterator support for SDUse
   /// operands that use a specific SDNode.
@@ -1768,6 +1778,21 @@ public:
   }
 };
 
+class TexTrapSDNode : public SDNode {
+  const MDNode *MD;
+  friend class SelectionDAG;
+  explicit TexTrapSDNode(const MDNode *md)
+  : SDNode(ISD::TEXTRAP_SDNODE, 0, DebugLoc(), getSDVTList(MVT::TexTrap)), MD(md)
+  {}
+public:
+
+  const MDNode *getMD() const { return MD; }
+
+  static bool classof(const SDNode *N) {
+    return N->getOpcode() == ISD::TEXTRAP_SDNODE;
+  }
+};
+
 class RegisterSDNode : public SDNode {
   unsigned Reg;
   friend class SelectionDAG;
@@ -2183,7 +2208,7 @@ public:
 
 private:
   friend class SelectionDAG;
-  MachineSDNode(unsigned Opc, unsigned Order, const DebugLoc DL, SDVTList VTs)
+  MachineSDNode(unsigned Opc, unsigned Order, const DebugLoc DL, const SDVTList VTs)
     : SDNode(Opc, Order, DL, VTs), MemRefs(nullptr), MemRefsEnd(nullptr) {}
 
   /// Operands for this instruction, if they fit here. If

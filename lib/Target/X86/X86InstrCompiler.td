@@ -1332,20 +1332,20 @@ def ADD64ri32_DB : I<0, Pseudo,
 
 // Odd encoding trick: -128 fits into an 8-bit immediate field while
 // +128 doesn't, so in this special case use a sub instead of an add.
-def : Pat<(add GR16:$src1, 128),
-          (SUB16ri8 GR16:$src1, -128)>;
-def : Pat<(store (add (loadi16 addr:$dst), 128), addr:$dst),
-          (SUB16mi8 addr:$dst, -128)>;
+// def : Pat<(add GR16:$src1, 128),
+//           (SUB16ri8 GR16:$src1, -128)>;
+// def : Pat<(store (add (loadi16 addr:$dst), 128), addr:$dst),
+//           (SUB16mi8 addr:$dst, -128)>;
 
-def : Pat<(add GR32:$src1, 128),
-          (SUB32ri8 GR32:$src1, -128)>;
-def : Pat<(store (add (loadi32 addr:$dst), 128), addr:$dst),
-          (SUB32mi8 addr:$dst, -128)>;
+// def : Pat<(add GR32:$src1, 128),
+//           (SUB32ri8 GR32:$src1, -128)>;
+// def : Pat<(store (add (loadi32 addr:$dst), 128), addr:$dst),
+//           (SUB32mi8 addr:$dst, -128)>;
 
-def : Pat<(add GR64:$src1, 128),
-          (SUB64ri8 GR64:$src1, -128)>;
-def : Pat<(store (add (loadi64 addr:$dst), 128), addr:$dst),
-          (SUB64mi8 addr:$dst, -128)>;
+// def : Pat<(add GR64:$src1, 128),
+//           (SUB64ri8 GR64:$src1, -128)>;
+// def : Pat<(store (add (loadi64 addr:$dst), 128), addr:$dst),
+//           (SUB64mi8 addr:$dst, -128)>;
 
 // The same trick applies for 32-bit immediate fields in 64-bit
 // instructions.
@@ -1908,3 +1908,7 @@ def : Pat<(cttz_zero_undef (loadi64 addr:$src)), (BSF64rm addr:$src)>;
 let Predicates = [HasMOVBE] in {
  def : Pat<(bswap GR16:$src), (ROL16ri GR16:$src, (i8 8))>;
 }
+
+def SET_COOKIE : I<0, Pseudo, (outs), (ins i64imm:$cookie),
+                  "#SET_COOKIE",
+                  [(int_set_cookie imm:$cookie)]>;

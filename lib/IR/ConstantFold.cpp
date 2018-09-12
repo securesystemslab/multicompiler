@@ -29,6 +29,7 @@
 #include "llvm/IR/Operator.h"
 #include "llvm/IR/PatternMatch.h"
 #include "llvm/Support/Compiler.h"
+#include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/ManagedStatic.h"
 #include "llvm/Support/MathExtras.h"
@@ -1107,50 +1108,77 @@ Constant *llvm::ConstantFoldBinaryInstruction(unsigned Opcode,
     if (ConstantInt *CI2 = dyn_cast<ConstantInt>(C2)) {
       const APInt &C1V = CI1->getValue();
       const APInt &C2V = CI2->getValue();
+      APInt Res;
       switch (Opcode) {
       default:
         break;
       case Instruction::Add:     
-        return ConstantInt::get(CI1->getContext(), C1V + C2V);
+        Res = C1V + C2V;
+        break;
       case Instruction::Sub:     
-        return ConstantInt::get(CI1->getContext(), C1V - C2V);
+        Res = C1V - C2V;
+        break;
       case Instruction::Mul:     
-        return ConstantInt::get(CI1->getContext(), C1V * C2V);
+        Res = C1V * C2V;
+        break;
       case Instruction::UDiv:
         assert(!CI2->isNullValue() && "Div by zero handled above");
-        return ConstantInt::get(CI1->getContext(), C1V.udiv(C2V));
+        Res = C1V.udiv(C2V);
+        break;
       case Instruction::SDiv:
         assert(!CI2->isNullValue() && "Div by zero handled above");
         if (C2V.isAllOnesValue() && C1V.isMinSignedValue())
           return UndefValue::get(CI1->getType());   // MIN_INT / -1 -> undef
-        return ConstantInt::get(CI1->getContext(), C1V.sdiv(C2V));
+        Res = C1V.sdiv(C2V);
+        break;
       case Instruction::URem:
         assert(!CI2->isNullValue() && "Div by zero handled above");
-        return ConstantInt::get(CI1->getContext(), C1V.urem(C2V));
+        Res = C1V.urem(C2V);
+        break;
       case Instruction::SRem:
         assert(!CI2->isNullValue() && "Div by zero handled above");
         if (C2V.isAllOnesValue() && C1V.isMinSignedValue())
           return UndefValue::get(CI1->getType());   // MIN_INT % -1 -> undef
-        return ConstantInt::get(CI1->getContext(), C1V.srem(C2V));
+        Res = C1V.srem(C2V);
+        break;
       case Instruction::And:
-        return ConstantInt::get(CI1->getContext(), C1V & C2V);
+        Res = C1V & C2V;
+        break;
       case Instruction::Or:
-        return ConstantInt::get(CI1->getContext(), C1V | C2V);
+        Res = C1V | C2V;
+        break;
       case Instruction::Xor:
-        return ConstantInt::get(CI1->getContext(), C1V ^ C2V);
+        Res = C1V ^ C2V;
+        break;
       case Instruction::Shl:
         if (C2V.ult(C1V.getBitWidth()))
-          return ConstantInt::get(CI1->getContext(), C1V.shl(C2V));
-        return UndefValue::get(C1->getType()); // too big shift is undef
+          Res = C1V.shl(C2V);
+        else
+          return UndefValue::get(C1->getType()); // too big shift is undef
+        break;
       case Instruction::LShr:
         if (C2V.ult(C1V.getBitWidth()))
-          return ConstantInt::get(CI1->getContext(), C1V.lshr(C2V));
-        return UndefValue::get(C1->getType()); // too big shift is undef
+          Res = C1V.lshr(C2V);
+        else
+          return UndefValue::get(C1->getType()); // too big shift is undef
+        break;
       case Instruction::AShr:
         if (C2V.ult(C1V.getBitWidth()))
-          return ConstantInt::get(CI1->getContext(), C1V.ashr(C2V));
-        return UndefValue::get(C1->getType()); // too big shift is undef
+          Res = C1V.ashr(C2V);
+        else
+          return UndefValue::get(C1->getType()); // too big shift is undef
+        break;
       }
+
+      // Assuming there cannot be conflicting VTIndices
+      ConstantVTIndex *VTI;
+      if ((VTI = dyn_cast<ConstantVTIndex>(C1)) ||
+          (VTI = dyn_cast<ConstantVTIndex>(C2))) {
+        TrapInfo TI = VTI->getTrapInfo();
+        TI.setMethodPointer(false);
+        return ConstantVTIndex::get(CI1->getContext(), Res, TI);
+      }
+      return ConstantInt::get(CI1->getContext(), Res);
     }
 
     switch (Opcode) {

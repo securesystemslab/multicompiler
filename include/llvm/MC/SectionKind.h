@@ -25,8 +25,23 @@ class SectionKind {
     /// Metadata - Debug info sections or other metadata.
     Metadata,
 
+        /// TexTrap - Sections detailing metadata useful for TRanslation and
+        /// Protection (randomization), treated as if they were data for
+        /// -fdata-sections purposes.
+        TexTrap,
+
+        /// TexTrapText - Sections detailing metadata useful for TRanslation and
+        /// Protection (randomization), treated as if they were text for
+        /// -ffunction-sections purposes.
+        TexTrapText,
+
     /// Text - Text section, used for functions and other executable code.
     Text,
+
+        /// TexTramp - Text section used to implement trampolines. Needs to be
+        /// seperate from the regular section so that all trampolines are
+        /// emitted together, away from the function they refer to.
+        TexTramp,
 
     /// ReadOnly - Data that is never written to at program runtime by the
     /// program or the dynamic linker.  Things in the top-level readonly
@@ -108,7 +123,10 @@ class SectionKind {
 public:
 
   bool isMetadata() const { return K == Metadata; }
-  bool isText() const { return K == Text; }
+  bool isTexTrap() const { return K == TexTrap; }
+  bool isTexTrapText() const { return K == TexTrapText; }
+  bool isText() const { return K == Text || K == TexTramp; }
+  bool isTexTramp() const { return K == TexTramp; }
 
   bool isReadOnly() const {
     return K == ReadOnly || isMergeableCString() ||
@@ -166,6 +184,12 @@ private:
 public:
 
   static SectionKind getMetadata() { return get(Metadata); }
+  static SectionKind getTexTrap(bool isText = false) {
+    return isText ? get(TexTrapText) : get(TexTrap);
+  }
+  static SectionKind getTexTramp() {
+    return get(TexTramp);
+  }
   static SectionKind getText() { return get(Text); }
   static SectionKind getReadOnly() { return get(ReadOnly); }
   static SectionKind getMergeable1ByteCString() {

@@ -181,6 +181,13 @@ public:
     return *this;
   }
 
+  const MachineInstrBuilder &addTexTrapInfo(const MDNode *MD) const {
+    MI->addOperand(*MF, MachineOperand::CreateTexTrapInfo(MD));
+    assert(MI->isDebugValue() &&
+           "first MDNode argument of a DBG_VALUE not a DIVariable");
+    return *this;
+  }
+
   const MachineInstrBuilder &addCFIIndex(unsigned CFIIndex) const {
     MI->addOperand(*MF, MachineOperand::CreateCFIIndex(CFIIndex));
     return *this;

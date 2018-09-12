@@ -271,6 +271,15 @@ void MCObjectFileInfo::initMachOMCObjectFileInfo(Triple T) {
   StackMapSection = Ctx->getMachOSection("__LLVM_STACKMAPS", "__llvm_stackmaps",
                                          0, SectionKind::getMetadata());
 
+  TexTrapSection =
+    Ctx->getMachOSection("__TEXTRAP", "__textrap", 0,
+                         SectionKind::getMetadata());
+
+  TexTrampSection =
+    Ctx->getMachOSection("__TRAMP", "__trampolines",
+                         MachO::S_ATTR_PURE_INSTRUCTIONS,
+                         SectionKind::getText());
+
   FaultMapSection = Ctx->getMachOSection("__LLVM_FAULTMAPS", "__llvm_faultmaps",
                                          0, SectionKind::getMetadata());
 
@@ -550,6 +559,15 @@ void MCObjectFileInfo::initELFMCObjectFileInfo(Triple T) {
 
   StackMapSection =
       Ctx->getELFSection(".llvm_stackmaps", ELF::SHT_PROGBITS, ELF::SHF_ALLOC);
+
+  TexTrapSection =
+    Ctx->getELFSection(".textrap", ELF::SHT_PROGBITS,
+                       ELF::SHF_ALLOC);
+
+  TexTrampSection =
+    Ctx->getELFSection(".tramp", ELF::SHT_PROGBITS,
+                       ELF::SHF_EXECINSTR |
+                       ELF::SHF_ALLOC);
 
   FaultMapSection =
       Ctx->getELFSection(".llvm_faultmaps", ELF::SHT_PROGBITS, ELF::SHF_ALLOC);

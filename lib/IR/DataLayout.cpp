@@ -181,6 +181,7 @@ void DataLayout::reset(StringRef Desc) {
   LayoutMap = nullptr;
   BigEndian = false;
   StackNaturalAlign = 0;
+  TrampolineSize = 128;
   ManglingMode = MM_None;
 
   // Default alignments
@@ -371,6 +372,10 @@ void DataLayout::parseSpecifier(StringRef Desc) {
         break;
       }
       break;
+    case 't': {
+      TrampolineSize = getInt(Tok);
+      break;
+    }
     default:
       report_fatal_error("Unknown specifier in datalayout string");
       break;
@@ -576,7 +581,6 @@ const StructLayout *DataLayout::getStructLayout(StructType *Ty) const {
   return L;
 }
 
-
 unsigned DataLayout::getPointerABIAlignment(unsigned AS) const {
   PointersTy::const_iterator I = findPointerLowerBound(AS);
   if (I == Pointers.end() || I->AddressSpace != AS) {
@@ -667,6 +671,9 @@ unsigned DataLayout::getAlignment(Type *Ty, bool abi_or_pref) const {
   case Type::X86_MMXTyID:
   case Type::VectorTyID:
     AlignType = VECTOR_ALIGN;
+    break;
+  case Type::TrampolineTyID:
+    return 1; // byte alignment
     break;
   default:
     llvm_unreachable("Bad type for getAlignment!!!");

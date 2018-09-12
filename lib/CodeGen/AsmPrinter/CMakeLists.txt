@@ -20,6 +20,7 @@ add_llvm_library(LLVMAsmPrinter
   ErlangGCPrinter.cpp
   OcamlGCPrinter.cpp
   WinException.cpp
+  VTableMarkingHandler.cpp
   WinCodeViewLineTables.cpp
   )
 

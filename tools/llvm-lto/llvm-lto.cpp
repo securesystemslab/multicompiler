@@ -235,6 +235,7 @@ static void createCombinedFunctionIndex() {
 }
 
 int main(int argc, char **argv) {
+
   // Print a stack trace if we signal out.
   sys::PrintStackTraceOnErrorSignal();
   PrettyStackTraceProgram X(argc, argv);

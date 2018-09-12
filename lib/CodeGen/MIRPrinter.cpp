@@ -840,6 +840,9 @@ void MIPrinter::print(const MachineOperand &Op, const TargetRegisterInfo *TRI,
     print(MMI.getFrameInstructions()[Op.getCFIIndex()], TRI);
     break;
   }
+  case MachineOperand::MO_TexTrapInfo:
+    llvm_unreachable("Can't print textrap info yet.");
+    break;
   }
 }
 

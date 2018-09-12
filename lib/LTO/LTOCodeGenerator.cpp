@@ -45,6 +45,7 @@
 #include "llvm/Support/TargetRegistry.h"
 #include "llvm/Support/TargetSelect.h"
 #include "llvm/Support/ToolOutputFile.h"
+#include "llvm/Support/RandomNumberGenerator.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Target/TargetLowering.h"
 #include "llvm/Target/TargetOptions.h"
@@ -53,6 +54,7 @@
 #include "llvm/Transforms/IPO.h"
 #include "llvm/Transforms/IPO/PassManagerBuilder.h"
 #include "llvm/Transforms/ObjCARC.h"
+#include "llvm/MultiCompiler/MultiCompilerOptions.h"
 #include <system_error>
 using namespace llvm;
 
@@ -461,6 +463,17 @@ bool LTOCodeGenerator::optimize(bool DisableVerify, bool DisableInline,
   if (!this->determineTarget())
     return false;
 
+  std::unique_ptr<RandomNumberGenerator> RNG(MergedModule->createRNG());
+
+  // Permute the function list
+  // While we *can* change the order of passes, I'd first like to look at
+  // simply permuting the order in which functions are processed.
+
+  if (multicompiler::RandomizeFunctionList) {
+    //printf("Shuffling functions...\n");
+    RNG->shuffle<Function>(MergedModule->getFunctionList());
+  }
+
   // Mark which symbols can not be internalized
   this->applyScopeRestrictions();
 
@@ -489,6 +502,11 @@ bool LTOCodeGenerator::optimize(bool DisableVerify, bool DisableInline,
 
   // Run our queue of passes all at once now, efficiently.
   passes.run(*MergedModule);
+
+  if (multicompiler::RandomizeFunctionList) {
+    //printf("Shuffling functions...\n");
+    RNG->shuffle<Function>(MergedModule->getFunctionList());
+  }
 
   return true;
 }

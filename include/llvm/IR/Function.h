@@ -369,6 +369,15 @@ public:
     return hasUWTable() || !doesNotThrow();
   }
 
+  bool isTrampoline() const {
+    return AttributeSets.hasAttribute(AttributeSet::FunctionIndex,
+                                      Attribute::Trampoline);
+  }
+
+  void setIsTrampoline() {
+    addFnAttr(Attribute::Trampoline);
+  }
+
   /// @brief Determine if the function returns a structure through first
   /// pointer argument.
   bool hasStructRetAttr() const {

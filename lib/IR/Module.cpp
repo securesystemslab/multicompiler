@@ -24,6 +24,9 @@
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/TypeFinder.h"
 #include "llvm/Support/Dwarf.h"
+#include "llvm/Pass.h"
+#include "llvm/Support/Path.h"
+#include "llvm/Pass.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Support/RandomNumberGenerator.h"
 #include <algorithm>
@@ -41,6 +44,7 @@ using namespace llvm;
 template class llvm::SymbolTableListTraits<Function>;
 template class llvm::SymbolTableListTraits<GlobalVariable>;
 template class llvm::SymbolTableListTraits<GlobalAlias>;
+template class llvm::SymbolTableListTraits<Trampoline>;
 
 //===----------------------------------------------------------------------===//
 // Primitive Module methods.
@@ -57,6 +61,7 @@ Module::~Module() {
   Context.removeModule(this);
   dropAllReferences();
   GlobalList.clear();
+  TrampolineList.clear();
   FunctionList.clear();
   AliasList.clear();
   NamedMDList.clear();
@@ -65,7 +70,9 @@ Module::~Module() {
 }
 
 RandomNumberGenerator *Module::createRNG(const Pass* P) const {
-  SmallString<32> Salt(P->getPassName());
+  SmallString<32> Salt;
+  if (P != 0)
+    Salt += P->getPassName();
 
   // This RNG is guaranteed to produce the same random stream only
   // when the Module ID and thus the input filename is the same. This
@@ -82,24 +89,18 @@ RandomNumberGenerator *Module::createRNG(const Pass* P) const {
   return new RandomNumberGenerator(Salt);
 }
 
-RandomNumberGenerator *Module::createRNG(const Pass* P) const {
-  SmallString<32> Salt(P->getPassName());
+RandomNumberGenerator *Module::createRNG(uint64_t Seed, const Pass* P,
+                                         StringRef InputSalt) const {
+  SmallString<32> Salt;
+  if (P != 0)
+    Salt += P->getPassName();
+  if (!InputSalt.empty())
+    Salt += InputSalt;
 
-  // This RNG is guaranteed to produce the same random stream only
-  // when the Module ID and thus the input filename is the same. This
-  // might be problematic if the input filename extension changes
-  // (e.g. from .c to .bc or .ll).
-  //
-  // We could store this salt in NamedMetadata, but this would make
-  // the parameter non-const. This would unfortunately make this
-  // interface unusable by any Machine passes, since they only have a
-  // const reference to their IR Module. Alternatively we can always
-  // store salt metadata from the Module constructor.
   Salt += sys::path::filename(getModuleIdentifier());
 
-  return new RandomNumberGenerator(Salt);
+  return new RandomNumberGenerator(Seed, Salt);
 }
-
 
 /// getNamedValue - Return the first global value in the module with
 /// the specified name, of arbitrary type.  This method returns null

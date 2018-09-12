@@ -107,6 +107,7 @@ private:
   bool BigEndian;
 
   unsigned StackNaturalAlign;
+  unsigned TrampolineSize; // in bits
 
   enum ManglingModeT {
     MM_None,
@@ -202,6 +203,7 @@ public:
     LegalIntWidths = DL.LegalIntWidths;
     Alignments = DL.Alignments;
     Pointers = DL.Pointers;
+    TrampolineSize = DL.TrampolineSize;
     return *this;
   }
 
@@ -544,6 +546,8 @@ inline uint64_t DataLayout::getTypeSizeInBits(Type *Ty) const {
     VectorType *VTy = cast<VectorType>(Ty);
     return VTy->getNumElements() * getTypeSizeInBits(VTy->getElementType());
   }
+  case Type::TrampolineTyID:
+    return TrampolineSize;
   default:
     llvm_unreachable("DataLayout::getTypeSizeInBits(): Unsupported type");
   }

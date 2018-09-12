@@ -15,6 +15,7 @@
 #include "DwarfDebug.h"
 #include "DwarfException.h"
 #include "WinException.h"
+#include "VTableMarkingHandler.h"
 #include "WinCodeViewLineTables.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/Statistic.h"
@@ -60,6 +61,7 @@ static const char *const DWARFGroupName = "DWARF Emission";
 static const char *const DbgTimerName = "Debug Info Emission";
 static const char *const EHTimerName = "DWARF Exception Writer";
 static const char *const CodeViewLineTablesGroupName = "CodeView Line Tables";
+static const char *const DivMarkingGroupName = "Diversification Marking";
 
 STATISTIC(EmittedInsts, "Number of machine instrs printed");
 
@@ -173,6 +175,9 @@ void AsmPrinter::getAnalysisUsage(AnalysisUsage &AU) const {
 }
 
 bool AsmPrinter::doInitialization(Module &M) {
+  if (!RNG && TM.Options.CallPointerProtection)
+    RNG.reset(M.createRNG(this));
+
   MMI = getAnalysisIfAvailable<MachineModuleInfo>();
 
   // Initialize TargetLoweringObjectFile.
@@ -258,7 +263,7 @@ bool AsmPrinter::doInitialization(Module &M) {
     }
   }
 
-  EHStreamer *ES = nullptr;
+  ES = nullptr;
   switch (MAI->getExceptionHandlingType()) {
   case ExceptionHandling::None:
     break;
@@ -283,6 +288,12 @@ bool AsmPrinter::doInitialization(Module &M) {
   }
   if (ES)
     Handlers.push_back(HandlerInfo(ES, EHTimerName, DWARFGroupName));
+
+  if (TM.Options.MarkVTables) {
+    DivHandlers.push_back(HandlerInfo(new VTableMarkingHandler(this),
+                                      DbgTimerName,
+                                      DivMarkingGroupName));
+  }
   return false;
 }
 
@@ -453,6 +464,10 @@ void AsmPrinter::EmitGlobalVariable(const GlobalVariable *GV) {
     EmitEmulatedTLSControlVariable(GV, EmittedSym, AllZeroInitValue);
 
   for (const HandlerInfo &HI : Handlers) {
+    NamedRegionTimer T(HI.TimerName, HI.TimerGroupName, TimePassesIsEnabled);
+    HI.Handler->setSymbolSize(GVSym, Size);
+  }
+  for (const HandlerInfo &HI : DivHandlers) {
     NamedRegionTimer T(HI.TimerName, HI.TimerGroupName, TimePassesIsEnabled);
     HI.Handler->setSymbolSize(GVSym, Size);
   }
@@ -657,6 +672,12 @@ void AsmPrinter::EmitFunctionHeader() {
 
   // Emit pre-function debug and/or EH information.
   for (const HandlerInfo &HI : Handlers) {
+    NamedRegionTimer T(HI.TimerName, HI.TimerGroupName, TimePassesIsEnabled);
+    HI.Handler->beginFunction(MF);
+  }
+
+  // Emit pre-function diversification information.
+  for (const HandlerInfo &HI : DivHandlers) {
     NamedRegionTimer T(HI.TimerName, HI.TimerGroupName, TimePassesIsEnabled);
     HI.Handler->beginFunction(MF);
   }
@@ -927,6 +948,12 @@ void AsmPrinter::EmitFunctionBody() {
         }
       }
 
+      for (const HandlerInfo &HI : DivHandlers) {
+        NamedRegionTimer T(HI.TimerName, HI.TimerGroupName,
+                           TimePassesIsEnabled);
+        HI.Handler->beginInstruction(&MI);
+      }
+
       if (isVerbose())
         emitComments(MI, OutStreamer->GetCommentOS());
 
@@ -969,6 +996,12 @@ void AsmPrinter::EmitFunctionBody() {
                              TimePassesIsEnabled);
           HI.Handler->endInstruction();
         }
+      }
+
+      for (const HandlerInfo &HI : DivHandlers) {
+        NamedRegionTimer T(HI.TimerName, HI.TimerGroupName,
+                           TimePassesIsEnabled);
+        HI.Handler->endInstruction();
       }
     }
 
@@ -1035,6 +1068,16 @@ void AsmPrinter::EmitFunctionBody() {
     NamedRegionTimer T(HI.TimerName, HI.TimerGroupName, TimePassesIsEnabled);
     HI.Handler->endFunction(MF);
   }
+  // Emit post-function diversification information.
+  for (const HandlerInfo &HI : DivHandlers) {
+    NamedRegionTimer T(HI.TimerName, HI.TimerGroupName, TimePassesIsEnabled);
+    HI.Handler->endFunction(MF);
+  }
+
+  // Emit any call trampolines for this function
+  if (TM.Options.CallPointerProtection)
+    EmitCallTrampolines();
+
   MMI->EndFunction();
 
   OutStreamer->AddBlankLine();
@@ -1182,6 +1225,14 @@ bool AsmPrinter::doFinalization(Module &M) {
     delete HI.Handler;
   }
   Handlers.clear();
+  // Finalize diversification information.
+  for (const HandlerInfo &HI : DivHandlers) {
+    NamedRegionTimer T(HI.TimerName, HI.TimerGroupName,
+                       TimePassesIsEnabled);
+    HI.Handler->endModule();
+    delete HI.Handler;
+  }
+  DivHandlers.clear();
   DD = nullptr;
 
   // If the target wants to know about weak references, print them all.
@@ -1418,9 +1469,11 @@ void AsmPrinter::EmitJumpTableInfo() {
   // the appropriate section.
   const Function *F = MF->getFunction();
   const TargetLoweringObjectFile &TLOF = getObjFileLowering();
-  bool JTInDiffSection = !TLOF.shouldPutJumpTableInFunctionSection(
-      MJTI->getEntryKind() == MachineJumpTableInfo::EK_LabelDifference32,
-      *F);
+  bool JTInDiffSection = TM.Options.JumpTablesROData ||
+      (!TM.Options.ExecJumpTables &&
+       !TLOF.shouldPutJumpTableInFunctionSection(
+          MJTI->getEntryKind() == MachineJumpTableInfo::EK_LabelDifference32,
+          *F));
   if (JTInDiffSection) {
     // Drop it in the readonly section.
     MCSection *ReadOnlySection = TLOF.getSectionForJumpTable(*F, *Mang, TM);
@@ -1442,7 +1495,8 @@ void AsmPrinter::EmitJumpTableInfo() {
 
     // For the EK_LabelDifference32 entry, if using .set avoids a relocation,
     /// emit a .set directive for each unique entry.
-    if (MJTI->getEntryKind() == MachineJumpTableInfo::EK_LabelDifference32 &&
+    if (!JTInDiffSection &&
+        MJTI->getEntryKind() == MachineJumpTableInfo::EK_LabelDifference32 &&
         MAI->doesSetDirectiveSuppressesReloc()) {
       SmallPtrSet<const MachineBasicBlock*, 16> EmittedSets;
       const TargetLowering *TLI = MF->getSubtarget().getTargetLowering();
@@ -1461,6 +1515,12 @@ void AsmPrinter::EmitJumpTableInfo() {
       }
     }
 
+    if (TM.Options.ExecJumpTables) {
+      unsigned EntrySize =
+        MJTI->getEntrySize(getDataLayout());
+      OutStreamer->EmitCodeAlignment(EntrySize);
+    }
+
     // On some targets (e.g. Darwin) we want to emit two consecutive labels
     // before each jump table.  The first label is never referenced, but tells
     // the assembler and linker the extents of the jump table object.  The
@@ -1473,7 +1533,7 @@ void AsmPrinter::EmitJumpTableInfo() {
     OutStreamer->EmitLabel(GetJTISymbol(JTI));
 
     for (unsigned ii = 0, ee = JTBBs.size(); ii != ee; ++ii)
-      EmitJumpTableEntry(MJTI, JTBBs[ii], JTI);
+      EmitJumpTableEntry(MJTI, JTBBs[ii], JTI, JTInDiffSection);
   }
   if (!JTInDiffSection)
     OutStreamer->EmitDataRegion(MCDR_DataRegionEnd);
@@ -1483,10 +1543,25 @@ void AsmPrinter::EmitJumpTableInfo() {
 /// current stream.
 void AsmPrinter::EmitJumpTableEntry(const MachineJumpTableInfo *MJTI,
                                     const MachineBasicBlock *MBB,
-                                    unsigned UID) const {
+                                    unsigned UID, bool JTInDiffSection) const {
   assert(MBB && MBB->getNumber() >= 0 && "Invalid basic block");
   const MCExpr *Value = nullptr;
+  unsigned EntrySize =
+      MJTI->getEntrySize(getDataLayout());
+
   switch (MJTI->getEntryKind()) {
+  case MachineJumpTableInfo::EK_Branch: {
+    assert(!JTInDiffSection && "Cannot emit EK_Branch jump table entries in a "
+           "different section");
+    MCInst JmpInst;
+    const MCSymbolRefExpr *TargetSymRef =
+      MCSymbolRefExpr::create(MBB->getSymbol(), OutContext);
+    MF->getSubtarget().getInstrInfo()->getUnconditionalBranch(
+      JmpInst, TargetSymRef);
+    OutStreamer->EmitInstruction(JmpInst, getSubtargetInfo());
+    OutStreamer->EmitCodeAlignment(EntrySize);
+    return;
+  }
   case MachineJumpTableInfo::EK_Inline:
     llvm_unreachable("Cannot emit EK_Inline jump table entry");
   case MachineJumpTableInfo::EK_Custom32:
@@ -1539,7 +1614,6 @@ void AsmPrinter::EmitJumpTableEntry(const MachineJumpTableInfo *MJTI,
 
   assert(Value && "Unknown entry kind!");
 
-  unsigned EntrySize = MJTI->getEntrySize(getDataLayout());
   OutStreamer->EmitValue(Value, EntrySize);
 }
 
@@ -2251,6 +2325,51 @@ static void handleIndirectSymViaGOTPCRel(AsmPrinter &AP, const MCExpr **ME,
     AP.GlobalGOTEquivs[GOTEquivSym] = std::make_pair(GV, NumUses);
 }
 
+const MCSymbolRefExpr *AsmPrinter::GetTrampolineSymref(const GlobalValue *GV) const {
+  MCSymbol *TargetSymbol = getSymbol(GV);
+  return MCSymbolRefExpr::create(TargetSymbol, MCSymbolRefExpr::VK_None,
+                                 OutContext);
+}
+
+
+static void emitGlobalTrampoline(const Trampoline *T, AsmPrinter &AP) {
+
+  if (auto JT = dyn_cast<JumpTrampoline>(T)) {
+    // This is all ripped from JumpInstrTables emission
+
+    // Emit the function labels to make this be a function entry point.
+    // MCSymbol *FunSym =
+    //   OutContext.GetOrCreateSymbol(FunPair.second->getName());
+    // EmitAlignment(LogAlignment);
+    // if (IsThumb)
+    //   OutStreamer.EmitThumbFunc(FunSym);
+    // if (MAI->hasDotTypeDotSizeDirective())
+    //   OutStreamer.EmitSymbolAttribute(FunSym, MCSA_ELF_TypeFunction);
+    // OutStreamer.EmitLabel(FunSym);
+
+    // Emit the jump instruction to transfer control to the original
+    // function.
+    MCInst JumpToFun;
+    const Function &Fn = *AP.MMI->getModule()->begin();
+    const TargetSubtargetInfo *TSI = AP.TM.getSubtargetImpl(Fn);
+    Type* TrampolineTy = JT->getValueType();
+    unsigned Align = Log2_32(AP.getDataLayout().getTypeSizeInBits(TrampolineTy)/8);
+    if (JT->getTarget()) {
+      const MCSymbolRefExpr *TargetSymRef = AP.GetTrampolineSymref(JT->getTarget());
+      TSI->getInstrInfo()->getUnconditionalBranch(JumpToFun, TargetSymRef);
+      AP.OutStreamer->EmitInstruction(JumpToFun, *AP.TM.getMCSubtargetInfo());
+      AP.EmitAlignment(Align);
+    } else {
+      MCInst TrapInst;
+      TSI->getInstrInfo()->getTrap(TrapInst);
+      AP.OutStreamer->EmitInstruction(TrapInst, *AP.TM.getMCSubtargetInfo());
+      AP.EmitAlignment(Align);
+    }
+  } else {
+    llvm_unreachable("CallTrampoline lowering not finished yet");
+  }
+}
+
 static void emitGlobalConstantImpl(const DataLayout &DL, const Constant *CV,
                                    AsmPrinter &AP, const Constant *BaseCV,
                                    uint64_t Offset) {
@@ -2317,6 +2436,9 @@ static void emitGlobalConstantImpl(const DataLayout &DL, const Constant *CV,
 
   if (const ConstantVector *V = dyn_cast<ConstantVector>(CV))
     return emitGlobalConstantVector(DL, V, AP);
+
+  if (const Trampoline *T = dyn_cast<Trampoline>(CV))
+    return emitGlobalTrampoline(T, AP);
 
   // Otherwise, it must be a ConstantExpr.  Lower it to an MCExpr, then emit it
   // thread the streamer with EmitValue.
@@ -2498,11 +2620,35 @@ void AsmPrinter::EmitBasicBlockStart(const MachineBasicBlock &MBB) const {
     if (isVerbose())
       OutStreamer->AddComment("Block address taken");
 
-    // MBBs can have their address taken as part of CodeGen without having
-    // their corresponding BB's address taken in IR
-    if (BB->hasAddressTaken())
-      for (MCSymbol *Sym : MMI->getAddrLabelSymbolToEmit(BB))
+    if (TM.Options.PointerProtection) {
+      MCSymbol *BBLabel = OutContext.createTempSymbol();
+      OutStreamer->EmitLabel(BBLabel);
+
+      OutStreamer->PushSection();
+      OutStreamer->SwitchSection(getObjFileLowering().SectionForGlobal(
+                                 MBB.getParent()->getFunction(),
+                                 SectionKind::getTexTramp(),
+                                 *Mang, TM));
+
+      std::vector<MCSymbol*> Symbols = MMI->getAddrLabelSymbolToEmit(BB);
+      for (auto *Sym : Symbols)
         OutStreamer->EmitLabel(Sym);
+
+      MCInst JmpInst;
+      const MCSymbolRefExpr *TargetSymRef =
+        MCSymbolRefExpr::create(BBLabel, OutContext);
+      MF->getSubtarget().getInstrInfo()->getUnconditionalBranch(
+        JmpInst, TargetSymRef);
+      OutStreamer->EmitInstruction(JmpInst, getSubtargetInfo());
+
+      OutStreamer->PopSection();
+    } else {
+      // MBBs can have their address taken as part of CodeGen without having
+      // their corresponding BB's address taken in IR
+      if (BB->hasAddressTaken())
+        for (MCSymbol *Sym : MMI->getAddrLabelSymbolToEmit(BB))
+          OutStreamer->EmitLabel(Sym);
+    }
   }
 
   // Print some verbose block comments.
@@ -2622,6 +2768,126 @@ GCMetadataPrinter *AsmPrinter::GetOrCreateGCPrinter(GCStrategy &S) {
     }
 
   report_fatal_error("no GCMetadataPrinter registered for GC: " + Twine(Name));
+}
+
+void AsmPrinter::EmitCallTrampolines() {
+  std::vector<CallTrampolineInfo> &Trampolines = MMI->getCallTrampolines();
+  if (Trampolines.empty())
+    return;
+
+  RNG->shuffle(Trampolines);
+
+  // Sort the landing pads in order of their type ids.  This is used to fold
+  // duplicate actions.
+  const std::vector<LandingPadInfo> &PadInfos = MMI->getLandingPads();
+  SmallVector<const LandingPadInfo *, 64> LandingPads;
+
+  DenseMap<const MachineInstr*, const LandingPadInfo*> CallPadMap;
+
+  if (ES) {
+    LandingPads.reserve(PadInfos.size());
+
+    for (unsigned i = 0, N = PadInfos.size(); i != N; ++i) {
+      LandingPads.push_back(&PadInfos[i]);
+    }
+
+    // Order landing pads lexicographically by type id.
+    std::sort(LandingPads.begin(), LandingPads.end(),
+              [](const LandingPadInfo *L,
+                 const LandingPadInfo *R) { return L->TypeIds < R->TypeIds; });
+
+    ES->prepareTrampolines(LandingPads, CallPadMap);
+  }
+
+  for (auto &Trampoline : Trampolines) {
+    OutStreamer->SwitchSection(
+        getObjFileLowering().SectionForGlobal(
+            MF->getFunction(), SectionKind::getTexTramp(),
+            *Mang, TM));
+
+    OutStreamer->EmitLabel(Trampoline.CallSym);
+
+    if (ES) {
+      DenseMap<const MachineInstr *, const LandingPadInfo *>::const_iterator L
+          = CallPadMap.find(Trampoline.OrigCall);
+      if (L != CallPadMap.end()) {
+        Trampoline.LPadInfo = L->second;
+      }
+      // Emit pre-function EH information.
+      ES->beginTrampoline(MF, Trampoline);
+    }
+
+    // Copy relevant CFI instructions into the trampoline so that EH info is
+    // correct
+    bool EmittingCFI = true;
+    for (auto &MBB : *MF) {
+      for (auto &MI : MBB) {
+        if (EmittingCFI
+            && MI.getOpcode() == TargetOpcode::CFI_INSTRUCTION) {
+          emitCFIInstruction(MI);
+        } else if (&MI == Trampoline.OrigCall) {
+          EmittingCFI = false;
+          break;
+        }
+      }
+      if (!EmittingCFI)
+        break;
+    }
+
+    OutStreamer->EmitInstruction(Trampoline.CallInstr, getSubtargetInfo());
+
+    // Copy relevant CFI instructions after the call into the trampoline so that
+    // EH info is correct
+    EmittingCFI = false;
+    for (auto &MBB : *MF) {
+      for (auto &MI : MBB) {
+        if (EmittingCFI
+            && MI.getOpcode() == TargetOpcode::CFI_INSTRUCTION) {
+          emitCFIInstruction(MI);
+        } else if (&MI == Trampoline.OrigCall) {
+          EmittingCFI = true;
+        }
+      }
+    }
+
+    MCInst JmpInst;
+    const MCSymbolRefExpr *TargetSymRef =
+      MCSymbolRefExpr::create(Trampoline.ReturnSym, OutContext);
+    MF->getSubtarget().getInstrInfo()->getUnconditionalBranch(
+        JmpInst, TargetSymRef);
+    OutStreamer->EmitInstruction(JmpInst, getSubtargetInfo());
+
+    MCSymbol *EndLabel = 0;
+
+    if (ES && Trampoline.LPadInfo) {
+      EndLabel = OutContext.createTempSymbol();
+      OutStreamer->EmitLabel(EndLabel);
+
+      MCInst JmpToLP;
+      const MCSymbolRefExpr *LPSymRef =
+          MCSymbolRefExpr::create(
+              Trampoline.LPadInfo->LandingPadLabel, OutContext);
+      MF->getSubtarget().getInstrInfo()->getUnconditionalBranch(
+          JmpToLP, LPSymRef);
+      OutStreamer->EmitInstruction(JmpToLP, getSubtargetInfo());
+    }
+
+    MCInst TrapInst;
+    MF->getSubtarget().getInstrInfo()->getTrap(TrapInst);
+    OutStreamer->EmitInstruction(TrapInst, getSubtargetInfo());
+
+    // Emit post-function EH information.
+    if (ES) {
+      ES->markFunctionEnd();
+      // FIXME : NYO : the exception table of MF already emitted so calling
+      // the following function triggers error for defining a label more than once.
+      // But we definitely need to emit exception table appropriately in the future,
+      // in order to make pointer protections work withh exceptions.
+      if (Trampoline.LPadInfo)
+        ES->endTrampoline(Trampoline, EndLabel);
+        CurExceptionSym = 0;
+    }
+  }
 }
 
 /// Pin vtable to this file.

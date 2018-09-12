@@ -1,0 +1,296 @@
+* How to build Apache with LTO and data randomization
+  
+  1. Set environment variables
+     - Set environment variable LLVM_BUILD_DIR to the llvm object root directory on your system.
+       #+BEGIN_SRC shell-script
+         export LLVM_BUILD_DIR=/home/USERNAME/multicompiler-priv/build
+       #+END_SRC
+       
+     - Set environment variable APACHE_INSTALL_DIR to the target directory to install apache to.
+       #+BEGIN_SRC shell-script
+         export APACHE_INSTALL_DIR=/home/USERNAME/apache/build
+
+         # Make sure that this directory exists
+         mkdir -p $APACHE_INSTALL_DIR
+       #+END_SRC
+       
+     - Set environment variables to select the llvm toolchain for building
+       #+BEGIN_SRC shell-script
+         export CC="$LLVM_BUILD_DIR/bin/clang"
+         export CXX="$LLVM_BUILD_DIR/bin/clang++"
+         export AR="$LLVM_BUILD_DIR/bin/llvm-ar"
+         export NM="$LLVM_BUILD_DIR/bin/llvm-nm"
+         export RANLIB="$LLVM_BUILD_DIR/bin/llvm-ranlib"
+       #+END_SRC
+       
+  2. Configure and build apr:
+     #+BEGIN_SRC shell-script
+       cd apr-1.5.2
+       ./configure CFLAGS="-g -O2 -flto" CXXFLAGS="-g -O2 -flto" --prefix=$APACHE_INSTALL_DIR --enable-static --enable-shared=no
+       make
+       make install
+     #+END_SRC
+     
+  3. Configure and build apr-util:
+     #+BEGIN_SRC shell-script
+       cd ../apr-util-1.5.4/
+       ./configure CFLAGS="-g -O2 -flto" CXXFLAGS="-g -O2 -flto" --with-expat=builtin --prefix=$APACHE_INSTALL_DIR --with-apr=$APACHE_INSTALL_DIR --enable-static --enable-shared=no
+       make
+       make install
+     #+END_SRC
+     
+  4. Configure and build httpd:
+     #+BEGIN_SRC shell-script
+       cd ../httpd-2.4.17
+       ./configure CFLAGS="-g -O2 -flto" CXXFLAGS="-g -O2 -flto" LDFLAGS="-fdata-rando" --with-mpm=prefork --prefix=$APACHE_INSTALL_DIR --with-apr=$APACHE_INSTALL_DIR --with-apr-util=$APACHE_INSTALL_DIR --enable-mods-static="access_compat alias auth_basic authn_core authn_file authz_core authz_groupfile authz_host authz_user autoindex dir env filter headers log_config mime reqtimeout setenvif status unixd version cgi dumpio info log_debug logio echo"
+       make
+       make install
+     #+END_SRC
+     
+* Data crosschecking support
+
+Randomization of boolean data is still vulnerable to arbitrary, uncontrolled
+overwrites due to the so-called Melski principle. If a boolean is overwritten
+with any (encrypted) value, it will almost always be non-zero (true).
+
+To mitigate this, we insert Raven crosschecks before branching based on
+potentially encrypted booleans. Specifically, we follow the use-def chain from
+each computed branch to find values to crosscheck that are non-constant loads
+but not of type i1 (LLVM's internal boolean representation). We exclude
+crosschecking of pointer type values, since these will differ due to different
+heap allocations and ASLR.
+
+We support blacklisting of crosschecks within annotated functions with the
+`__attribute__((address_divergent))` annotation. This is needed for hash
+function computations in Apache that explicitly cast a pointer to int then
+branch on a value derived from this pointer.
+
+** Building multicompiler with crosschecking support 
+
+Crosschecking support is in the data-diversity-3.8 branch of the
+multicompiler. It also requires the data-diversity-3.8 branch of clang, instead
+of the upstream 3.8 release as noted above.
+
+Periodic crosschecks are enabled by default. They can be disabled via
+`-DMULTICOMPILER_PERIODIC_CROSSCHECKS=Off` and the period can be configured via the
+`CROSSCHECK_INTERVAL` defined in
+`projects/compiler-rt/lib/data_rando/CrossChecks.cpp`.
+
+** Using crosschecking
+
+Apache needs to be patched to add annotations to blacklist APR hash
+functions. The following patch for APR 1.5.2 should fix APR hash divergence.
+#+BEGIN_SRC diff
+diff -u -r CFAR-3.1.0-orig/atds/apache/apr-1.5.2/tables/apr_hash.c CFAR-3.1.0/atds/apache/apr-1.5.2/tables/apr_hash.c
+--- CFAR-3.1.0-orig/atds/apache/apr-1.5.2/tables/apr_hash.c	2016-08-29 16:27:31.000000000 +0000
++++ CFAR-3.1.0/atds/apache/apr-1.5.2/tables/apr_hash.c	2016-09-15 00:47:20.393011784 +0000
+@@ -282,6 +282,7 @@
+  * that hash entries can be removed.
+  */
+ 
++__attribute__((address_divergent,noinline))
+ static apr_hash_entry_t **find_entry(apr_hash_t *ht,
+                                      const void *key,
+                                      apr_ssize_t klen,
+@@ -371,6 +372,7 @@
+         return NULL;
+ }
+ 
++__attribute__((address_divergent,noinline))
+ APR_DECLARE(void) apr_hash_set(apr_hash_t *ht,
+                                const void *key,
+                                apr_ssize_t klen,
+#+END_SRC
+
+Build apache mainly as shown above, adding "-Wl,--plugin-opt=-data-checks
+-lrbuff" to LDFLAGS.  You will need to preload
+"$LLVM_BUILD_DIR/lib/libforkrbuff.so" to use the ring buffer in the MVEE
+environment, and place "$LLVM_BUILD_DIR/lib/librbuff.so" in Apache's load
+path. The following is an example MVEE config file that loads two Apache
+variants (assuming librbuff.so and libforkrbuff.so are placed in the root of the
+target_app directory).
+#+BEGIN_SRC js
+{
+    "atd": {
+        "name": "ApacheDataChecks",
+        "description": "Immunant Apache DataChecks",
+        "server": "APACHE",
+        "class" : "None"
+    },
+    "variant": {
+        "global": {
+            "exec": {
+                "argv": [                  
+                    "-f", "/testing/content/apache_support/httpd.conf",
+                    "-d", "/testing/content/apache_support/"              
+                ],
+            "env": ["LD_PRELOAD=/thread_libs/libgetpid.so /target_apps/libforkrbuff.so"],
+		"mvee-only-vars": ["LD_PRELOAD"],
+                "path": "/apache/bin/httpd"
+            },
+            "logs": [
+                "/tmp/access_log",
+                "/tmp/error_log",
+                "/tmp/httpd.pid"
+            ],
+	    "settings": {
+		"aslr_mode": 2
+            }
+        },
+        "sets": {
+            "default": [
+                "variant-1",
+                "variant-2"
+            ]
+        },
+        "specs": {
+            "variant-1": {
+                "exec": {
+                    "alias": [
+                        "/apache/bin/httpd=/target_apps/variant-1/bin/httpd-immunant-datachecks",
+                        "/usr/lib/librbuff.so=/target_apps/librbuff.so",
+                        "/dev/cfar_urandom=/dev/urandom"
+                    ]
+                }
+            },
+            "variant-2": {
+                "exec": {
+                    "alias": [
+                        "/apache/bin/httpd=/target_apps/variant-2/bin/httpd-immunant-datachecks",
+                        "/usr/lib/librbuff.so=/target_apps/librbuff.so",
+                        "/dev/cfar_urandom=/dev/urandom"
+                    ]
+                }
+            }
+        }
+    }
+}
+#+END_SRC
+* Build Statistics
+  During compilation LLVM gathers statistics that provide information about the
+  function of the compiler. The statistics specific to data randomization are
+  documented below. To output the value of statistics provide the -stats option
+  to the LLVM tool being used. Different statistics are gathered depending on
+  whether context sensitive data randomization is used.
+** Statistics Reported by Data Randomization
+   - "Effective number of equivalence classes": The effective number of
+     equivalence classes, considering all unencrypted classes to be part of a
+     single class.
+   - "Maximum number of globals contained in a single equivalence class": The
+     maximum number of global variables defined within the target program that
+     are contained in a single equivalence class.
+   - "Number of DSNodes": The total number of nodes in the graph produced by
+     the pointer analysis.
+   - "Number of DSNodes with Heap flag": The total number of nodes in the
+     points-to graph that have the heap flag, indicating they originated from a
+     heap allocation.
+   - "Number of equivalence classes accessed by instructions": The number of
+     equivalence classes for which we use the mask to instrument instructions in
+     the program. Not all equivalence classes are actually accessed by
+     instructions in the target program.
+   - "Number of equivalence classes assigned masks": The number of equivalence
+     classes assigned a mask, this includes equivalence classes assigned the
+     mask 0.
+   - "Number of equivalence classes composed entirely of safe accesses": The
+     number of equivalence classes that only access constant addresses. These
+     are considered safe and not encrypted. The safety analysis can be disabled
+     through the -safety-analysis compilation option.
+   - "Number of equivalence classes containing global variables": The number of
+     equivalence classes that contain a global variable which is defined in the
+     target program. 
+   - "Number of equivalence classes on the heap": The number of equivalence
+     classes which are assigned masks whose node in the points-to graph has the
+     heap flag set. Not all nodes in the points-to graph will be used in the
+     program and assigned a mask, so this value should always be less than or
+     equal to "Number of DSNodes with Heap flag".
+   - "Number of equivalence classes that cannot be encrypted": The total number
+     of equivalence classes that we cannot encrypt in order to preserve
+     correct function. The various reasons contributing to equivalence classes not being
+     encrypted are measured in several other statistics. 
+   - "Number of equivalence classes we can't encrypt because they contain
+     VA_List values": Count of VA_List classes. The structures used to access
+     the arguments of variadic functions cannot be encrypted, however the
+     arguments and what they point to can still be encrypted.
+   - "Number of equivalence classes we can't encrypt because they contain
+     external globals": External global variables cannot be encrypted since it
+     is possible they will be also accessed by code outside of the target
+     program.
+   - "Number of equivalence classes we can't encrypt because they contain
+     unencryptable types": Opaque types cannot be encrypted.
+   - "Number of equivalence classes we can't encrypt because they escape to
+     unwrapped external functions": If a wrapper function does not exist to
+     decrypt the arguments to a library function then we must not encrypt the
+     arguments.
+   - "Number of global variables defined in module": The total number of global
+     variables at the LLVM IR level which are defined within the module being analyzed.
+   - "Number of global variables defined in module which are not encrypted": The
+     number of global variables that are not encrypted. This could be because
+     they are considered safe or because they need to remain unencrypted to
+     ensure correct function.
+   - "Number of incomplete equivalence classes": The number of nodes in the
+     points-to graph considered incomplete by the pointer analysis. This
+     indicates that the analysis feels it doesn't have all possible information
+     about the node, possibly because it could be accessed by code external to
+     the module.
+   - "Number of random masks assigned to equivalence classes": The number of
+     non-zero, random masks assigned to equivalence classes.
+   - "Number of equivalence classes which are not encrypted": The total number
+     of equivalence classes that are not encrypted. This includes both classes
+     that are considered safe and classes that cannot be encrypted.
+** Statistics Reported by Context-Sensitive Data Randomization
+   - "Maximum number of globals contained in a single equivalence class": The
+     maximum number of global variables defined within the target program that
+     are contained in a single equivalence class.
+   - "Number of equivalence classes assigned masks": The number of equivalence
+     classes assigned a mask, this includes equivalence classes assigned the
+     mask 0.
+   - "Number of equivalence classes assigned null mask": The total number of
+     equiavlence classes that could not be encrypted and are assigned the mask 0.
+   - "Number of equivalence classes containing global variables": The number of
+     equivalence classes that contain a global variable which is defined in the
+     target program.
+   - "Number of function equivalence classes": The number of equivalence classes
+     of functions. The functions are placed in equivalence classes such that if
+     two functions can be called from the same callsite then they must be in the
+     same equivalence class.
+   - "Number of function equivalence classes containing external functions": The
+     number of function equivalence classes containing functions not defined in
+     this module.
+   - "Number of functions with mask arguments added": The number of functions
+     which we add arguments used to pass masks in order to handle context
+     sensitivity.
+   - "Number of global variables defined in module": The total number of global
+     variables at the LLVM IR level which are defined within the module being analyzed.
+   - "Number of global variables defined in module which are not encrypted": The
+     number of global variables that are not encrypted. This could be because
+     they are considered safe or because they need to remain unencrypted to
+     ensure correct function.
+   - "Number of heap equivalence classes": The number of equivalence classes
+     which are assigned a mask and have the heap flag set in the points-to
+     graph.
+   - "Number of random masks assigned to equivalence classes": The number of
+     non-zero, random masks assigned to equivalence classes.
+* Options
+  - "-print-eq-classes-to=STRING": Output every equivalence class in the program
+    to the provided filename. This will include the mask used for each class,
+    which classes are pointed to by each class, and every LLVM Value contained
+    in the class. This includes a lot of information and takes a large amount of
+    time to produce, often several hours for large programs.
+  - "-data-rando-effective-mask-size=INTEGER": Controls the effective size of
+    the mask in bytes. Default is 8. If necessary the mask will be repeated to
+    match the access size of the instruction. This must be a power of 2 which
+    has the value of 8 or lower. Lower values will generally result in lower run
+    time overhead since the mask will need to be aligned for less memory
+    accesses. Lower values also reduce the security because a smaller mask may
+    be easier to guess or discover.
+** Options available only for non-context-sensitive Data Randomization
+   - "-safety-analysis=BOOL": Controls if safety analysis should be performed to
+     identify equivalence classes that cannot overflow the memory objects.
+     Defaults to TRUE, enabling the safety analysis.
+   - "-print-eq-class-usage-counts=STRING": Output the number of instructions that
+     access each equivalence class to the provided filename.
+** Options available only for Context-Sensitive Data Randomization
+   - "-dsa-use-global-function-list=BOOL": Controls how the pointer analysis
+     resolves indirect callsites with partial information. Default is TRUE.
+     Setting this option to FALSE can cause more equivalence classes to be
+     identified, but the analysis result is not as conservative.

@@ -143,6 +143,9 @@
 /* Define to 1 if you have the 'z' library (-lz). */
 #cmakedefine HAVE_LIBZ ${HAVE_LIBZ}
 
+/* Define to 1 if you have the 'openssl' library (-lcrypto). */
+#cmakedefine HAVE_OPENSSL ${HAVE_OPENSSL}
+
 /* Define to 1 if you have the 'edit' library (-ledit). */
 #cmakedefine HAVE_LIBEDIT ${HAVE_LIBEDIT}
 
@@ -506,6 +509,9 @@
 
 /* Define if we link Polly to the tools */
 #cmakedefine LINK_POLLY_INTO_TOOLS
+
+/* Define if using openssl */
+#cmakedefine01 LLVM_ENABLE_OPENSSL
 
 /* Define if the OS needs help to load dependent libraries for dlopen(). */
 #cmakedefine LTDL_DLOPEN_DEPLIBS ${LTDL_DLOPEN_DEPLIBS}

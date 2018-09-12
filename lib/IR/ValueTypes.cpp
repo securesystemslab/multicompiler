@@ -190,6 +190,7 @@ std::string EVT::getEVTString() const {
   case MVT::v8f64:   return "v8f64";
   case MVT::Metadata:return "Metadata";
   case MVT::Untyped: return "Untyped";
+  case MVT::TexTrap: return "TexTrap";
   }
 }
 
@@ -267,6 +268,7 @@ Type *EVT::getTypeForEVT(LLVMContext &Context) const {
   case MVT::v4f64:   return VectorType::get(Type::getDoubleTy(Context), 4); 
   case MVT::v8f64:   return VectorType::get(Type::getDoubleTy(Context), 8); 
   case MVT::Metadata: return Type::getMetadataTy(Context);
+  case MVT::TexTrap: return Type::getMetadataTy(Context);
  }
 }
 

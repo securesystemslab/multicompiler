@@ -45,6 +45,18 @@ FunctionPass *createX86FloatingPointStackifierPass();
 /// transition penalty between functions encoded with AVX and SSE.
 FunctionPass *createX86IssueVZeroUpperPass();
 
+/// createMOVToLEAPass - This pass changes some register-to-register MOVs
+/// to equivalent LEA instructions.
+FunctionPass *createMOVToLEAPass();
+
+/// createEquivSubstPass - This pass substitutes some instructions with
+/// equivalent ones.
+FunctionPass *createEquivSubstPass();
+
+/// createNOPInsertionPass - This pass adds NOPs at random between
+/// instructions.
+FunctionPass *createNOPInsertionPass(bool is64Bit);
+
 /// Return a pass that pads short functions with NOOPs.
 /// This will prevent a stall when returning on the Atom.
 FunctionPass *createX86PadShortFunctions();
@@ -72,6 +84,14 @@ FunctionPass *createX86WinEHStatePass();
 /// must run after prologue/epilogue insertion and before lowering
 /// the MachineInstr to MC.
 FunctionPass *createX86ExpandPseudoPass();
+
+/// createX86FixupVCalls - A pass that fixes immediate operand width for virtual
+/// call indexing when the number of potential virtual functions will not fit
+/// into a byte
+FunctionPass *createX86FixupVCalls();
+
+FunctionPass *createCookieSetterPass();
+
 } // End llvm namespace
 
 #endif

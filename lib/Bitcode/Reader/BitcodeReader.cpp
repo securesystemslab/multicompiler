@@ -1233,6 +1233,8 @@ static Attribute::AttrKind getAttrFromCode(uint64_t Code) {
     return Attribute::Cold;
   case bitc::ATTR_KIND_CONVERGENT:
     return Attribute::Convergent;
+  case bitc::ATTR_KIND_CROSSCHECK:
+    return Attribute::CrossCheck;
   case bitc::ATTR_KIND_INACCESSIBLEMEM_ONLY:
     return Attribute::InaccessibleMemOnly;
   case bitc::ATTR_KIND_INACCESSIBLEMEM_OR_ARGMEMONLY:
@@ -1651,6 +1653,9 @@ std::error_code BitcodeReader::parseTypeTableBody() {
       if (!ResultTy || !StructType::isValidElementType(ResultTy))
         return error("Invalid type");
       ResultTy = VectorType::get(ResultTy, Record[0]);
+      break;
+    case bitc::TYPE_CODE_TRAMPOLINE:     // TRAMPOLINE
+      ResultTy = Type::getTrampolineTy(Context);
       break;
     }
 
@@ -2970,6 +2975,44 @@ std::error_code BitcodeReader::parseConstants() {
       V = BlockAddress::get(Fn, BB);
       break;
     }
+    case bitc::CST_CODE_JUMPTRAMPOLINE:{
+      if (Record.size() == 0) {
+        V = JumpTrampoline::Create(Context);
+        break;
+      } else if (Record.size() < 2)
+        return error("Invalid record");
+      Type *FnTy = getTypeByID(Record[0]);
+      if (!FnTy)
+        return error("Invalid record");
+      auto *Target =
+        dyn_cast_or_null<GlobalValue>(ValueList.getConstantFwdRef(Record[1],FnTy));
+      if (!Target)
+        return error("Invalid record");
+
+      V = JumpTrampoline::Create(Target);
+      break;
+    }
+    case bitc::CST_CODE_VT_INDEX:{   // VT_INDEX: [intval]
+      if (!CurTy->isIntegerTy() || Record.size() < 5)
+        return error("Invalid record");
+      uint64_t Index = Record[0];
+      Type *GVTy = getTypeByID(Record[1]);
+      if (!GVTy)
+        return error("Invalid record");
+      GlobalVariable *ClassName =
+        dyn_cast_or_null<GlobalVariable>(ValueList.getValueFwdRef(Record[2], GVTy));
+      if (!ClassName)
+        return error("Invalid record");
+      uint64_t MaxNumVFuncs = Record[3];
+      bool IsMethodPointer = Record[4];
+      TrapInfo TI;
+      if (IsMethodPointer)
+        TI = TrapInfo::getMethodPointer(ClassName, MaxNumVFuncs);
+      else
+        TI = TrapInfo::getVCall(ClassName, MaxNumVFuncs);
+      V = ConstantVTIndex::get(CurTy, Index, TI);
+      break;
+    }
     }
 
     ValueList.assignValue(V, NextCstNo);
@@ -3455,8 +3498,8 @@ std::error_code BitcodeReader::parseModule(uint64_t ResumeBit,
     }
     // GLOBALVAR: [pointer type, isconst, initid,
     //             linkage, alignment, section, visibility, threadlocal,
-    //             unnamed_addr, externally_initialized, dllstorageclass,
-    //             comdat]
+    //             unnamed_addr, externally_initialized, nocrosscheck,
+    //             dllstorageclass, comdat]
     case bitc::MODULE_CODE_GLOBALVAR: {
       if (Record.size() < 6)
         return error("Invalid record");
@@ -3504,6 +3547,10 @@ std::error_code BitcodeReader::parseModule(uint64_t ResumeBit,
       if (Record.size() > 9)
         ExternallyInitialized = Record[9];
 
+      bool NoCrossCheck = false;
+      if (Record.size() > 10)
+        NoCrossCheck = Record[10];
+
       GlobalVariable *NewGV =
         new GlobalVariable(*TheModule, Ty, isConstant, Linkage, nullptr, "", nullptr,
                            TLM, AddressSpace, ExternallyInitialized);
@@ -3512,9 +3559,10 @@ std::error_code BitcodeReader::parseModule(uint64_t ResumeBit,
         NewGV->setSection(Section);
       NewGV->setVisibility(Visibility);
       NewGV->setUnnamedAddr(UnnamedAddr);
+      NewGV->setNoCrossCheck(NoCrossCheck);
 
-      if (Record.size() > 10)
-        NewGV->setDLLStorageClass(getDecodedDLLStorageClass(Record[10]));
+      if (Record.size() > 11)
+        NewGV->setDLLStorageClass(getDecodedDLLStorageClass(Record[11]));
       else
         upgradeDLLImportExportLinkage(NewGV, RawLinkage);
 
@@ -3524,8 +3572,8 @@ std::error_code BitcodeReader::parseModule(uint64_t ResumeBit,
       if (unsigned InitID = Record[2])
         GlobalInits.push_back(std::make_pair(NewGV, InitID-1));
 
-      if (Record.size() > 11) {
-        if (unsigned ComdatID = Record[11]) {
+      if (Record.size() > 12) {
+        if (unsigned ComdatID = Record[12]) {
           if (ComdatID > ComdatList.size())
             return error("Invalid global variable comdat ID");
           NewGV->setComdat(ComdatList[ComdatID - 1]);
@@ -4087,6 +4135,23 @@ std::error_code BitcodeReader::parseFunctionBody(Function *F) {
         IA = cast<MDNode>(MetadataList.getValueFwdRef(IAID - 1));
       LastLoc = DebugLoc::get(Line, Col, Scope, IA);
       I->setDebugLoc(LastLoc);
+      I = nullptr;
+      continue;
+    }
+
+    case bitc::FUNC_CODE_TRAP_INFO: {      // TRAP_INFO: [classname+offset]
+      I = getLastInstruction();
+      if (!I || Record.size() < 1)
+        return error("Invalid record");
+
+      auto *ClassNameMD = cast<ValueAsMetadata>(MetadataList.getValueFwdRef(Record[0]));
+      uint64_t MaxNumVFuncs = Record[1];
+      bool IsMethodPointer = Record[2];
+      GlobalVariable *ClassName = cast<GlobalVariable>(ClassNameMD->getValue());
+      if (IsMethodPointer)
+        I->setTrapInfo(TrapInfo::getMethodPointer(ClassName, MaxNumVFuncs));
+      else
+        I->setTrapInfo(TrapInfo::getVCall(ClassName, MaxNumVFuncs));
       I = nullptr;
       continue;
     }

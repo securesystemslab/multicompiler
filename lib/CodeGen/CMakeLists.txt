@@ -33,6 +33,7 @@ add_llvm_library(LLVMCodeGen
   GCRootLowering.cpp
   GCStrategy.cpp
   GlobalMerge.cpp
+  GlobalRandomization.cpp
   IfConversion.cpp
   ImplicitNullChecks.cpp
   InlineSpiller.cpp
@@ -83,6 +84,8 @@ add_llvm_library(LLVMCodeGen
   MachineVerifier.cpp
   MIRPrinter.cpp
   MIRPrintingPass.cpp
+  MarkVTables.cpp
+  MarkVTablesIR.cpp
   OcamlGC.cpp
   OptimizePHIs.cpp
   PHIElimination.cpp
@@ -91,6 +94,7 @@ add_llvm_library(LLVMCodeGen
   Passes.cpp
   PeepholeOptimizer.cpp
   PostRASchedulerList.cpp
+  PointerProtection.cpp
   ProcessImplicitDefs.cpp
   PrologEpilogInserter.cpp
   PseudoSourceValue.cpp
@@ -103,6 +107,8 @@ add_llvm_library(LLVMCodeGen
   RegisterCoalescer.cpp
   RegisterPressure.cpp
   RegisterScavenging.cpp
+  StackToHeapPromotion.cpp
+  StackElementPadding.cpp
   ScheduleDAG.cpp
   ScheduleDAGInstrs.cpp
   ScheduleDAGPrinter.cpp

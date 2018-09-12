@@ -38,10 +38,12 @@
 #include "llvm/Support/Format.h"
 #include "llvm/Support/MathExtras.h"
 #include "llvm/Support/raw_os_ostream.h"
+#include "llvm/Support/RandomNumberGenerator.h"
 #include "llvm/Target/TargetLowering.h"
 #include "llvm/Target/TargetSubtargetInfo.h"
 #include "llvm/Transforms/Utils/Local.h"
 #include "llvm/Transforms/Utils/ModuleUtils.h"
+#include "llvm/MultiCompiler/MultiCompilerOptions.h"
 
 using namespace llvm;
 
@@ -118,6 +120,9 @@ class SafeStack : public FunctionPass {
   /// 16 seems like a reasonable upper bound on the alignment of objects that we
   /// might expect to appear on the stack on most common targets.
   enum { StackAlignment = 16 };
+
+  std::unique_ptr<RandomNumberGenerator> RNG;
+  bool EnableSEP;
 
   /// \brief Build a value representing a pointer to the unsafe stack pointer.
   Value *getOrCreateUnsafeStackPtr(IRBuilder<> &IRB, Function &F);
@@ -536,6 +541,15 @@ Value *SafeStack::moveStaticAllocasToUnsafeStack(
     StaticOffset += Size;
     StaticOffset = RoundUpToAlignment(StaticOffset, Align);
 
+    if (EnableSEP) {
+      unsigned nonce = RNG->Random(100);
+      //XX% probability of pad insertion
+      if(nonce < multicompiler::StackElementPaddingPercentage) {
+        unsigned paddingSize = RNG->Random(multicompiler::MaxStackElementPadding) * Align;
+        StaticOffset += paddingSize;
+      }
+    }
+
     Value *Off = IRB.CreateGEP(BasePointer, // BasePointer is i8*
                                ConstantInt::get(Int32Ty, -StaticOffset));
     Value *NewArg = IRB.CreateBitCast(Off, Arg->getType(),
@@ -566,6 +580,15 @@ Value *SafeStack::moveStaticAllocasToUnsafeStack(
     // NOTE: we ensure that BasePointer itself is aligned to >= Align.
     StaticOffset += Size;
     StaticOffset = RoundUpToAlignment(StaticOffset, Align);
+
+    if (EnableSEP) {
+      unsigned nonce = RNG->Random(100);
+      //XX% probability of pad insertion
+      if(nonce < multicompiler::StackElementPaddingPercentage) {
+        unsigned paddingSize = RNG->Random(multicompiler::MaxStackElementPadding) * Align;
+        StaticOffset += paddingSize;
+      }
+    }
 
     Value *Off = IRB.CreateGEP(BasePointer, // BasePointer is i8*
                                ConstantInt::get(Int32Ty, -StaticOffset));
@@ -620,6 +643,17 @@ void SafeStack::moveDynamicAllocasToUnsafeStack(
         (unsigned)StackAlignment);
 
     assert(isPowerOf2_32(Align));
+
+    // Stack element padding for unsafestack
+    if (EnableSEP) {
+      unsigned nonce = RNG->Random(100);
+      //XX% probability of pad insertion
+      if(nonce < multicompiler::StackElementPaddingPercentage) {
+        unsigned paddingSize = RNG->Random(multicompiler::MaxStackElementPadding) * Align;
+        SP = IRB.CreateSub(SP, ConstantInt::get(IntPtrTy, paddingSize));
+      }
+    }
+
     Value *NewTop = IRB.CreateIntToPtr(
         IRB.CreateAnd(SP, ConstantInt::get(IntPtrTy, ~uint64_t(Align - 1))),
         StackPtrTy);
@@ -693,6 +727,20 @@ bool SafeStack::runOnFunction(Function &F) {
         AttributeSet::get(F.getContext(), AttributeSet::FunctionIndex, B));
   }
 
+  EnableSEP = false;
+
+  if (multicompiler::StackElementPaddingPercentage != 0) {
+    if (multicompiler::MaxStackElementPadding == 0)
+      errs() << "warning: Stack-element padding has no effect.\n"
+             << "'-max-stack-element-pad-size' should be specified as a non-zero value.\n";
+    else
+      EnableSEP = true;
+  }
+
+  if (!RNG && (multicompiler::StackElementPaddingPercentage != 0 ||
+               multicompiler::ShuffleStackFrames))
+    RNG.reset(F.getParent()->createRNG(this));
+
   ++NumFunctions;
 
   SmallVector<AllocaInst *, 16> StaticAllocas;
@@ -725,6 +773,20 @@ bool SafeStack::runOnFunction(Function &F) {
 
   IRBuilder<> IRB(&F.front(), F.begin()->getFirstInsertionPt());
   UnsafeStackPtr = getOrCreateUnsafeStackPtr(IRB, F);
+
+  if(multicompiler::getFunctionOption(multicompiler::ShuffleStackFrames, F)){
+    RNG->shuffle<AllocaInst *, 16>(StaticAllocas);
+    RNG->shuffle<AllocaInst *, 4>(DynamicAllocas);
+    RNG->shuffle<Argument *, 4>(ByValArguments);
+    DEBUG(dbgs() << "shuffled buffers on unsafe stack\n");
+  }
+
+  if(multicompiler::getFunctionOption(multicompiler::ReverseStackFrames, F)){
+    std::reverse(StaticAllocas.begin(), StaticAllocas.end());
+    std::reverse(DynamicAllocas.begin(), DynamicAllocas.end());
+    std::reverse(ByValArguments.begin(), ByValArguments.end());
+    DEBUG(dbgs() << "reversed buffers on unsafe stack\n");
+  }
 
   // The top of the unsafe stack after all unsafe static allocas are allocated.
   Value *StaticTop = moveStaticAllocasToUnsafeStack(IRB, F, StaticAllocas,

@@ -13,6 +13,10 @@ tablegen(LLVM X86GenSubtargetInfo.inc -gen-subtarget)
 add_public_tablegen_target(X86CommonTableGen)
 
 set(sources
+  CookieSetter.cpp
+  NOPInsertion.cpp
+  MOVToLEA.cpp
+  EquivSubst.cpp
   X86AsmPrinter.cpp
   X86CallFrameOptimization.cpp
   X86ExpandPseudo.cpp
@@ -36,6 +40,7 @@ set(sources
   X86FixupLEAs.cpp
   X86WinEHState.cpp
   X86OptimizeLEAs.cpp
+  X86FixupVCalls.cpp
   )
 
 add_llvm_target(X86CodeGen ${sources})

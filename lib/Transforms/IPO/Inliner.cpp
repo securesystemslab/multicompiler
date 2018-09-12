@@ -88,6 +88,54 @@ void Inliner::getAnalysisUsage(AnalysisUsage &AU) const {
 typedef DenseMap<ArrayType*, std::vector<AllocaInst*> >
 InlinedArrayAllocasTy;
 
+// FIXME : NYO : Is this necessary?
+#if 0
+/// \brief If the inlined function had a higher stack protection level than the
+/// calling function, then bump up the caller's stack protection level.
+static void AdjustCallerSSPLevel(Function *Caller, Function *Callee) {
+  // If upgrading the SSP attribute, clear out the old SSP Attributes first.
+  // Having multiple SSP attributes doesn't actually hurt, but it adds useless
+  // clutter to the IR.
+  AttrBuilder B;
+  B.addAttribute(Attribute::StackProtect)
+    .addAttribute(Attribute::StackProtectStrong)
+    .addAttribute(Attribute::StackProtectReq);
+  AttributeSet OldSSPAttr = AttributeSet::get(Caller->getContext(),
+                                              AttributeSet::FunctionIndex,
+                                              B);
+  AttributeSet CallerAttr = Caller->getAttributes(),
+               CalleeAttr = Callee->getAttributes();
+
+  if (CalleeAttr.hasAttribute(AttributeSet::FunctionIndex,
+                              Attribute::SafeStack)) {
+    Caller->removeAttributes(AttributeSet::FunctionIndex, OldSSPAttr);
+    Caller->addFnAttr(Attribute::SafeStack);
+  } else if (CalleeAttr.hasAttribute(AttributeSet::FunctionIndex,
+                                     Attribute::StackProtectReq) &&
+             !CallerAttr.hasAttribute(AttributeSet::FunctionIndex,
+                                      Attribute::SafeStack)) {
+    Caller->removeAttributes(AttributeSet::FunctionIndex, OldSSPAttr);
+    Caller->addFnAttr(Attribute::StackProtectReq);
+  } else if (CalleeAttr.hasAttribute(AttributeSet::FunctionIndex,
+                                     Attribute::StackProtectStrong) &&
+             !CallerAttr.hasAttribute(AttributeSet::FunctionIndex,
+                                      Attribute::SafeStack) &&
+             !CallerAttr.hasAttribute(AttributeSet::FunctionIndex,
+                                      Attribute::StackProtectReq)) {
+    Caller->removeAttributes(AttributeSet::FunctionIndex, OldSSPAttr);
+    Caller->addFnAttr(Attribute::StackProtectStrong);
+  } else if (CalleeAttr.hasAttribute(AttributeSet::FunctionIndex,
+                                     Attribute::StackProtect) &&
+           !CallerAttr.hasAttribute(AttributeSet::FunctionIndex,
+                                    Attribute::SafeStack) &&
+           !CallerAttr.hasAttribute(AttributeSet::FunctionIndex,
+                                    Attribute::StackProtectReq) &&
+           !CallerAttr.hasAttribute(AttributeSet::FunctionIndex,
+                                    Attribute::StackProtectStrong))
+    Caller->addFnAttr(Attribute::StackProtect);
+}
+#endif
+
 /// If it is possible to inline the specified call site,
 /// do so and update the CallGraph for this operation.
 ///

@@ -1672,10 +1672,15 @@ SDValue DAGCombiner::visitADD(SDNode *N) {
   // fold (add Sym, c) -> Sym+c
   if (GlobalAddressSDNode *GA = dyn_cast<GlobalAddressSDNode>(N0))
     if (!LegalOperations && TLI.isOffsetFoldingLegal(GA) && N1C &&
-        GA->getOpcode() == ISD::GlobalAddress)
-      return DAG.getGlobalAddress(GA->getGlobal(), SDLoc(N1C), VT,
+        GA->getOpcode() == ISD::GlobalAddress) {
+      SDValue RetVal = DAG.getGlobalAddress(GA->getGlobal(), SDLoc(N1C), VT,
                                   GA->getOffset() +
                                     (uint64_t)N1C->getSExtValue());
+      if (const ConstantVTIndex *VTI =
+          dyn_cast<ConstantVTIndex>(N1C->getConstantIntValue()))
+        RetVal.getNode()->setTrapInfo(VTI->getTrapInfo());
+      return RetVal;
+    }
   // fold ((c1-A)+c2) -> (c1+c2)-A
   if (N1C && N0.getOpcode() == ISD::SUB)
     if (ConstantSDNode *N0C = getAsNonOpaqueConstant(N0.getOperand(0))) {
@@ -1942,10 +1947,15 @@ SDValue DAGCombiner::visitSUB(SDNode *N) {
   if (GlobalAddressSDNode *GA = dyn_cast<GlobalAddressSDNode>(N0))
     if (!LegalOperations && TLI.isOffsetFoldingLegal(GA)) {
       // fold (sub Sym, c) -> Sym-c
-      if (N1C && GA->getOpcode() == ISD::GlobalAddress)
-        return DAG.getGlobalAddress(GA->getGlobal(), SDLoc(N1C), VT,
-                                    GA->getOffset() -
-                                      (uint64_t)N1C->getSExtValue());
+      if (N1C && GA->getOpcode() == ISD::GlobalAddress) {
+        SDValue RetVal = DAG.getGlobalAddress(GA->getGlobal(), SDLoc(N1C), VT,
+                                              GA->getOffset() -
+                                              (uint64_t)N1C->getSExtValue());
+        if (const ConstantVTIndex *VTI =
+            dyn_cast<ConstantVTIndex>(N1C->getConstantIntValue()))
+          RetVal.getNode()->setTrapInfo(VTI->getTrapInfo());
+        return RetVal;
+      }
       // fold (sub Sym+c1, Sym+c2) -> c1-c2
       if (GlobalAddressSDNode *GB = dyn_cast<GlobalAddressSDNode>(N1))
         if (GA->getGlobal() == GB->getGlobal())
@@ -9283,8 +9293,6 @@ SDValue DAGCombiner::visitFABS(SDNode *N) {
 
   // Transform fabs(bitconvert(x)) -> bitconvert(x & ~sign) to avoid loading
   // constant pool values.
-  // TODO: We can also optimize for vectors here, but we need to make sure
-  // that the sign mask is created properly for each vector element.
   if (!TLI.isFAbsFree(VT) &&
       N0.getOpcode() == ISD::BITCAST &&
       N0.getNode()->hasOneUse()) {

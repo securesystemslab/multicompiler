@@ -68,6 +68,7 @@ namespace llvm {
       if (isa<BlockAddressSDNode>(Node))   return true;
       if (Node->getOpcode() == ISD::EntryToken ||
           isa<MDNodeSDNode>(Node)) return true;
+      if (isa<TexTrapSDNode>(Node))        return true;
       return false;
     }
 

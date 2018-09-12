@@ -662,6 +662,9 @@ void ValueEnumerator::EnumerateOperandType(const Value *V) {
   if (!C)
     return;
 
+  if (auto *VTIndex = dyn_cast<ConstantVTIndex>(C))
+    EnumerateMetadata(VTIndex->getTrapInfo().getClassMD());
+
   // If this constant is already enumerated, ignore it, we know its type must
   // be enumerated.
   if (ValueMap.count(C))

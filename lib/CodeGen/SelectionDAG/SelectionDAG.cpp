@@ -1177,6 +1177,7 @@ SDValue SelectionDAG::getConstant(const ConstantInt &Val, SDLoc DL, EVT VT,
   assert(Elt->getBitWidth() == EltVT.getSizeInBits() &&
          "APInt size does not match type size!");
   unsigned Opc = isT ? ISD::TargetConstant : ISD::Constant;
+
   FoldingSetNodeID ID;
   AddNodeIDNode(ID, Opc, getVTList(EltVT), None);
   ID.AddPointer(Elt);
@@ -1793,6 +1794,22 @@ SDValue SelectionDAG::getBitcast(EVT VT, SDValue V) {
     return V;
 
   return getNode(ISD::BITCAST, SDLoc(V), VT, V);
+}
+
+/// getTexTrapInfoNode - Return an MDNodeSDNode which holds an MDNode.
+SDValue SelectionDAG::getTexTrapNode(const MDNode *MD) {
+  FoldingSetNodeID ID;
+  AddNodeIDNode(ID, ISD::TEXTRAP_SDNODE, getVTList(MVT::TexTrap), None);
+  ID.AddPointer(MD);
+
+  void *IP = nullptr;
+  if (SDNode *E = CSEMap.FindNodeOrInsertPos(ID, IP))
+    return SDValue(E, 0);
+
+  SDNode *N = new (NodeAllocator) TexTrapSDNode(MD);
+  CSEMap.InsertNode(N, IP);
+  InsertNode(N);
+  return SDValue(N, 0);
 }
 
 /// getAddrSpaceCast - Return an AddrSpaceCastSDNode.
@@ -2881,7 +2898,8 @@ SDValue SelectionDAG::getNode(unsigned Opcode, SDLoc DL, EVT VT) {
     return SDValue(E, 0);
 
   SDNode *N = new (NodeAllocator) SDNode(Opcode, DL.getIROrder(),
-                                         DL.getDebugLoc(), getVTList(VT));
+                                         DL.getDebugLoc(),
+                                         getVTList(VT));
   CSEMap.InsertNode(N, IP);
 
   InsertNode(N);
@@ -3201,11 +3219,13 @@ SDValue SelectionDAG::getNode(unsigned Opcode, SDLoc DL,
       return SDValue(E, 0);
 
     N = new (NodeAllocator) UnarySDNode(Opcode, DL.getIROrder(),
-                                        DL.getDebugLoc(), VTs, Operand);
+                                        DL.getDebugLoc(),
+                                        VTs, Operand);
     CSEMap.InsertNode(N, IP);
   } else {
     N = new (NodeAllocator) UnarySDNode(Opcode, DL.getIROrder(),
-                                        DL.getDebugLoc(), VTs, Operand);
+                                        DL.getDebugLoc(),
+                                        VTs, Operand);
   }
 
   InsertNode(N);

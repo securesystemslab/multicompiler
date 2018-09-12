@@ -65,6 +65,10 @@ STATISTIC(NumAliasesResolved, "Number of global aliases resolved");
 STATISTIC(NumAliasesRemoved, "Number of global aliases eliminated");
 STATISTIC(NumCXXDtorsRemoved, "Number of global C++ destructors removed");
 
+static cl::opt<bool>
+DisableGlobalSROAForStruct("disable-global-sroa-for-struct", cl::init(false),
+                           cl::ZeroOrMore);
+
 namespace {
   struct GlobalOpt : public ModulePass {
     void getAnalysisUsage(AnalysisUsage &AU) const override {
@@ -488,6 +492,8 @@ static GlobalVariable *SRAGlobal(GlobalVariable *GV, const DataLayout &DL) {
     StartAlignment = DL.getABITypeAlignment(GV->getType());
 
   if (StructType *STy = dyn_cast<StructType>(Ty)) {
+    if (DisableGlobalSROAForStruct)
+      return nullptr;
     NewGlobals.reserve(STy->getNumElements());
     const StructLayout &Layout = *DL.getStructLayout(STy);
     for (unsigned i = 0, e = STy->getNumElements(); i != e; ++i) {

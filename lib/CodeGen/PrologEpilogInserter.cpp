@@ -21,6 +21,7 @@
 #include "llvm/ADT/SetVector.h"
 #include "llvm/ADT/SmallSet.h"
 #include "llvm/ADT/Statistic.h"
+#include "llvm/ADT/SmallVector.h"
 #include "llvm/CodeGen/MachineDominators.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineInstr.h"
@@ -34,18 +35,26 @@
 #include "llvm/IR/DiagnosticInfo.h"
 #include "llvm/IR/InlineAsm.h"
 #include "llvm/IR/LLVMContext.h"
+#include "llvm/IR/Module.h"
+#include "llvm/MultiCompiler/MultiCompilerOptions.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Compiler.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
+#include "llvm/Support/RandomNumberGenerator.h"
 #include "llvm/Target/TargetFrameLowering.h"
 #include "llvm/Target/TargetInstrInfo.h"
 #include "llvm/Target/TargetMachine.h"
 #include "llvm/Target/TargetRegisterInfo.h"
 #include "llvm/Target/TargetSubtargetInfo.h"
 #include <climits>
+#include "llvm/Support/raw_ostream.h"
+#include <algorithm>
 
 using namespace llvm;
+using namespace multicompiler;
+
+
 
 #define DEBUG_TYPE "pei"
 
@@ -65,6 +74,9 @@ public:
   bool runOnMachineFunction(MachineFunction &Fn) override;
 
 private:
+  // Stack frame padding -- only applied once
+  bool PaddingApplied;
+
   RegScavenger *RS;
 
   // MinCSFrameIndex, MaxCSFrameIndex - Keeps the range of callee saved
@@ -80,6 +92,9 @@ private:
   // frame index materialization registers. Set according to
   // TRI->requiresFrameIndexScavenging() for the current function.
   bool FrameIndexVirtualScavenging;
+
+  // RNG instance for this pass
+  std::unique_ptr<RandomNumberGenerator> RNG;
 
   void calculateSets(MachineFunction &Fn);
   void calculateCallsInformation(MachineFunction &Fn);
@@ -102,6 +117,10 @@ static cl::opt<unsigned>
 WarnStackSize("warn-stack-size", cl::Hidden, cl::init((unsigned)-1),
               cl::desc("Warn for stack size bigger than the given"
                        " number"));
+
+static cl::opt<unsigned long long>
+Seed("stack-frame-random-seed", cl::value_desc("seed"),
+     cl::desc("Random seed for stack frame shuffling and padding"), cl::init(0));
 
 INITIALIZE_PASS_BEGIN(PEI, "prologepilog",
                 "Prologue/Epilogue Insertion", false, false)
@@ -170,7 +189,15 @@ bool PEI::runOnMachineFunction(MachineFunction &Fn) {
 
   assert(!Fn.getRegInfo().getNumVirtRegs() && "Regalloc must assign all vregs");
 
+
   RS = TRI->requiresRegisterScavenging(Fn) ? new RegScavenger() : nullptr;
+
+  if (Seed != 0)
+    RNG.reset(F->getParent()->createRNG(Seed, this, Fn.getName()));
+  else
+    if (!RNG)
+      RNG.reset(F->getParent()->createRNG(this));
+
   FrameIndexVirtualScavenging = TRI->requiresFrameIndexScavenging(Fn);
 
   // Calculate the MaxCallFrameSize and AdjustsStack variables for the
@@ -697,32 +724,112 @@ void PEI::calculateFrameObjectOffsets(MachineFunction &Fn) {
       llvm_unreachable("Unexpected SSPLayoutKind.");
     }
 
-    AssignProtectedObjSet(LargeArrayObjs, ProtectedObjs, MFI, StackGrowsDown,
-                          Offset, MaxAlign, Skew);
-    AssignProtectedObjSet(SmallArrayObjs, ProtectedObjs, MFI, StackGrowsDown,
-                          Offset, MaxAlign, Skew);
-    AssignProtectedObjSet(AddrOfObjs, ProtectedObjs, MFI, StackGrowsDown,
-                          Offset, MaxAlign, Skew);
+    if(multicompiler::getFunctionOption(multicompiler::ShuffleStackFrames,
+                                        *Fn.getFunction())) {
+//      dbgs() << ".....large objects " << LargeArrayObjs.size() << "\n";
+//      dbgs() << ".....small objects " << SmallArrayObjs.size() << "\n";
+//      dbgs() << "...addr of objects " << AddrOfObjs.size()     << "\n";
+
+      // Shuffle all protected objects together rather than in separate groups.
+      // We're not using ProtectedObjs because it is an unordered set. Instead
+      // copy protected objects to a temporary, ordered vector and randomize it.
+      SmallVector<int, 8> AllObjs;
+      std::copy(LargeArrayObjs.begin(), LargeArrayObjs.end(), std::back_inserter(AllObjs));
+      std::copy(SmallArrayObjs.begin(), SmallArrayObjs.end(), std::back_inserter(AllObjs));
+      std::copy(AddrOfObjs.begin(), AddrOfObjs.end(), std::back_inserter(AllObjs));
+
+      RNG->shuffle<int, 8>(AllObjs);
+      DEBUG(dbgs() << "shuffled protected objects in " << Fn.getName() << "\n");
+
+      if(multicompiler::getFunctionOption(multicompiler::ReverseStackFrames,
+                                          *Fn.getFunction())){
+        std::reverse(AllObjs.begin(), AllObjs.end());
+        DEBUG(dbgs() << "reversed protected objects in " << Fn.getName() << "\n");
+      }
+
+      // NOTE: This code is essentially the body of AssignProtectedObjSet but
+      // iterating over a vector rather than a set.
+      for (auto I = AllObjs.begin(), E = AllObjs.end(); I != E; ++I) {
+        int i = *I;
+        AdjustStackOffset(MFI, i, StackGrowsDown, Offset, MaxAlign, Skew);
+        ProtectedObjs.insert(i);
+      }
+    } else {
+      AssignProtectedObjSet(LargeArrayObjs, ProtectedObjs, MFI, StackGrowsDown,
+                            Offset, MaxAlign, Skew);
+      AssignProtectedObjSet(SmallArrayObjs, ProtectedObjs, MFI, StackGrowsDown,
+                            Offset, MaxAlign, Skew);
+      AssignProtectedObjSet(AddrOfObjs, ProtectedObjs, MFI, StackGrowsDown,
+                            Offset, MaxAlign, Skew);
+    }
+  }
+
+  // Stack Layout Randomization
+  // code to select whether loop index runs from 0 to MFI->getObjectIndexEnd() - 1
+  // or from MFI->getObjectIndexEnd() - 1 to 0. Two different increments
+  // are needed for the loop index as it is unsigned.
+  
+  PaddingApplied = false;
+  SmallVector<unsigned, 10> array;
+  for(int i = 0; i < MFI->getObjectIndexEnd(); i++) array.push_back(i);
+
+  if(multicompiler::getFunctionOption(multicompiler::ShuffleStackFrames,
+                                      *Fn.getFunction())){
+    RNG->shuffle<unsigned, 10>(array);
+    DEBUG(dbgs() << "shuffled stack frame for " << Fn.getName() << "\n");
+    for(size_t i = 0; i < array.size(); i++) DEBUG(dbgs() << array[i] << " ");
+    DEBUG(dbgs() << "\n");
+  }
+
+  if(multicompiler::getFunctionOption(multicompiler::ReverseStackFrames,
+                                      *Fn.getFunction())){
+    std::reverse(array.begin(), array.end());
+    DEBUG(dbgs() << "reversed stack frame for " << Fn.getName() << "\n");
+    for(size_t i = 0; i < array.size(); i++) DEBUG(dbgs() << array[i] << " ");
+    DEBUG(dbgs() << "\n");
+  }
+
+  // Stack frame padding
+  // If we haven't applied a pad yet, do so now.
+  if (!PaddingApplied) {
+    unsigned int maxStackPadding = multicompiler::getFunctionOption(
+      multicompiler::MaxStackFramePadding, *Fn.getFunction());
+    if (maxStackPadding > 0) {
+      uint32_t pad = RNG->Random(maxStackPadding);
+      Offset += pad;
+      DEBUG(dbgs() << "Stack frame pad size " << Offset << " Max " 
+                   << maxStackPadding << "\n");
+    }
+    PaddingApplied = true;
   }
 
   // Then assign frame offsets to stack objects that are not used to spill
   // callee saved registers.
-  for (unsigned i = 0, e = MFI->getObjectIndexEnd(); i != e; ++i) {
-    if (MFI->isObjectPreAllocated(i) &&
+  for(int i = 0; i != MFI->getObjectIndexEnd(); ++i) {
+  //	i += loopIndexBodyIncrement;
+  //  for (unsigned i = 0, e = MFI->getObjectIndexEnd(); i != e; ++i) {
+  //  for (unsigned i = MFI->getObjectIndexEnd(); i != 0; ) {
+  //	--i;
+    if (MFI->isObjectPreAllocated(array[i]) &&
         MFI->getUseLocalStackAllocationBlock())
       continue;
-    if (i >= MinCSFrameIndex && i <= MaxCSFrameIndex)
+    if (array[i] >= MinCSFrameIndex && array[i] <= MaxCSFrameIndex)
       continue;
-    if (RS && RS->isScavengingFrameIndex((int)i))
+    if (RS && RS->isScavengingFrameIndex((int)array[i]))
       continue;
-    if (MFI->isDeadObjectIndex(i))
+    if (MFI->isDeadObjectIndex(array[i]))
       continue;
-    if (MFI->getStackProtectorIndex() == (int)i)
+    if (MFI->getStackProtectorIndex() == (int)array[i])
       continue;
-    if (ProtectedObjs.count(i))
+    if (ProtectedObjs.count(array[i]))
       continue;
 
-    AdjustStackOffset(MFI, i, StackGrowsDown, Offset, MaxAlign, Skew);
+    AdjustStackOffset(MFI, array[i], StackGrowsDown, Offset, MaxAlign, Skew);
+    DEBUG(dbgs() << "Processing element " << array[i] 
+      << " size[" << MFI->getObjectSize(array[i]) << "]"
+      << " align[" << MFI->getObjectAlignment(array[i]) << "]"
+      << " offset[" << MFI->getObjectOffset(array[i]) << "]"
+      << " (array[" << i << "])\n");
   }
 
   // Make sure the special register scavenging spill slot is closest to the

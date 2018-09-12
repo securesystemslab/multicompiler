@@ -545,6 +545,7 @@ lltok::Kind LLLexer::LexIdentifier() {
   KEYWORD(acq_rel);
   KEYWORD(seq_cst);
   KEYWORD(singlethread);
+  KEYWORD(nocrosscheck);
 
   KEYWORD(nnan);
   KEYWORD(ninf);
@@ -601,6 +602,7 @@ lltok::Kind LLLexer::LexIdentifier() {
 
   KEYWORD(attributes);
 
+  KEYWORD(nocrosscheck);
   KEYWORD(alwaysinline);
   KEYWORD(argmemonly);
   KEYWORD(builtin);

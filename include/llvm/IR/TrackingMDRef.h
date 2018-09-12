@@ -70,7 +70,7 @@ public:
   ///
   /// If \c MD isn't replaceable, the destructor will be a no-op.
   bool hasTrivialDestructor() const {
-    return !MD || !MetadataTracking::isReplaceable(*MD);
+    return !isValid(MD) || !MetadataTracking::isReplaceable(*MD);
   }
 
   bool operator==(const TrackingMDRef &X) const { return MD == X.MD; }
@@ -78,19 +78,25 @@ public:
 
 private:
   void track() {
-    if (MD)
+    if (isValid(MD))
       MetadataTracking::track(MD);
   }
   void untrack() {
-    if (MD)
+    if (isValid(MD))
       MetadataTracking::untrack(MD);
   }
   void retrack(TrackingMDRef &X) {
     assert(MD == X.MD && "Expected values to match");
-    if (X.MD) {
+    if (isValid(X.MD)) {
       MetadataTracking::retrack(X.MD, MD);
       X.MD = nullptr;
     }
+  }
+
+  static bool isValid(Metadata *M) {
+    return M &&
+           M != DenseMapInfo<Metadata *>::getEmptyKey() &&
+           M != DenseMapInfo<Metadata *>::getTombstoneKey();
   }
 };
 

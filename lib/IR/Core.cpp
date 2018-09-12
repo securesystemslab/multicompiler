@@ -264,6 +264,8 @@ LLVMTypeKind LLVMGetTypeKind(LLVMTypeRef Ty) {
     return LLVMX86_MMXTypeKind;
   case Type::TokenTyID:
     return LLVMTokenTypeKind;
+  case Type::TrampolineTyID:
+    return LLVMTrampolineTypeKind;
   }
   llvm_unreachable("Unhandled TypeID.");
 }

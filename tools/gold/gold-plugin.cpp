@@ -44,10 +44,16 @@
 #include "llvm/Transforms/Utils/GlobalStatus.h"
 #include "llvm/Transforms/Utils/ModuleUtils.h"
 #include "llvm/Transforms/Utils/ValueMapper.h"
+#include "llvm/DataRando/DataRando.h"
+#include "llvm/DataRando/Passes.h"
+#include "llvm/Analysis/LoopInfo.h"
 #include <list>
 #include <plugin-api.h>
 #include <system_error>
 #include <vector>
+
+#include "llvm/MultiCompiler/MultiCompilerOptions.h"
+#include "llvm/Support/RandomNumberGenerator.h"
 
 #ifndef LDPO_PIE
 // FIXME: remove this declaration when we stop maintaining Ubuntu Quantal and
@@ -137,6 +143,10 @@ namespace options {
   // the information from intermediate files and write a combined
   // global index for the ThinLTO backends.
   static bool thinlto = false;
+  static bool DataRando = false;
+  static bool HeapChecks = false;
+  static bool DataRandoContextSensitive = false;
+  static bool DisableVectorization = false;
   // Additional options to pass into the code generator.
   // Note: This array will contain all plugin options which are not claimed
   // as plugin exclusive to pass to the code generator.
@@ -177,6 +187,14 @@ namespace options {
         message(LDPL_FATAL, "Invalid parallelism level: %s", opt_ + 5);
     } else if (opt == "disable-verify") {
       DisableVerify = true;
+    } else if (opt == "data-rando") {
+      DataRando = true;
+    } else if (opt == "context-sensitive") {
+      DataRandoContextSensitive = true;
+    } else if (opt == "heap-checks") {
+      HeapChecks = true;
+    } else if (opt == "disable-vectorization") {
+      DisableVectorization = true;
     } else {
       // Save this option to pass to the code generator.
       // ParseCommandLineOptions() expects argv[0] to be program name. Lazily
@@ -744,10 +762,39 @@ static void runLTOPasses(Module &M, TargetMachine &TM) {
   // point and has unknown origin.
   PMB.VerifyInput = true;
   PMB.VerifyOutput = !options::DisableVerify;
-  PMB.LoopVectorize = true;
-  PMB.SLPVectorize = true;
+  PMB.LoopVectorize = !options::DisableVectorization;
+  PMB.SLPVectorize = !options::DisableVectorization;
   PMB.OptLevel = options::OptLevel;
+
+  Module *mergedModule = &M;
+
+  std::unique_ptr<RandomNumberGenerator> RNG(mergedModule->createRNG());
+
+
+  if (multicompiler::RandomizeFunctionList) {
+    //printf("Shuffling functions...\n");
+    RNG->shuffle<Function>(mergedModule->getFunctionList());
+  }
+
   PMB.populateLTOPassManager(passes);
+  if (options::DataRando || options::HeapChecks) {
+    // The LoopInfoWrapperPass happens to initialize passes that are needed for
+    // DataRando and HeapChecks. In the case that we are building without
+    // optimization these passes are not initialized since neither DataRando nor
+    // the DSA passes use the INITIALIZE_PASS_* macros for initializing the passes
+    // they depend on.
+    LoopInfoWrapperPass();
+  }
+  if (options::DataRando) {
+    if (options::DataRandoContextSensitive) {
+      passes.add(new CSDataRando());
+    } else {
+      passes.add(new DataRando());
+    }
+  }
+  if (options::HeapChecks) {
+    passes.add(createHeapChecksPass());
+  }
   passes.run(M);
 }
 

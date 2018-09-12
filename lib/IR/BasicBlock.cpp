@@ -20,6 +20,7 @@
 #include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Type.h"
+#include "llvm/MultiCompiler/MultiCompilerOptions.h"
 #include <algorithm>
 
 using namespace llvm;
@@ -40,7 +41,8 @@ template class llvm::SymbolTableListTraits<Instruction>;
 
 BasicBlock::BasicBlock(LLVMContext &C, const Twine &Name, Function *NewParent,
                        BasicBlock *InsertBefore)
-  : Value(Type::getLabelTy(C), Value::BasicBlockVal), Parent(nullptr) {
+  : Value(Type::getLabelTy(C), Value::BasicBlockVal), Parent(nullptr),
+    NOPInsertionPercentage(multicompiler::NOPInsertionUnknown) {
 
   if (NewParent)
     insertInto(NewParent, InsertBefore);

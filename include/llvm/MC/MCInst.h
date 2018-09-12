@@ -18,6 +18,7 @@
 
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
+#include "llvm/IR/TrapInfo.h"
 #include "llvm/Support/DataTypes.h"
 #include "llvm/Support/SMLoc.h"
 
@@ -151,6 +152,7 @@ class MCInst {
   unsigned Opcode;
   SMLoc Loc;
   SmallVector<MCOperand, 8> Operands;
+  TrapInfo trapInfo;
 
 public:
   MCInst() : Opcode(0) {}
@@ -160,6 +162,9 @@ public:
 
   void setLoc(SMLoc loc) { Loc = loc; }
   SMLoc getLoc() const { return Loc; }
+
+  void setTrapInfo(TrapInfo TI) { trapInfo = TI; }
+  TrapInfo getTrapInfo() const { return trapInfo; }
 
   const MCOperand &getOperand(unsigned i) const { return Operands[i]; }
   MCOperand &getOperand(unsigned i) { return Operands[i]; }

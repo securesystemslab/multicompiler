@@ -1606,6 +1606,8 @@ void DFSanVisitor::visitCallSite(CallSite CS) {
         *DFSF.DFS.Ctx, AttributeSet::ReturnIndex,
         AttributeFuncs::typeIncompatible(NewCS.getInstruction()->getType())));
 
+    NewCS->setTrapInfo(CS->getTrapInfo());
+
     if (Next) {
       ExtractValueInst *ExVal =
           ExtractValueInst::Create(NewCS.getInstruction(), 0, "", Next);

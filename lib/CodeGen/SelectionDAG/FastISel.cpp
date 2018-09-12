@@ -171,6 +171,10 @@ unsigned FastISel::getRegForValue(const Value *V) {
   if (!RealVT.isSimple())
     return 0;
 
+  // Don't handle trap info here
+  if (isa<ConstantVTIndex>(V))
+    return 0;
+
   // Ignore illegal types. We must do this before looking up the value
   // in ValueMap because Arguments are given virtual registers regardless
   // of whether FastISel can handle them.
@@ -498,6 +502,11 @@ bool FastISel::selectGetElementPtr(const User *I) {
                                             E = I->op_end();
        OI != E; ++OI) {
     const Value *Idx = *OI;
+
+    // We can't handle ConstantVTIndices yet...
+    if (isa<ConstantVTIndex>(Idx))
+      return false;
+
     if (auto *StTy = dyn_cast<StructType>(Ty)) {
       uint64_t Field = cast<ConstantInt>(Idx)->getZExtValue();
       if (Field) {

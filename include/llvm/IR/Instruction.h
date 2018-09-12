@@ -19,6 +19,7 @@
 #include "llvm/ADT/ilist_node.h"
 #include "llvm/IR/DebugLoc.h"
 #include "llvm/IR/SymbolTableListTraits.h"
+#include "llvm/IR/TrapInfo.h"
 #include "llvm/IR/User.h"
 
 namespace llvm {
@@ -40,6 +41,7 @@ class Instruction : public User,
 
   BasicBlock *Parent;
   DebugLoc DbgLoc;                         // 'dbg' Metadata cache.
+  TrapInfo trapInfo;                       // 'textrap' Metadata cache.
 
   enum {
     /// HasMetadataBit - This is a bit stored in the SubClassData field which
@@ -229,6 +231,12 @@ public:
 
   /// getDebugLoc - Return the debug location for this node as a DebugLoc.
   const DebugLoc &getDebugLoc() const { return DbgLoc; }
+
+  /// setTrapInfo - Set the trap information for this instruction.
+  void setTrapInfo(const TrapInfo &Info) { trapInfo = Info; }
+
+  /// getTrapInfo - Return the trap information for this node.
+  const TrapInfo &getTrapInfo() const { return trapInfo; }
 
   /// Set or clear the unsafe-algebra flag on this instruction, which must be an
   /// operator which supports this flag. See LangRef.html for the meaning of

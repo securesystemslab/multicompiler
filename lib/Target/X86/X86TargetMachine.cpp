@@ -18,10 +18,12 @@
 #include "llvm/CodeGen/Passes.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/LegacyPassManager.h"
+#include "llvm/MultiCompiler/MultiCompilerOptions.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/FormattedStream.h"
 #include "llvm/Support/TargetRegistry.h"
 #include "llvm/Target/TargetOptions.h"
+#include "llvm/Transforms/Instrumentation.h"
 using namespace llvm;
 
 static cl::opt<bool> EnableMachineCombinerPass("x86-machine-combiner",
@@ -95,6 +97,9 @@ static std::string computeDataLayout(const Triple &TT) {
     Ret += "-a:0:32-S32";
   else
     Ret += "-S128";
+
+  // Trampoline size
+  Ret += "-t64";
 
   return Ret;
 }
@@ -195,9 +200,10 @@ TargetIRAnalysis X86TargetMachine::getTargetIRAnalysis() {
 namespace {
 /// X86 Code Generator Pass Configuration Options.
 class X86PassConfig : public TargetPassConfig {
+  bool Is64Bit;
 public:
-  X86PassConfig(X86TargetMachine *TM, PassManagerBase &PM)
-    : TargetPassConfig(TM, PM) {}
+  X86PassConfig(X86TargetMachine *TM, PassManagerBase &PM, bool Is64Bit = false)
+    : TargetPassConfig(TM, PM), Is64Bit(Is64Bit) {}
 
   X86TargetMachine &getX86TargetMachine() const {
     return getTM<X86TargetMachine>();
@@ -215,7 +221,7 @@ public:
 } // namespace
 
 TargetPassConfig *X86TargetMachine::createPassConfig(PassManagerBase &PM) {
-  return new X86PassConfig(this, PM);
+  return new X86PassConfig(this, PM, Subtarget.is64Bit());
 }
 
 void X86PassConfig::addIRPasses() {
@@ -267,6 +273,8 @@ void X86PassConfig::addPostRegAlloc() {
 void X86PassConfig::addPreSched2() { addPass(createX86ExpandPseudoPass()); }
 
 void X86PassConfig::addPreEmitPass() {
+  addPass(createCookieSetterPass());
+
   if (getOptLevel() != CodeGenOpt::None)
     addPass(createExecutionDependencyFixPass(&X86::VR128RegClass));
 
@@ -276,5 +284,17 @@ void X86PassConfig::addPreEmitPass() {
   if (getOptLevel() != CodeGenOpt::None) {
     addPass(createX86PadShortFunctions());
     addPass(createX86FixupLEAs());
+  }
+
+  addPass(createX86FixupVCalls());
+
+  // NOTE: these must be added in exactly this order
+  // as they interfere with each other
+  // MOVToLEA might change the MOVs inserted as NOPs
+  // into LEAs, which we don't want to happen
+  addPass(createMOVToLEAPass());
+  addPass(createEquivSubstPass());
+  if (TM->Options.NOPInsertion) {
+    addPass(createNOPInsertionPass(Is64Bit));
   }
 }

@@ -134,6 +134,9 @@
 /* Define to 1 if you have the `isatty' function. */
 #undef HAVE_ISATTY
 
+/* Define to 1 if you have the `crypto' library (-lcrypto). */
+#undef HAVE_LIBCRYPTO
+
 /* Define if libedit is available on this platform. */
 #undef HAVE_LIBEDIT
 
@@ -210,6 +213,15 @@
 
 /* Define to 1 if you have the <ndir.h> header file, and it defines `DIR'. */
 #undef HAVE_NDIR_H
+
+/* Define if OpenSSL is available */
+#undef HAVE_OPENSSL
+
+/* Define to 1 if you have the <openssl/aes.h> header file. */
+#undef HAVE_OPENSSL_AES_H
+
+/* Define to 1 if you have the <openssl/evp.h> header file. */
+#undef HAVE_OPENSSL_EVP_H
 
 /* Define to 1 if you have the `posix_spawn' function. */
 #undef HAVE_POSIX_SPAWN
@@ -413,6 +425,9 @@
 
 /* Define to enable checks that alter the LLVM C++ ABI */
 #undef LLVM_ENABLE_ABI_BREAKING_CHECKS
+
+/* Define if the openssl libcrypto library is enabled */
+#undef LLVM_ENABLE_OPENSSL
 
 /* Define if threads enabled */
 #undef LLVM_ENABLE_THREADS

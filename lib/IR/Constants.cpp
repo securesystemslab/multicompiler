@@ -434,6 +434,10 @@ bool Constant::needsRelocation() const {
   if (isa<GlobalValue>(this))
     return true; // Global reference.
 
+  // FIXME : NYO : Would BoobyTrap need relocation? Not sure yet.
+  if (isa<JumpTrampoline>(this))
+    return true;
+
   if (const BlockAddress *BA = dyn_cast<BlockAddress>(this))
     return BA->getFunction()->needsRelocation();
 
@@ -521,8 +525,8 @@ void Constant::removeDeadConstantUsers() const {
 
 void ConstantInt::anchor() { }
 
-ConstantInt::ConstantInt(IntegerType *Ty, const APInt& V)
-  : Constant(Ty, ConstantIntVal, nullptr, 0), Val(V) {
+ConstantInt::ConstantInt(IntegerType *Ty, const APInt& V, ValueTy VT)
+  : Constant(Ty, VT, nullptr, 0), Val(V) {
   assert(V.getBitWidth() == Ty->getBitWidth() && "Invalid constant for type");
 }
 
@@ -3037,4 +3041,49 @@ Instruction *ConstantExpr::getAsInstruction() {
       BO->setIsExact(SubclassOptionalData & PossiblyExactOperator::IsExact);
     return BO;
   }
+}
+
+//===----------------------------------------------------------------------===//
+//                                ConstantVTIndex
+//===----------------------------------------------------------------------===//
+
+void ConstantVTIndex::anchor() { }
+
+ConstantVTIndex::ConstantVTIndex(IntegerType *Ty, const APInt& V, TrapInfo TI)
+  : ConstantInt(Ty, V, ConstantVTIndexVal), trapInfo(TI) {
+}
+
+// Get a ConstantVTIndex from an APInt.
+ConstantVTIndex *ConstantVTIndex::get(LLVMContext &Context, const APInt &V, TrapInfo TI) {
+   // get an existing value or the insertion position
+  LLVMContextImpl *pImpl = Context.pImpl;
+  ConstantVTIndex *&Slot = pImpl->VTIndexConstants[std::make_pair(V, TI)];
+  if (!Slot) {
+    // Get the corresponding integer type for the bit width of the value.
+    IntegerType *ITy = IntegerType::get(Context, V.getBitWidth());
+    Slot = new ConstantVTIndex(ITy, V, TI);
+  }
+  assert(Slot->getType() == IntegerType::get(Context, V.getBitWidth()));
+  return Slot;
+}
+
+Constant *ConstantVTIndex::get(Type *Ty, uint64_t V, TrapInfo TI) {
+  return get(cast<IntegerType>(Ty->getScalarType()), V, TI);
+}
+
+ConstantVTIndex *ConstantVTIndex::get(IntegerType *Ty, uint64_t V, TrapInfo TI) {
+  return get(Ty->getContext(), APInt(Ty->getBitWidth(), V), TI);
+}
+
+Constant *ConstantVTIndex::get(Type *Ty, const APInt& V, TrapInfo TI) {
+  ConstantVTIndex *C = get(Ty->getContext(), V, TI);
+  assert(C->getType() == Ty->getScalarType() &&
+         "ConstantVTIndex type doesn't match the type implied by its value!");
+
+  return C;
+}
+
+ConstantVTIndex *ConstantVTIndex::get(IntegerType* Ty, StringRef Str,
+                                      uint8_t radix, TrapInfo TI) {
+  return get(Ty->getContext(), APInt(Ty->getBitWidth(), Str, radix), TI);
 }

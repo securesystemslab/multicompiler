@@ -11,7 +11,13 @@ add_llvm_tool(llvm-config
 # Compute the substitution values for various items.
 get_property(LLVM_SYSTEM_LIBS_LIST TARGET LLVMSupport PROPERTY LLVM_SYSTEM_LIBS)
 foreach(l ${LLVM_SYSTEM_LIBS_LIST})
-  set(SYSTEM_LIBS ${SYSTEM_LIBS} "-l${l}")
+  if (l MATCHES "\\.so$")
+    # If it's a library path, don't add -l
+    set(SYSTEM_LIBS ${SYSTEM_LIBS} "${l}")
+  else()
+    # Otherwise assume it's a library name we need to link with.
+    set(SYSTEM_LIBS ${SYSTEM_LIBS} "-l${l}")
+  endif()
 endforeach()
 string(REPLACE ";" " " SYSTEM_LIBS "${SYSTEM_LIBS}")
 

@@ -197,7 +197,8 @@ typedef enum {
   LLVMVectorTypeKind,      /**< SIMD 'packed' format, or other vector type */
   LLVMMetadataTypeKind,    /**< Metadata */
   LLVMX86_MMXTypeKind,     /**< X86 MMX */
-  LLVMTokenTypeKind        /**< Tokens */
+  LLVMTokenTypeKind,       /**< Tokens */
+  LLVMTrampolineTypeKind   /**< Trampolines */
 } LLVMTypeKind;
 
 typedef enum {

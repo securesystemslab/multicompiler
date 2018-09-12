@@ -57,6 +57,7 @@ class MDNode;
 class MMIAddrLabelMap;
 class MachineBasicBlock;
 class MachineFunction;
+class MachineInstr;
 class Module;
 class PointerType;
 class StructType;
@@ -83,6 +84,21 @@ struct LandingPadInfo {
 
   explicit LandingPadInfo(MachineBasicBlock *MBB)
       : LandingPadBlock(MBB), LandingPadLabel(nullptr) {}
+};
+
+//===----------------------------------------------------------------------===//
+/// CallTrampolineInfo - This structure is used to retain call trampoline info
+/// for the current function for pointer protection.
+///
+struct CallTrampolineInfo {
+  MCSymbol *CallSym;
+  MCSymbol *ReturnSym;
+  const MachineInstr *OrigCall;
+  MCInst CallInstr;
+  const LandingPadInfo *LPadInfo;
+
+  explicit CallTrampolineInfo(MCSymbol *CS, MCSymbol *RS, const MachineInstr *MI, MCInst CI)
+      : CallSym(CS), ReturnSym(RS), OrigCall(MI), CallInstr(CI), LPadInfo(0) { }
 };
 
 //===----------------------------------------------------------------------===//
@@ -185,6 +201,10 @@ class MachineModuleInfo : public ImmutablePass {
   bool UsesMorestackAddr;
 
   EHPersonality PersonalityTypeCache;
+
+  /// CallTrampolines - Tramolines that should be emitted to hide true return
+  /// addresses.
+  std::vector<CallTrampolineInfo> CallTrampolines;
 
 public:
   static char ID; // Pass identification, replacement for typeid
@@ -425,6 +445,17 @@ public:
   }
 
   VariableDbgInfoMapTy &getVariableDbgInfo() { return VariableDbgInfos; }
+
+  /// AddCallTrampoline - Add a new call trampoline for the current function
+  void AddCallTrampoline(CallTrampolineInfo CT) {
+    CallTrampolines.push_back(CT);
+  }
+
+  /// getCallTrampolines - Return a reference to the call trampoline info for the
+  /// current function.
+  std::vector<CallTrampolineInfo> &getCallTrampolines() {
+    return CallTrampolines;
+  }
 
 }; // End class MachineModuleInfo
 

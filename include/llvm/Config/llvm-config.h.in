@@ -101,4 +101,7 @@
 /* LLVM version string */
 #undef LLVM_VERSION_STRING
 
+/* Define if OpenSSL should be used for random number generation */
+#undef LLVM_ENABLE_OPENSSL
+
 #endif

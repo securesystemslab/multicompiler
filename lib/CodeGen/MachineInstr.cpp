@@ -255,6 +255,8 @@ bool MachineOperand::isIdenticalTo(const MachineOperand &Other) const {
     return getCFIIndex() == Other.getCFIIndex();
   case MachineOperand::MO_Metadata:
     return getMetadata() == Other.getMetadata();
+  case MachineOperand::MO_TexTrapInfo:
+    return getTexTrapInfo() == Other.getTexTrapInfo();
   }
   llvm_unreachable("Invalid machine operand type");
 }
@@ -299,6 +301,8 @@ hash_code llvm::hash_value(const MachineOperand &MO) {
     return hash_combine(MO.getType(), MO.getTargetFlags(), MO.getMCSymbol());
   case MachineOperand::MO_CFIIndex:
     return hash_combine(MO.getType(), MO.getTargetFlags(), MO.getCFIIndex());
+  case MachineOperand::MO_TexTrapInfo:
+    return hash_combine(MO.getType(), MO.getTargetFlags(), MO.getTexTrapInfo());
   }
   llvm_unreachable("Invalid machine operand type");
 }
@@ -446,6 +450,9 @@ void MachineOperand::print(raw_ostream &OS, ModuleSlotTracker &MST,
     break;
   case MachineOperand::MO_CFIIndex:
     OS << "<call frame instruction>";
+    break;
+  case MachineOperand::MO_TexTrapInfo:
+    OS << "<textrap info>";
     break;
   }
 
@@ -667,7 +674,7 @@ MachineInstr::MachineInstr(MachineFunction &MF, const MachineInstr &MI)
   : MCID(&MI.getDesc()), Parent(nullptr), Operands(nullptr), NumOperands(0),
     Flags(0), AsmPrinterFlags(0),
     NumMemRefs(MI.NumMemRefs), MemRefs(MI.MemRefs),
-    debugLoc(MI.getDebugLoc()) {
+    debugLoc(MI.getDebugLoc()), trapInfo(MI.getTrapInfo()) {
   assert(debugLoc.hasTrivialDestructor() && "Expected trivial destructor");
 
   CapOperands = OperandCapacity::get(MI.getNumOperands());
@@ -765,7 +772,7 @@ void MachineInstr::addOperand(MachineFunction &MF, const MachineOperand &Op) {
   // instruction, only implicit regs are allowed beyond MCID->getNumOperands().
   // RegMask operands go between the explicit and implicit operands.
   assert((isImpReg || Op.isRegMask() || MCID->isVariadic() ||
-          OpNo < MCID->getNumOperands() || isMetaDataOp) &&
+          OpNo < MCID->getNumOperands() || isMetaDataOp || Op.isTexTrapInfo()) &&
          "Trying to add an operand to a machine instr that is already done!");
 #endif
 
@@ -1861,6 +1868,9 @@ void MachineInstr::print(raw_ostream &OS, ModuleSlotTracker &MST,
     OS << " dbg:";
     debugLoc.print(OS);
   }
+
+  if (!trapInfo.isUnknown())
+    OS << " TRAPINFO";
 
   OS << '\n';
 }

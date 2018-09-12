@@ -63,15 +63,16 @@ public:
     MetadataTyID,    ///<  8: Metadata
     X86_MMXTyID,     ///<  9: MMX vectors (64 bits, X86 specific)
     TokenTyID,       ///< 10: Tokens
+    TrampolineTyID,  ///< 11: Trampolines
 
     // Derived types... see DerivedTypes.h file.
     // Make sure FirstDerivedTyID stays up to date!
-    IntegerTyID,     ///< 11: Arbitrary bit width integers
-    FunctionTyID,    ///< 12: Functions
-    StructTyID,      ///< 13: Structures
-    ArrayTyID,       ///< 14: Arrays
-    PointerTyID,     ///< 15: Pointers
-    VectorTyID       ///< 16: SIMD 'packed' format, or other vector type
+    IntegerTyID,     ///< 12: Arbitrary bit width integers
+    FunctionTyID,    ///< 13: Functions
+    StructTyID,      ///< 14: Structures
+    ArrayTyID,       ///< 15: Arrays
+    PointerTyID,     ///< 16: Pointers
+    VectorTyID       ///< 17: SIMD 'packed' format, or other vector type
   };
 
 private:
@@ -168,6 +169,9 @@ public:
   /// isX86_MMXTy - Return true if this is X86 MMX.
   bool isX86_MMXTy() const { return getTypeID() == X86_MMXTyID; }
 
+  /// isTrampolineTy - Return true if this is X86 MMX.
+  bool isTrampolineTy() const { return getTypeID() == TrampolineTyID; }
+
   /// isFPOrFPVectorTy - Return true if this is a FP type or a vector of FP.
   ///
   bool isFPOrFPVectorTy() const { return getScalarType()->isFloatingPointTy(); }
@@ -233,7 +237,8 @@ public:
   /// is a valid type for a Value.
   ///
   bool isFirstClassType() const {
-    return getTypeID() != FunctionTyID && getTypeID() != VoidTyID;
+    return getTypeID() != FunctionTyID && getTypeID() != VoidTyID &&
+      getTypeID() != TrampolineTyID;
   }
 
   /// isSingleValueType - Return true if the type is a valid type for a
@@ -262,7 +267,8 @@ public:
     // If it's a primitive, it is always sized.
     if (getTypeID() == IntegerTyID || isFloatingPointTy() ||
         getTypeID() == PointerTyID ||
-        getTypeID() == X86_MMXTyID)
+        getTypeID() == X86_MMXTyID ||
+        getTypeID() == TrampolineTyID)
       return true;
     // If it is not something that can have a size (e.g. a function or label),
     // it doesn't have a size.
@@ -382,6 +388,7 @@ public:
   static Type *getPPC_FP128Ty(LLVMContext &C);
   static Type *getX86_MMXTy(LLVMContext &C);
   static Type *getTokenTy(LLVMContext &C);
+  static Type *getTrampolineTy(LLVMContext &C);
   static IntegerType *getIntNTy(LLVMContext &C, unsigned N);
   static IntegerType *getInt1Ty(LLVMContext &C);
   static IntegerType *getInt8Ty(LLVMContext &C);
@@ -401,6 +408,7 @@ public:
   static PointerType *getFP128PtrTy(LLVMContext &C, unsigned AS = 0);
   static PointerType *getPPC_FP128PtrTy(LLVMContext &C, unsigned AS = 0);
   static PointerType *getX86_MMXPtrTy(LLVMContext &C, unsigned AS = 0);
+  static PointerType *getTrampolinePtrTy(LLVMContext &C, unsigned AS = 0);
   static PointerType *getIntNPtrTy(LLVMContext &C, unsigned N, unsigned AS = 0);
   static PointerType *getInt1PtrTy(LLVMContext &C, unsigned AS = 0);
   static PointerType *getInt8PtrTy(LLVMContext &C, unsigned AS = 0);

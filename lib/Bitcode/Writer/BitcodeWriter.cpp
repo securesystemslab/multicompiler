@@ -178,6 +178,8 @@ static uint64_t getAttrKindEncoding(Attribute::AttrKind Kind) {
     return bitc::ATTR_KIND_IN_ALLOCA;
   case Attribute::Cold:
     return bitc::ATTR_KIND_COLD;
+  case Attribute::CrossCheck:
+    return bitc::ATTR_KIND_CROSSCHECK;
   case Attribute::InaccessibleMemOnly:
     return bitc::ATTR_KIND_INACCESSIBLEMEM_ONLY;
   case Attribute::InaccessibleMemOrArgMemOnly:
@@ -262,6 +264,10 @@ static uint64_t getAttrKindEncoding(Attribute::AttrKind Kind) {
     llvm_unreachable("Can not encode end-attribute kinds marker.");
   case Attribute::None:
     llvm_unreachable("Can not encode none-attribute.");
+  case Attribute::CookieCheck:
+    llvm_unreachable("Can not encode CookieCheck attribute yet.");
+  case Attribute::Trampoline:
+    llvm_unreachable("Can not encode Trampoline attribute yet.");
   }
 
   llvm_unreachable("Trying to encode unknown attribute");
@@ -416,6 +422,7 @@ static void WriteTypeTable(const ValueEnumerator &VE, BitstreamWriter &Stream) {
     case Type::MetadataTyID:  Code = bitc::TYPE_CODE_METADATA;  break;
     case Type::X86_MMXTyID:   Code = bitc::TYPE_CODE_X86_MMX;   break;
     case Type::TokenTyID:     Code = bitc::TYPE_CODE_TOKEN;     break;
+    case Type::TrampolineTyID: Code = bitc::TYPE_CODE_TRAMPOLINE; break;
     case Type::IntegerTyID:
       // INTEGER: [width]
       Code = bitc::TYPE_CODE_INTEGER;
@@ -707,8 +714,8 @@ static uint64_t WriteModuleInfo(const Module *M, const ValueEnumerator &VE,
 
     // GLOBALVAR: [type, isconst, initid,
     //             linkage, alignment, section, visibility, threadlocal,
-    //             unnamed_addr, externally_initialized, dllstorageclass,
-    //             comdat]
+    //             unnamed_addr, externally_initialized, nocrosscheck,
+    //             dllstorageclass, comdat]
     Vals.push_back(VE.getTypeID(GV.getValueType()));
     Vals.push_back(GV.getType()->getAddressSpace() << 2 | 2 | GV.isConstant());
     Vals.push_back(GV.isDeclaration() ? 0 :
@@ -720,11 +727,12 @@ static uint64_t WriteModuleInfo(const Module *M, const ValueEnumerator &VE,
         GV.getVisibility() != GlobalValue::DefaultVisibility ||
         GV.hasUnnamedAddr() || GV.isExternallyInitialized() ||
         GV.getDLLStorageClass() != GlobalValue::DefaultStorageClass ||
-        GV.hasComdat()) {
+        GV.hasComdat() || GV.isNoCrossCheck()) {
       Vals.push_back(getEncodedVisibility(GV));
       Vals.push_back(getEncodedThreadLocalMode(GV));
       Vals.push_back(GV.hasUnnamedAddr());
       Vals.push_back(GV.isExternallyInitialized());
+      Vals.push_back(GV.isNoCrossCheck());
       Vals.push_back(getEncodedDLLStorageClass(GV));
       Vals.push_back(GV.hasComdat() ? VE.getComdatID(GV.getComdat()) : 0);
     } else {
@@ -1551,6 +1559,19 @@ static void WriteConstants(unsigned FirstVal, unsigned LastVal,
       Record.clear();
       continue;
     }
+    if (const ConstantVTIndex *IV = dyn_cast<ConstantVTIndex>(V)) {
+      uint64_t V = IV->getSExtValue();
+      const TrapInfo &TI = IV->getTrapInfo();
+      const GlobalVariable *ClassName = TI.getClassName();
+      Record.push_back(V);
+      Record.push_back(VE.getTypeID(ClassName->getType()));
+      Record.push_back(VE.getValueID(ClassName));
+      Record.push_back(TI.getMaxNumVFuncs());
+      Record.push_back(TI.isMethodPointer());
+      Stream.EmitRecord(bitc::CST_CODE_VT_INDEX, Record);
+      Record.clear();
+      continue;
+    }
     const Constant *C = cast<Constant>(V);
     unsigned Code = -1U;
     unsigned AbbrevToUse = 0;
@@ -1722,6 +1743,14 @@ static void WriteConstants(unsigned FirstVal, unsigned LastVal,
       Record.push_back(VE.getTypeID(BA->getFunction()->getType()));
       Record.push_back(VE.getValueID(BA->getFunction()));
       Record.push_back(VE.getGlobalBasicBlockID(BA->getBasicBlock()));
+    } else if (const JumpTrampoline *JT = dyn_cast<JumpTrampoline>(C)) {
+      Code = bitc::CST_CODE_JUMPTRAMPOLINE;
+
+      // Make sure this is not a null trampoline.
+      if (JT->getTarget()) {
+        Record.push_back(VE.getTypeID(JT->getTarget()->getType()));
+        Record.push_back(VE.getValueID(JT->getTarget()));
+      }
     } else {
 #ifndef NDEBUG
       C->dump();
@@ -2508,23 +2537,31 @@ static void WriteFunction(
 
       // If the instruction has a debug location, emit it.
       DILocation *DL = I->getDebugLoc();
-      if (!DL)
-        continue;
+      if (DL) {
+        if (DL == LastDL) {
+          // Just repeat the same debug loc as last time.
+          Stream.EmitRecord(bitc::FUNC_CODE_DEBUG_LOC_AGAIN, Vals);
+          continue;
+        }
 
-      if (DL == LastDL) {
-        // Just repeat the same debug loc as last time.
-        Stream.EmitRecord(bitc::FUNC_CODE_DEBUG_LOC_AGAIN, Vals);
-        continue;
+        Vals.push_back(DL->getLine());
+        Vals.push_back(DL->getColumn());
+        Vals.push_back(VE.getMetadataOrNullID(DL->getScope()));
+        Vals.push_back(VE.getMetadataOrNullID(DL->getInlinedAt()));
+        Stream.EmitRecord(bitc::FUNC_CODE_DEBUG_LOC, Vals);
+        Vals.clear();
+
+        LastDL = DL;
       }
 
-      Vals.push_back(DL->getLine());
-      Vals.push_back(DL->getColumn());
-      Vals.push_back(VE.getMetadataOrNullID(DL->getScope()));
-      Vals.push_back(VE.getMetadataOrNullID(DL->getInlinedAt()));
-      Stream.EmitRecord(bitc::FUNC_CODE_DEBUG_LOC, Vals);
-      Vals.clear();
-
-      LastDL = DL;
+      const TrapInfo &TI = I->getTrapInfo();
+      if (TI) {
+        Vals.push_back(VE.getMetadataOrNullID(TI.getClassMD()));
+        Vals.push_back(TI.getMaxNumVFuncs());
+        Vals.push_back(TI.isMethodPointer());
+        Stream.EmitRecord(bitc::FUNC_CODE_TRAP_INFO, Vals);
+        Vals.clear();
+      }
     }
 
   // Emit names for all the instructions etc.
