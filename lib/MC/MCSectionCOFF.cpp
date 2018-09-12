@@ -11,6 +11,7 @@
 #include "llvm/MC/MCAsmInfo.h"
 #include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCSymbol.h"
+#include "llvm/Support/COFF.h"
 #include "llvm/Support/raw_ostream.h"
 using namespace llvm;
 
@@ -47,18 +48,22 @@ void MCSectionCOFF::PrintSwitchToSection(const MCAsmInfo &MAI,
   }
 
   OS << "\t.section\t" << getSectionName() << ",\"";
-  if (getKind().isText())
-    OS << 'x';
-  else if (getKind().isBSS())
-    OS << 'b';
-  if (getKind().isWriteable())
-    OS << 'w';
-  else
-    OS << 'r';
-  if (getCharacteristics() & COFF::IMAGE_SCN_MEM_DISCARDABLE)
-    OS << 'n';
   if (getCharacteristics() & COFF::IMAGE_SCN_CNT_INITIALIZED_DATA)
     OS << 'd';
+  if (getCharacteristics() & COFF::IMAGE_SCN_CNT_UNINITIALIZED_DATA)
+    OS << 'b';
+  if (getCharacteristics() & COFF::IMAGE_SCN_MEM_EXECUTE)
+    OS << 'x';
+  if (getCharacteristics() & COFF::IMAGE_SCN_MEM_WRITE)
+    OS << 'w';
+  else if (getCharacteristics() & COFF::IMAGE_SCN_MEM_READ)
+    OS << 'r';
+  else
+    OS << 'y';
+  if (getCharacteristics() & COFF::IMAGE_SCN_LNK_REMOVE)
+    OS << 'n';
+  if (getCharacteristics() & COFF::IMAGE_SCN_MEM_SHARED)
+    OS << 's';
   OS << '"';
 
   if (getCharacteristics() & COFF::IMAGE_SCN_LNK_COMDAT) {
@@ -90,7 +95,7 @@ void MCSectionCOFF::PrintSwitchToSection(const MCAsmInfo &MAI,
         break;
     }
     assert(COMDATSymbol);
-    OS << *COMDATSymbol;
+    COMDATSymbol->print(OS, &MAI);
   }
   OS << '\n';
 }

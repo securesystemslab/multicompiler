@@ -41,8 +41,8 @@
 define i32* @cmov1(i32 signext %s) nounwind readonly {
 entry:
   %tobool = icmp ne i32 %s, 0
-  %tmp1 = load i32** @i3, align 4
-  %cond = select i1 %tobool, i32* getelementptr inbounds ([3 x i32]* @i1, i32 0, i32 0), i32* %tmp1
+  %tmp1 = load i32*, i32** @i3, align 4
+  %cond = select i1 %tobool, i32* getelementptr inbounds ([3 x i32], [3 x i32]* @i1, i32 0, i32 0), i32* %tmp1
   ret i32* %cond
 }
 
@@ -81,8 +81,8 @@ entry:
 define i32 @cmov2(i32 signext %s) nounwind readonly {
 entry:
   %tobool = icmp ne i32 %s, 0
-  %tmp1 = load i32* @c, align 4
-  %tmp2 = load i32* @d, align 4
+  %tmp1 = load i32, i32* @c, align 4
+  %tmp2 = load i32, i32* @d, align 4
   %cond = select i1 %tobool, i32 %tmp1, i32 %tmp2
   ret i32 %cond
 }
@@ -757,24 +757,9 @@ define i32 @slti6(i32 signext %a) nounwind readnone {
 
 ; ALL-LABEL: slti6:
 
-; 32-CMOV-DAG: slti [[R1:\$[0-9]+]], $4, 7
-; 32-CMOV-DAG: xori [[R1]], [[R1]], 1
-; 32-CMOV-DAG: addiu [[R2:\$[0-9]+]], [[R1]], 3
-; 32-CMOV-NOT: movn
-
-; 32-CMP-DAG:  slti [[R1:\$[0-9]+]], $4, 7
-; 32-CMP-DAG:  xori [[R1]], [[R1]], 1
-; 32-CMP-DAG:  addiu [[R2:\$[0-9]+]], [[R1]], 3
-; 32-CMP-NOT:  seleqz
-; 32-CMP-NOT:  selnez
-
-; 64-CMOV-DAG: slti [[R1:\$[0-9]+]], $4, 7
-; 64-CMOV-DAG: xori [[R1]], [[R1]], 1
-; 64-CMOV-DAG: addiu [[R2:\$[0-9]+]], [[R1]], 3
-; 64-CMOV-NOT: movn
-
-; 64-CMP-DAG:  slti [[R1:\$[0-9]+]], $4, 7
-; 64-CMP-DAG:  xori [[R1]], [[R1]], 1
-; 64-CMP-DAG:  addiu [[R2:\$[0-9]+]], [[R1]], 3
-; 64-CMP-NOT:  seleqz
-; 64-CMP-NOT:  selnez
+; ALL-DAG: addiu [[R1:\$[0-9]+]], $zero, 6
+; ALL-DAG: slt [[R1]], [[R1]], $4
+; ALL-DAG: addiu [[R2:\$[0-9]+]], [[R1]], 3
+; ALL-NOT: movn
+; ALL-NOT:  seleqz
+; ALL-NOT:  selnez

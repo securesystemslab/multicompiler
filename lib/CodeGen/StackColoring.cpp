@@ -43,12 +43,12 @@
 #include "llvm/CodeGen/PseudoSourceValue.h"
 #include "llvm/CodeGen/SlotIndexes.h"
 #include "llvm/CodeGen/StackProtector.h"
+#include "llvm/CodeGen/WinEHFuncInfo.h"
 #include "llvm/IR/DebugInfo.h"
 #include "llvm/IR/Dominators.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Module.h"
-#include "llvm/MC/MCInstrItineraries.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
@@ -228,7 +228,7 @@ void StackColoring::dump() const {
 unsigned StackColoring::collectMarkers(unsigned NumSlot) {
   unsigned MarkersFound = 0;
   // Scan the function to find all lifetime markers.
-  // NOTE: We use the a reverse-post-order iteration to ensure that we obtain a
+  // NOTE: We use a reverse-post-order iteration to ensure that we obtain a
   // deterministic numbering, and because we'll need a post-order iteration
   // later for solving the liveness dataflow problem.
   for (MachineBasicBlock *MBB : depth_first(MF)) {
@@ -364,7 +364,7 @@ void StackColoring::calculateLocalLiveness() {
       }
     }
 
-    BBSet = NextBBSet;
+    BBSet = std::move(NextBBSet);
   }// while changed.
 }
 
@@ -463,7 +463,8 @@ void StackColoring::remapInstructions(DenseMap<int, int> &SlotRemap) {
     if (!VI.Var)
       continue;
     if (SlotRemap.count(VI.Slot)) {
-      DEBUG(dbgs()<<"Remapping debug info for ["<<VI.Var->getName()<<"].\n");
+      DEBUG(dbgs() << "Remapping debug info for ["
+                   << cast<DILocalVariable>(VI.Var)->getName() << "].\n");
       VI.Slot = SlotRemap[VI.Slot];
       FixedDbg++;
     }
@@ -569,6 +570,14 @@ void StackColoring::remapInstructions(DenseMap<int, int> &SlotRemap) {
         FixedInstr++;
       }
     }
+
+  // Update the location of C++ catch objects for the MSVC personality routine.
+  if (WinEHFuncInfo *EHInfo = MF->getWinEHFuncInfo())
+    for (WinEHTryBlockMapEntry &TBME : EHInfo->TryBlockMap)
+      for (WinEHHandlerType &H : TBME.HandlerArray)
+        if (H.CatchObj.FrameIndex != INT_MAX &&
+            SlotRemap.count(H.CatchObj.FrameIndex))
+          H.CatchObj.FrameIndex = SlotRemap[H.CatchObj.FrameIndex];
 
   DEBUG(dbgs()<<"Fixed "<<FixedMemOp<<" machine memory operands.\n");
   DEBUG(dbgs()<<"Fixed "<<FixedDbg<<" debug locations.\n");

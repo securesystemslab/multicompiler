@@ -62,7 +62,8 @@ static cl::opt<std::string> OutputFilename("o", cl::desc("Output filename"),
 
 typedef int (*ConvertFuncPtr)(yaml::Input & YIn, raw_ostream &Out);
 
-int convertYAML(yaml::Input & YIn, raw_ostream &Out, ConvertFuncPtr Convert) {
+static int convertYAML(yaml::Input &YIn, raw_ostream &Out,
+                       ConvertFuncPtr Convert) {
   unsigned CurDocNum = 0;
   do {
     if (++CurDocNum == DocNum)
@@ -83,11 +84,11 @@ int main(int argc, char **argv) {
   if (OutputFilename.empty())
     OutputFilename = "-";
 
-  std::string ErrorInfo;
+  std::error_code EC;
   std::unique_ptr<tool_output_file> Out(
-      new tool_output_file(OutputFilename.c_str(), ErrorInfo, sys::fs::F_None));
-  if (!ErrorInfo.empty()) {
-    errs() << ErrorInfo << '\n';
+      new tool_output_file(OutputFilename, EC, sys::fs::F_None));
+  if (EC) {
+    errs() << EC.message() << '\n';
     return 1;
   }
 

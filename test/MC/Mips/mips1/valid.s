@@ -1,7 +1,7 @@
 # Instructions that are valid
 #
 # RUN: llvm-mc %s -triple=mips-unknown-linux -show-encoding -mcpu=mips1 | FileCheck %s
-
+a:
         .set noat
         abs.d     $f7,$f25             # CHECK: encoding:
         abs.s     $f9,$f16
@@ -10,7 +10,10 @@
         add.s     $f8,$f21,$f24
         addi      $13,$9,26322
         addi      $8,$8,~1             # CHECK: addi $8, $8, -2 # encoding: [0x21,0x08,0xff,0xfe]
+        add       $9,$14,15176         # CHECK: addi $9, $14, 15176   # encoding: [0x21,0xc9,0x3b,0x48]
+        add       $24,-7193            # CHECK: addi $24, $24, -7193  # encoding: [0x23,0x18,0xe3,0xe7]
         addu      $9,$a0,$a2
+        addu      $9,10                # CHECK: addiu $9, $9, 10    # encoding: [0x25,0x29,0x00,0x0a]
         and       $s7,$v0,$12
         and       $2,4                 # CHECK: andi $2, $2, 4 # encoding: [0x30,0x42,0x00,0x04]
         bc1f      $fcc0, 4             # CHECK: bc1f 4        # encoding: [0x45,0x00,0x00,0x01]
@@ -38,6 +41,12 @@
         div.s     $f4,$f5,$f15
         divu      $zero,$25,$15
         ehb                            # CHECK: ehb # encoding:  [0x00,0x00,0x00,0xc0]
+        j         1f                   # CHECK: j $tmp0 # encoding: [0b000010AA,A,A,A]
+                                       # CHECK:         #   fixup A - offset: 0, value: ($tmp0), kind: fixup_Mips_26
+        j         a                    # CHECK: j a     # encoding: [0b000010AA,A,A,A]
+                                       # CHECK:         #   fixup A - offset: 0, value: a, kind: fixup_Mips_26
+        j         1328                 # CHECK: j 1328  # encoding: [0x08,0x00,0x01,0x4c]
+        jal       21100                # CHECK: jal 21100     # encoding: [0x0c,0x00,0x14,0x9b]
         lb        $24,-14515($10)
         lbu       $8,30195($v1)
         lh        $11,-8556($s5)
@@ -56,8 +65,8 @@
         mflo      $s1
         mov.d     $f20,$f14
         mov.s     $f2,$f27
-        move      $s8,$a0
-        move      $25,$a2
+        move      $s8,$a0              # CHECK: move $fp, $4           # encoding: [0x00,0x80,0xf0,0x25]
+        move      $25,$a2              # CHECK: move $25, $6           # encoding: [0x00,0xc0,0xc8,0x25]
         mtc1      $s8,$f9
         mthi      $s1
         mtlo      $sp
@@ -97,6 +106,8 @@
         srlv      $25,$s4,$a0          # CHECK: srlv $25, $20, $4      # encoding: [0x00,0x94,0xc8,0x06]
         ssnop                          # CHECK: ssnop                  # encoding: [0x00,0x00,0x00,0x40]
         sub       $s6,$s3,$12
+        sub       $22,$17,-3126        # CHECK: addi $22, $17, 3126    # encoding: [0x22,0x36,0x0c,0x36]
+        sub       $13,6512             # CHECK: addi $13, $13, -6512   # encoding: [0x21,0xad,0xe6,0x90]
         sub.d     $f18,$f3,$f17
         sub.s     $f23,$f22,$f22
         subu      $sp,$s6,$s6
@@ -111,3 +122,6 @@
         tlbwi                          # CHECK: tlbwi                  # encoding: [0x42,0x00,0x00,0x02]
         tlbwr                          # CHECK: tlbwr                  # encoding: [0x42,0x00,0x00,0x06]
         xor       $s2,$a0,$s8
+        xor       $2, 4                # CHECK: xori $2, $2, 4         # encoding: [0x38,0x42,0x00,0x04]
+
+1:

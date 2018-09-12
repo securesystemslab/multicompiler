@@ -1,4 +1,5 @@
 ; RUN: llvm-as < %s | llvm-dis | FileCheck %s
+; RUN: verify-uselistorder < %s
 ; PR12696
 
 define void @f1(i8 zeroext)
@@ -203,7 +204,7 @@ define void @f34()
 ; CHECK: define void @f34()
 {
         call void @nobuiltin() nobuiltin
-; CHECK: call void @nobuiltin() #25
+; CHECK: call void @nobuiltin() #30
         ret void;
 }
 
@@ -239,6 +240,53 @@ define dereferenceable(18446744073709551606) i8* @f40(i8* dereferenceable(184467
         ret i8* %a
 }
 
+define void @f41(i8* align 32, double* align 64) {
+; CHECK: define void @f41(i8* align 32, double* align 64) {
+        ret void
+}
+
+; CHECK: define dereferenceable_or_null(8) i8* @f42(i8* dereferenceable_or_null(8) %foo)
+define dereferenceable_or_null(8) i8* @f42(i8* dereferenceable_or_null(8) %foo) {
+ entry:
+  ret i8* %foo
+}
+
+; CHECK: define void @f43() #25
+define void @f43() convergent {
+  ret void
+}
+
+define void @f44() argmemonly
+; CHECK: define void @f44() #26
+{
+        ret void;
+}
+
+; CHECK: define "string_attribute" void @f45(i32 "string_attribute")
+define "string_attribute" void @f45(i32 "string_attribute") {
+  ret void
+}
+
+; CHECK: define "string_attribute_with_value"="value" void @f46(i32 "string_attribute_with_value"="value")
+define "string_attribute_with_value"="value" void @f46(i32 "string_attribute_with_value"="value") {
+  ret void
+}
+
+; CHECK: define void @f47() #27
+define void @f47() norecurse {
+  ret void
+}
+
+; CHECK: define void @f48() #28
+define void @f48() inaccessiblememonly {
+  ret void
+}
+
+; CHECK: define void @f49() #29
+define void @f49() inaccessiblemem_or_argmemonly {
+  ret void
+}
+
 ; CHECK: attributes #0 = { noreturn }
 ; CHECK: attributes #1 = { nounwind }
 ; CHECK: attributes #2 = { readnone }
@@ -264,4 +312,9 @@ define dereferenceable(18446744073709551606) i8* @f40(i8* dereferenceable(184467
 ; CHECK: attributes #22 = { minsize }
 ; CHECK: attributes #23 = { noinline optnone }
 ; CHECK: attributes #24 = { jumptable }
-; CHECK: attributes #25 = { nobuiltin }
+; CHECK: attributes #25 = { convergent }
+; CHECK: attributes #26 = { argmemonly }
+; CHECK: attributes #27 = { norecurse }
+; CHECK: attributes #28 = { inaccessiblememonly }
+; CHECK: attributes #29 = { inaccessiblemem_or_argmemonly }
+; CHECK: attributes #30 = { nobuiltin }

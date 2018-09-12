@@ -45,7 +45,7 @@ define <4 x i32> @test5(<4 x i32> %A) {
 
 ; Check that we combine "if x!=0 && x!=-1" into "if x+1u>1"
 define i32 @test6(i64 %x) nounwind {
-; CHECK: @test6
+; CHECK-LABEL: @test6(
 ; CHECK-NEXT: add i64 %x, 1
 ; CHECK-NEXT: icmp ugt i64 %x.off, 1
   %cmp1 = icmp ne i64 %x, -1
@@ -54,3 +54,94 @@ define i32 @test6(i64 %x) nounwind {
   %land.ext = zext i1 %.cmp1 to i32
   ret i32 %land.ext
 }
+
+define i1 @test7(i32 %i, i1 %b) {
+; CHECK-LABEL: @test7(
+; CHECK-NEXT: [[CMP:%.*]] = icmp eq i32 %i, 0
+; CHECK-NEXT: [[AND:%.*]] = and i1 [[CMP]], %b
+; CHECK-NEXT: ret i1 [[AND]]
+  %cmp1 = icmp slt i32 %i, 1
+  %cmp2 = icmp sgt i32 %i, -1
+  %and1 = and i1 %cmp1, %b
+  %and2 = and i1 %and1, %cmp2
+  ret i1 %and2
+}
+
+define i1 @test8(i32 %i) {
+; CHECK-LABEL: @test8(
+; CHECK-NEXT: [[DEC:%.*]] = add i32 %i, -1
+; CHECK-NEXT: [[CMP:%.*]] = icmp ult i32 [[DEC]], 13
+; CHECK-NEXT: ret i1 [[CMP]]
+  %cmp1 = icmp ne i32 %i, 0
+  %cmp2 = icmp ult i32 %i, 14
+  %cond = and i1 %cmp1, %cmp2
+  ret i1 %cond
+}
+
+; combine -x & 1 into x & 1
+define i64 @test9(i64 %x) {
+; CHECK-LABEL: @test9(
+; CHECK-NOT: %sub = sub nsw i64 0, %x
+; CHECK-NOT: %and = and i64 %sub, 1
+; CHECK-NEXT: %and = and i64 %x, 1
+; CHECK-NEXT: ret i64 %and
+  %sub = sub nsw i64 0, %x
+  %and = and i64 %sub, 1
+  ret i64 %and
+}
+
+define i64 @test10(i64 %x) {
+; CHECK-LABEL: @test10(
+; CHECK-NOT: %sub = sub nsw i64 0, %x
+; CHECK-NEXT: %and = and i64 %x, 1
+; CHECK-NOT: %add = add i64 %sub, %and
+; CHECK-NEXT: %add = sub i64 %and, %x
+; CHECK-NEXT: ret i64 %add
+  %sub = sub nsw i64 0, %x
+  %and = and i64 %sub, 1
+  %add = add i64 %sub, %and
+  ret i64 %add
+}
+
+define i64 @fabs_double(double %x) {
+; CHECK-LABEL: @fabs_double(
+; CHECK-NEXT:  %fabs = call double @llvm.fabs.f64(double %x)
+; CHECK-NEXT:  %and = bitcast double %fabs to i64
+; CHECK-NEXT:  ret i64 %and
+  %bc = bitcast double %x to i64
+  %and = and i64 %bc, 9223372036854775807
+  ret i64 %and
+}
+
+define i64 @fabs_double_swap(double %x) {
+; CHECK-LABEL: @fabs_double_swap(
+; CHECK-NEXT:  %fabs = call double @llvm.fabs.f64(double %x)
+; CHECK-NEXT:  %and = bitcast double %fabs to i64
+; CHECK-NEXT:  ret i64 %and
+  %bc = bitcast double %x to i64
+  %and = and i64 9223372036854775807, %bc
+  ret i64 %and
+}
+
+define i32 @fabs_float(float %x) {
+; CHECK-LABEL: @fabs_float(
+; CHECK-NEXT:  %fabs = call float @llvm.fabs.f32(float %x)
+; CHECK-NEXT:  %and = bitcast float %fabs to i32
+; CHECK-NEXT:  ret i32 %and
+  %bc = bitcast float %x to i32
+  %and = and i32 %bc, 2147483647
+  ret i32 %and
+}
+
+; Make sure that only a bitcast is transformed.
+
+define i64 @fabs_double_not_bitcast(double %x) {
+; CHECK-LABEL: @fabs_double_not_bitcast(
+; CHECK-NEXT:  %bc = fptoui double %x to i64
+; CHECK-NEXT:  %and = and i64 %bc, 9223372036854775807
+; CHECK-NEXT:  ret i64 %and
+  %bc = fptoui double %x to i64
+  %and = and i64 %bc, 9223372036854775807
+  ret i64 %and
+}
+

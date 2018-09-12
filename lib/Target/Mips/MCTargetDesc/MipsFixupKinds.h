@@ -7,8 +7,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LLVM_MIPS_MIPSFIXUPKINDS_H
-#define LLVM_MIPS_MIPSFIXUPKINDS_H
+#ifndef LLVM_LIB_TARGET_MIPS_MCTARGETDESC_MIPSFIXUPKINDS_H
+#define LLVM_LIB_TARGET_MIPS_MCTARGETDESC_MIPSFIXUPKINDS_H
 
 #include "llvm/MC/MCFixup.h"
 
@@ -18,13 +18,16 @@ namespace Mips {
   // one can have multiple fixup types for a given relocation and thus need
   // to be uniquely named.
   //
-  // This table *must* be in the save order of
+  // This table *must* be in the same order of
   // MCFixupKindInfo Infos[Mips::NumTargetFixupKinds]
   // in MipsAsmBackend.cpp.
   //
   enum Fixups {
+    // Branch fixups resulting in R_MIPS_NONE.
+    fixup_Mips_NONE = FirstTargetFixupKind,
+
     // Branch fixups resulting in R_MIPS_16.
-    fixup_Mips_16 = FirstTargetFixupKind,
+    fixup_Mips_16,
 
     // Pure 32 bit data fixup resulting in - R_MIPS_32.
     fixup_Mips_32,
@@ -158,6 +161,12 @@ namespace Mips {
     // resulting in - R_MICROMIPS_GOT16
     fixup_MICROMIPS_GOT16,
 
+    // resulting in - R_MICROMIPS_PC7_S1
+    fixup_MICROMIPS_PC7_S1,
+
+    // resulting in - R_MICROMIPS_PC10_S1
+    fixup_MICROMIPS_PC10_S1,
+
     // resulting in - R_MICROMIPS_PC16_S1
     fixup_MICROMIPS_PC16_S1,
 
@@ -199,4 +208,4 @@ namespace Mips {
 } // namespace llvm
 
 
-#endif // LLVM_MIPS_MIPSFIXUPKINDS_H
+#endif

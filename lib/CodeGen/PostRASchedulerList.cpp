@@ -41,7 +41,6 @@
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Target/TargetInstrInfo.h"
 #include "llvm/Target/TargetLowering.h"
-#include "llvm/Target/TargetMachine.h"
 #include "llvm/Target/TargetRegisterInfo.h"
 #include "llvm/Target/TargetSubtargetInfo.h"
 using namespace llvm;
@@ -88,7 +87,7 @@ namespace {
 
     void getAnalysisUsage(AnalysisUsage &AU) const override {
       AU.setPreservesCFG();
-      AU.addRequired<AliasAnalysis>();
+      AU.addRequired<AAResultsWrapperPass>();
       AU.addRequired<TargetPassConfig>();
       AU.addRequired<MachineDominatorTree>();
       AU.addPreserved<MachineDominatorTree>();
@@ -98,7 +97,7 @@ namespace {
     }
 
     bool runOnMachineFunction(MachineFunction &Fn) override;
-    
+
     bool enablePostRAScheduler(
         const TargetSubtargetInfo &ST, CodeGenOpt::Level OptLevel,
         TargetSubtargetInfo::AntiDepBreakMode &Mode,
@@ -137,12 +136,12 @@ namespace {
 
   public:
     SchedulePostRATDList(
-      MachineFunction &MF, MachineLoopInfo &MLI, MachineDominatorTree &MDT,
-      AliasAnalysis *AA, const RegisterClassInfo&,
-      TargetSubtargetInfo::AntiDepBreakMode AntiDepMode,
-      SmallVectorImpl<const TargetRegisterClass*> &CriticalPathRCs);
+        MachineFunction &MF, MachineLoopInfo &MLI, AliasAnalysis *AA,
+        const RegisterClassInfo &,
+        TargetSubtargetInfo::AntiDepBreakMode AntiDepMode,
+        SmallVectorImpl<const TargetRegisterClass *> &CriticalPathRCs);
 
-    ~SchedulePostRATDList();
+    ~SchedulePostRATDList() override;
 
     /// startBlock - Initialize register live-range state for scheduling in
     /// this block.
@@ -193,16 +192,17 @@ INITIALIZE_PASS(PostRAScheduler, "post-RA-sched",
                 "Post RA top-down list latency scheduler", false, false)
 
 SchedulePostRATDList::SchedulePostRATDList(
-  MachineFunction &MF, MachineLoopInfo &MLI, MachineDominatorTree &MDT,
-  AliasAnalysis *AA, const RegisterClassInfo &RCI,
-  TargetSubtargetInfo::AntiDepBreakMode AntiDepMode,
-  SmallVectorImpl<const TargetRegisterClass*> &CriticalPathRCs)
-  : ScheduleDAGInstrs(MF, MLI, MDT, /*IsPostRA=*/true), AA(AA), EndIndex(0) {
+    MachineFunction &MF, MachineLoopInfo &MLI, AliasAnalysis *AA,
+    const RegisterClassInfo &RCI,
+    TargetSubtargetInfo::AntiDepBreakMode AntiDepMode,
+    SmallVectorImpl<const TargetRegisterClass *> &CriticalPathRCs)
+    : ScheduleDAGInstrs(MF, &MLI), AA(AA), EndIndex(0) {
 
-  const TargetMachine &TM = MF.getTarget();
-  const InstrItineraryData *InstrItins = TM.getInstrItineraryData();
+  const InstrItineraryData *InstrItins =
+      MF.getSubtarget().getInstrItineraryData();
   HazardRec =
-    TM.getInstrInfo()->CreateTargetPostRAHazardRecognizer(InstrItins, this);
+      MF.getSubtarget().getInstrInfo()->CreateTargetPostRAHazardRecognizer(
+          InstrItins, this);
 
   assert((AntiDepMode == TargetSubtargetInfo::ANTIDEP_NONE ||
           MRI.tracksLiveness()) &&
@@ -257,7 +257,7 @@ bool PostRAScheduler::enablePostRAScheduler(
     TargetSubtargetInfo::RegClassVector &CriticalPathRCs) const {
   Mode = ST.getAntiDepBreakMode();
   ST.getCriticalPathRCs(CriticalPathRCs);
-  return ST.enablePostMachineScheduler() &&
+  return ST.enablePostRAScheduler() &&
          OptLevel >= ST.getOptLevelToEnablePostRAScheduler();
 }
 
@@ -265,10 +265,9 @@ bool PostRAScheduler::runOnMachineFunction(MachineFunction &Fn) {
   if (skipOptnoneFunction(*Fn.getFunction()))
     return false;
 
-  TII = Fn.getTarget().getInstrInfo();
+  TII = Fn.getSubtarget().getInstrInfo();
   MachineLoopInfo &MLI = getAnalysis<MachineLoopInfo>();
-  MachineDominatorTree &MDT = getAnalysis<MachineDominatorTree>();
-  AliasAnalysis *AA = &getAnalysis<AliasAnalysis>();
+  AliasAnalysis *AA = &getAnalysis<AAResultsWrapperPass>().getAAResults();
   TargetPassConfig *PassConfig = &getAnalysis<TargetPassConfig>();
 
   RegClassInfo.runOnMachineFunction(Fn);
@@ -283,9 +282,7 @@ bool PostRAScheduler::runOnMachineFunction(MachineFunction &Fn) {
   } else {
     // Check that post-RA scheduling is enabled for this target.
     // This may upgrade the AntiDepMode.
-    const TargetSubtargetInfo &ST =
-        Fn.getTarget().getSubtarget<TargetSubtargetInfo>();
-    if (!enablePostRAScheduler(ST, PassConfig->getOptLevel(),
+    if (!enablePostRAScheduler(Fn.getSubtarget(), PassConfig->getOptLevel(),
                                AntiDepMode, CriticalPathRCs))
       return false;
   }
@@ -301,12 +298,11 @@ bool PostRAScheduler::runOnMachineFunction(MachineFunction &Fn) {
 
   DEBUG(dbgs() << "PostRAScheduler\n");
 
-  SchedulePostRATDList Scheduler(Fn, MLI, MDT, AA, RegClassInfo, AntiDepMode,
+  SchedulePostRATDList Scheduler(Fn, MLI, AA, RegClassInfo, AntiDepMode,
                                  CriticalPathRCs);
 
   // Loop over all of the basic blocks
-  for (MachineFunction::iterator MBB = Fn.begin(), MBBe = Fn.end();
-       MBB != MBBe; ++MBB) {
+  for (auto &MBB : Fn) {
 #ifndef NDEBUG
     // If DebugDiv > 0 then only schedule MBB with (ID % DebugDiv) == DebugMod
     if (DebugDiv > 0) {
@@ -314,25 +310,25 @@ bool PostRAScheduler::runOnMachineFunction(MachineFunction &Fn) {
       if (bbcnt++ % DebugDiv != DebugMod)
         continue;
       dbgs() << "*** DEBUG scheduling " << Fn.getName()
-             << ":BB#" << MBB->getNumber() << " ***\n";
+             << ":BB#" << MBB.getNumber() << " ***\n";
     }
 #endif
 
     // Initialize register live-range state for scheduling in this block.
-    Scheduler.startBlock(MBB);
+    Scheduler.startBlock(&MBB);
 
     // Schedule each sequence of instructions not interrupted by a label
     // or anything else that effectively needs to shut down scheduling.
-    MachineBasicBlock::iterator Current = MBB->end();
-    unsigned Count = MBB->size(), CurrentCount = Count;
-    for (MachineBasicBlock::iterator I = Current; I != MBB->begin(); ) {
+    MachineBasicBlock::iterator Current = MBB.end();
+    unsigned Count = MBB.size(), CurrentCount = Count;
+    for (MachineBasicBlock::iterator I = Current; I != MBB.begin();) {
       MachineInstr *MI = std::prev(I);
       --Count;
       // Calls are not scheduling boundaries before register allocation, but
       // post-ra we don't gain anything by scheduling across calls since we
       // don't need to worry about register pressure.
-      if (MI->isCall() || TII->isSchedulingBoundary(MI, MBB, Fn)) {
-        Scheduler.enterRegion(MBB, I, Current, CurrentCount - Count);
+      if (MI->isCall() || TII->isSchedulingBoundary(MI, &MBB, Fn)) {
+        Scheduler.enterRegion(&MBB, I, Current, CurrentCount - Count);
         Scheduler.setEndIndex(CurrentCount);
         Scheduler.schedule();
         Scheduler.exitRegion();
@@ -346,9 +342,9 @@ bool PostRAScheduler::runOnMachineFunction(MachineFunction &Fn) {
         Count -= MI->getBundleSize();
     }
     assert(Count == 0 && "Instruction count mismatch!");
-    assert((MBB->begin() == Current || CurrentCount != 0) &&
+    assert((MBB.begin() == Current || CurrentCount != 0) &&
            "Instruction count mismatch!");
-    Scheduler.enterRegion(MBB, MBB->begin(), Current, CurrentCount);
+    Scheduler.enterRegion(&MBB, MBB.begin(), Current, CurrentCount);
     Scheduler.setEndIndex(CurrentCount);
     Scheduler.schedule();
     Scheduler.exitRegion();
@@ -358,7 +354,7 @@ bool PostRAScheduler::runOnMachineFunction(MachineFunction &Fn) {
     Scheduler.finishBlock();
 
     // Update register kills
-    Scheduler.fixupKills(MBB);
+    Scheduler.fixupKills(&MBB);
   }
 
   return true;
@@ -403,8 +399,12 @@ void SchedulePostRATDList::schedule() {
   }
 
   DEBUG(dbgs() << "********** List Scheduling **********\n");
-  DEBUG(for (unsigned su = 0, e = SUnits.size(); su != e; ++su)
-          SUnits[su].dumpAll(this));
+  DEBUG(
+    for (const SUnit &SU : SUnits) {
+      SU.dumpAll(this);
+      dbgs() << '\n';
+    }
+  );
 
   AvailableQueue.initNodes(SUnits);
   ListScheduleTopDown();
@@ -560,10 +560,10 @@ void SchedulePostRATDList::ListScheduleTopDown() {
       if (HT == ScheduleHazardRecognizer::NoHazard) {
         if (HazardRec->ShouldPreferAnother(CurSUnit)) {
           if (!NotPreferredSUnit) {
-	    // If this is the first non-preferred node for this cycle, then
-	    // record it and continue searching for a preferred node. If this
-	    // is not the first non-preferred node, then treat it as though
-	    // there had been a hazard.
+            // If this is the first non-preferred node for this cycle, then
+            // record it and continue searching for a preferred node. If this
+            // is not the first non-preferred node, then treat it as though
+            // there had been a hazard.
             NotPreferredSUnit = CurSUnit;
             continue;
           }

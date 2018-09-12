@@ -1,22 +1,83 @@
 # See docs/CMake.html for instructions about how to build LLVM with CMake.
 
-cmake_minimum_required(VERSION 2.8.8)
+cmake_minimum_required(VERSION 2.8.12.2)
 
-# FIXME: It may be removed when we use 2.8.12.
-if(CMAKE_VERSION VERSION_LESS 2.8.12)
-  # Invalidate a couple of keywords.
-  set(cmake_2_8_12_INTERFACE)
-  set(cmake_2_8_12_PRIVATE)
+if (NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+  message(STATUS "No build type selected, default to Debug")
+  set(CMAKE_BUILD_TYPE "Debug")
+endif()
+
+if(POLICY CMP0022)
+  cmake_policy(SET CMP0022 NEW) # automatic when 2.8.12 is required
+endif()
+
+if (POLICY CMP0051)
+  # CMake 3.1 and higher include generator expressions of the form
+  # $<TARGETLIB:obj> in the SOURCES property.  These need to be
+  # stripped everywhere that access the SOURCES property, so we just
+  # defer to the OLD behavior of not including generator expressions
+  # in the output for now.
+  cmake_policy(SET CMP0051 OLD)
+endif()
+
+if(CMAKE_VERSION VERSION_LESS 3.1.20141117)
+  set(cmake_3_2_USES_TERMINAL)
 else()
-  # Use ${cmake_2_8_12_KEYWORD} intead of KEYWORD in target_link_libraries().
-  set(cmake_2_8_12_INTERFACE INTERFACE)
-  set(cmake_2_8_12_PRIVATE PRIVATE)
-  if(POLICY CMP0022)
-    cmake_policy(SET CMP0022 NEW) # automatic when 2.8.12 is required
+  set(cmake_3_2_USES_TERMINAL USES_TERMINAL)
+endif()
+
+if(NOT DEFINED LLVM_VERSION_MAJOR)
+  set(LLVM_VERSION_MAJOR 3)
+endif()
+if(NOT DEFINED LLVM_VERSION_MINOR)
+  set(LLVM_VERSION_MINOR 8)
+endif()
+if(NOT DEFINED LLVM_VERSION_PATCH)
+  set(LLVM_VERSION_PATCH 1)
+endif()
+if(NOT DEFINED LLVM_VERSION_SUFFIX)
+  set(LLVM_VERSION_SUFFIX "")
+endif()
+
+if (POLICY CMP0048)
+  cmake_policy(SET CMP0048 NEW)
+  set(cmake_3_0_PROJ_VERSION
+    VERSION ${LLVM_VERSION_MAJOR}.${LLVM_VERSION_MINOR}.${LLVM_VERSION_PATCH})
+  set(cmake_3_0_LANGUAGES LANGUAGES)
+endif()
+
+if (NOT PACKAGE_VERSION)
+  set(PACKAGE_VERSION
+    "${LLVM_VERSION_MAJOR}.${LLVM_VERSION_MINOR}.${LLVM_VERSION_PATCH}${LLVM_VERSION_SUFFIX}")
+endif()
+
+project(LLVM
+  ${cmake_3_0_PROJ_VERSION}
+  ${cmake_3_0_LANGUAGES}
+  C CXX ASM)
+
+# The following only works with the Ninja generator in CMake >= 3.0.
+set(LLVM_PARALLEL_COMPILE_JOBS "" CACHE STRING
+  "Define the maximum number of concurrent compilation jobs.")
+if(LLVM_PARALLEL_COMPILE_JOBS)
+  if(CMAKE_VERSION VERSION_LESS 3.0 OR NOT CMAKE_MAKE_PROGRAM MATCHES "ninja")
+    message(WARNING "Job pooling is only available with Ninja generators and CMake 3.0 and later.")
+  else()
+    set_property(GLOBAL APPEND PROPERTY JOB_POOLS compile_job_pool=${LLVM_PARALLEL_COMPILE_JOBS})
+    set(CMAKE_JOB_POOL_COMPILE compile_job_pool)
   endif()
 endif()
 
-project(LLVM)
+set(LLVM_PARALLEL_LINK_JOBS "" CACHE STRING
+  "Define the maximum number of concurrent link jobs.")
+if(LLVM_PARALLEL_LINK_JOBS)
+  if(CMAKE_VERSION VERSION_LESS 3.0 OR NOT CMAKE_MAKE_PROGRAM MATCHES "ninja")
+    message(WARNING "Job pooling is only available with Ninja generators and CMake 3.0 and later.")
+  else()
+    set_property(GLOBAL APPEND PROPERTY JOB_POOLS link_job_pool=${LLVM_PARALLEL_LINK_JOBS})
+    set(CMAKE_JOB_POOL_LINK link_job_pool)
+  endif()
+endif()
 
 # Add path for custom modules
 set(CMAKE_MODULE_PATH
@@ -25,13 +86,11 @@ set(CMAKE_MODULE_PATH
   "${CMAKE_CURRENT_SOURCE_DIR}/cmake/modules"
   )
 
-set(LLVM_VERSION_MAJOR 3)
-set(LLVM_VERSION_MINOR 5)
-set(LLVM_VERSION_PATCH 2)
+# Generate a CompilationDatabase (compile_commands.json file) for our build,
+# for use by clang_complete, YouCompleteMe, etc.
+set(CMAKE_EXPORT_COMPILE_COMMANDS 1)
 
-if (NOT PACKAGE_VERSION)
-  set(PACKAGE_VERSION "${LLVM_VERSION_MAJOR}.${LLVM_VERSION_MINOR}.${LLVM_VERSION_PATCH}svn")
-endif()
+option(LLVM_INSTALL_UTILS "Include utility binaries in the 'install' target." OFF)
 
 option(LLVM_INSTALL_TOOLCHAIN_ONLY "Only include toolchain files in the 'install' target." OFF)
 
@@ -64,6 +123,7 @@ set(CPACK_PACKAGE_VERSION_MINOR ${LLVM_VERSION_MINOR})
 set(CPACK_PACKAGE_VERSION_PATCH ${LLVM_VERSION_PATCH})
 set(CPACK_PACKAGE_VERSION ${PACKAGE_VERSION})
 set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.TXT")
+set(CPACK_NSIS_COMPRESSOR "/SOLID lzma \r\n SetCompressorDictSize 32")
 if(WIN32 AND NOT UNIX)
   set(CPACK_PACKAGE_INSTALL_REGISTRY_KEY "LLVM")
   set(CPACK_PACKAGE_ICON "${CMAKE_CURRENT_SOURCE_DIR}\\\\cmake\\\\nsis_logo.bmp")
@@ -75,6 +135,9 @@ if(WIN32 AND NOT UNIX)
     "ExecWait '$INSTDIR/tools/msbuild/install.bat'")
   set(CPACK_NSIS_EXTRA_UNINSTALL_COMMANDS
     "ExecWait '$INSTDIR/tools/msbuild/uninstall.bat'")
+  if( CMAKE_CL_64 )
+    set(CPACK_NSIS_INSTALL_ROOT "$PROGRAMFILES64")
+  endif()
 endif()
 include(CPack)
 
@@ -111,9 +174,16 @@ endif()
 
 string(TOUPPER "${CMAKE_BUILD_TYPE}" uppercase_CMAKE_BUILD_TYPE)
 
+if (CMAKE_BUILD_TYPE AND
+    NOT uppercase_CMAKE_BUILD_TYPE MATCHES "^(DEBUG|RELEASE|RELWITHDEBINFO|MINSIZEREL)$")
+  message(FATAL_ERROR "Invalid value for CMAKE_BUILD_TYPE: ${CMAKE_BUILD_TYPE}")
+endif()
+
+set(LLVM_LIBDIR_SUFFIX "" CACHE STRING "Define suffix of library directory name (32/64)" )
+
 # They are used as destination of target generators.
 set(LLVM_RUNTIME_OUTPUT_INTDIR ${CMAKE_CURRENT_BINARY_DIR}/${CMAKE_CFG_INTDIR}/bin)
-set(LLVM_LIBRARY_OUTPUT_INTDIR ${CMAKE_CURRENT_BINARY_DIR}/${CMAKE_CFG_INTDIR}/lib)
+set(LLVM_LIBRARY_OUTPUT_INTDIR ${CMAKE_CURRENT_BINARY_DIR}/${CMAKE_CFG_INTDIR}/lib${LLVM_LIBDIR_SUFFIX})
 if(WIN32 OR CYGWIN)
   # DLL platform -- put DLLs into bin.
   set(LLVM_SHLIB_OUTPUT_INTDIR ${LLVM_RUNTIME_OUTPUT_INTDIR})
@@ -130,18 +200,18 @@ set(LLVM_BINARY_DIR       ${CMAKE_CURRENT_BINARY_DIR}  ) # --prefix
 
 set(LLVM_EXAMPLES_BINARY_DIR ${LLVM_BINARY_DIR}/examples)
 set(LLVM_INCLUDE_DIR ${CMAKE_CURRENT_BINARY_DIR}/include)
-set(LLVM_LIBDIR_SUFFIX "" CACHE STRING "Define suffix of library directory name (32/64)" )
 
 set(LLVM_ALL_TARGETS
   AArch64
+  AMDGPU
   ARM
+  BPF
   CppBackend
   Hexagon
   Mips
   MSP430
   NVPTX
   PowerPC
-  R600
   Sparc
   SystemZ
   X86
@@ -200,16 +270,11 @@ list(REMOVE_DUPLICATES LLVM_TARGETS_TO_BUILD)
 include(AddLLVMDefinitions)
 
 option(LLVM_ENABLE_PIC "Build Position-Independent Code" ON)
-
-# MSVC has a gazillion warnings with this.
-if( MSVC )
-  option(LLVM_ENABLE_WARNINGS "Enable compiler warnings." OFF)
-else()
-  option(LLVM_ENABLE_WARNINGS "Enable compiler warnings." ON)
-endif()
-
+option(LLVM_ENABLE_WARNINGS "Enable compiler warnings." ON)
+option(LLVM_ENABLE_MODULES "Compile with C++ modules enabled." OFF)
 option(LLVM_ENABLE_CXX1Y "Compile with C++1y enabled." OFF)
 option(LLVM_ENABLE_LIBCXX "Use libc++ if available." OFF)
+option(LLVM_ENABLE_LIBCXXABI "Use libc++abi when using libc++." OFF)
 option(LLVM_ENABLE_PEDANTIC "Compile with pedantic enabled." ON)
 option(LLVM_ENABLE_WERROR "Fail and stop if a warning is triggered." OFF)
 
@@ -218,6 +283,9 @@ if( NOT uppercase_CMAKE_BUILD_TYPE STREQUAL "DEBUG" )
 else()
   option(LLVM_ENABLE_ASSERTIONS "Enable assertions" ON)
 endif()
+
+set(LLVM_ABI_BREAKING_CHECKS "WITH_ASSERTS" CACHE STRING
+  "Enable abi-breaking checks.  Can be WITH_ASSERTS, FORCE_ON or FORCE_OFF.")
 
 option(LLVM_FORCE_USE_OLD_HOST_TOOLCHAIN
        "Set to ON to force using an old, unsupported host toolchain." OFF)
@@ -236,6 +304,9 @@ endif( LLVM_USE_INTEL_JITEVENTS )
 
 option(LLVM_USE_OPROFILE
   "Use opagent JIT interface to inform OProfile about JIT code" OFF)
+
+option(LLVM_EXTERNALIZE_DEBUGINFO
+  "Generate dSYM files and strip executables and libraries (Darwin Only)" OFF)
 
 # If enabled, verify we are on a platform that supports oprofile.
 if( LLVM_USE_OPROFILE )
@@ -263,7 +334,7 @@ endif()
 # Define the default arguments to use with 'lit', and an option for the user to
 # override.
 set(LIT_ARGS_DEFAULT "-sv")
-if (MSVC OR XCODE)
+if (MSVC_IDE OR XCODE)
   set(LIT_ARGS_DEFAULT "${LIT_ARGS_DEFAULT} --no-progress-bar")
 endif()
 set(LLVM_LIT_ARGS "${LIT_ARGS_DEFAULT}" CACHE STRING "Default options for lit")
@@ -292,6 +363,7 @@ option(LLVM_INCLUDE_EXAMPLES "Generate build targets for the LLVM examples" ON)
 option(LLVM_BUILD_TESTS
   "Build LLVM unit tests. If OFF, just generate build targets." OFF)
 option(LLVM_INCLUDE_TESTS "Generate build targets for the LLVM unit tests." ON)
+option(LLVM_INCLUDE_GO_TESTS "Include the Go bindings tests in test build targets." ON)
 
 option (LLVM_BUILD_DOCS "Build the llvm documentation." OFF)
 option (LLVM_INCLUDE_DOCS "Generate build targets for llvm documentation." ON)
@@ -300,6 +372,34 @@ option (LLVM_ENABLE_SPHINX "Use Sphinx to generate llvm documentation." OFF)
 
 option (LLVM_BUILD_EXTERNAL_COMPILER_RT
   "Build compiler-rt as an external project." OFF)
+
+# You can configure which libraries from LLVM you want to include in the
+# shared library by setting LLVM_DYLIB_COMPONENTS to a semi-colon delimited
+# list of LLVM components. All component names handled by llvm-config are valid.
+if(NOT DEFINED LLVM_DYLIB_COMPONENTS)
+  set(LLVM_DYLIB_COMPONENTS "all" CACHE STRING
+    "Semicolon-separated list of components to include in libLLVM, or \"all\".")
+endif()
+option(LLVM_LINK_LLVM_DYLIB "Link tools against the libllvm dynamic library" OFF)
+option(LLVM_BUILD_LLVM_C_DYLIB "Build libllvm-c re-export library (Darwin Only)" OFF)
+set(LLVM_BUILD_LLVM_DYLIB_default OFF)
+if(LLVM_LINK_LLVM_DYLIB OR LLVM_BUILD_LLVM_C_DYLIB)
+  set(LLVM_BUILD_LLVM_DYLIB_default ON)
+endif()
+option(LLVM_BUILD_LLVM_DYLIB "Build libllvm dynamic library" ${LLVM_BUILD_LLVM_DYLIB_default})
+set(LLVM_DISABLE_LLVM_DYLIB_ATEXIT_DEFAULT ON)
+if (LLVM_LINK_LLVM_DYLIB)
+  set(LLVM_DISABLE_LLVM_DYLIB_ATEXIT_DEFAULT OFF)
+endif()
+option(LLVM_DISABLE_LLVM_DYLIB_ATEXIT "Disable llvm-shlib's atexit destructors." ${LLVM_DISABLE_LLVM_DYLIB_ATEXIT_DEFAULT})
+if(LLVM_DISABLE_LLVM_DYLIB_ATEXIT)
+  set(DISABLE_LLVM_DYLIB_ATEXIT 1)
+endif()
+
+option(LLVM_OPTIMIZED_TABLEGEN "Force TableGen to be built with optimization" OFF)
+if(CMAKE_CROSSCOMPILING OR (LLVM_OPTIMIZED_TABLEGEN AND LLVM_ENABLE_ASSERTIONS))
+  set(LLVM_USE_HOST_TOOLS ON)
+endif()
 
 # All options referred to from HandleLLVMOptions have to be specified
 # BEFORE this include, otherwise options will not be correctly set on
@@ -315,13 +415,19 @@ set(TARGET_TRIPLE "${LLVM_DEFAULT_TARGET_TRIPLE}")
 include(HandleLLVMOptions)
 
 # Verify that we can find a Python 2 interpreter.  Python 3 is unsupported.
-set(Python_ADDITIONAL_VERSIONS 2.7 2.6 2.5)
+# FIXME: We should support systems with only Python 3, but that requires work
+# on LLDB.
+set(Python_ADDITIONAL_VERSIONS 2.7)
 include(FindPythonInterp)
 if( NOT PYTHONINTERP_FOUND )
   message(FATAL_ERROR
 "Unable to find Python interpreter, required for builds and testing.
 
 Please install Python or specify the PYTHON_EXECUTABLE CMake variable.")
+endif()
+
+if( ${PYTHON_VERSION_STRING} VERSION_LESS 2.7 )
+  message(FATAL_ERROR "Python 2.7 or newer is required")
 endif()
 
 ######
@@ -449,8 +555,8 @@ configure_file(
 
 # They are not referenced. See set_output_directory().
 set( CMAKE_RUNTIME_OUTPUT_DIRECTORY ${LLVM_BINARY_DIR}/bin )
-set( CMAKE_LIBRARY_OUTPUT_DIRECTORY ${LLVM_BINARY_DIR}/lib )
-set( CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${LLVM_BINARY_DIR}/lib )
+set( CMAKE_LIBRARY_OUTPUT_DIRECTORY ${LLVM_BINARY_DIR}/lib${LLVM_LIBDIR_SUFFIX} )
+set( CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${LLVM_BINARY_DIR}/lib${LLVM_LIBDIR_SUFFIX} )
 
 set(CMAKE_BUILD_WITH_INSTALL_RPATH ON)
 if (APPLE)
@@ -458,31 +564,71 @@ if (APPLE)
   set(CMAKE_INSTALL_RPATH "@executable_path/../lib")
 else(UNIX)
   if(NOT DEFINED CMAKE_INSTALL_RPATH)
-    set(CMAKE_INSTALL_RPATH "\$ORIGIN/../lib")
-    if (${CMAKE_SYSTEM_NAME} MATCHES FreeBSD)
+    set(CMAKE_INSTALL_RPATH "\$ORIGIN/../lib${LLVM_LIBDIR_SUFFIX}")
+    if(${CMAKE_SYSTEM_NAME} MATCHES "(FreeBSD|DragonFly)")
       set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -Wl,-z,origin")
+      set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -Wl,-z,origin")
     endif()
   endif(NOT DEFINED CMAKE_INSTALL_RPATH)
+endif()
+
+if(APPLE AND DARWIN_LTO_LIBRARY)
+  set(CMAKE_EXE_LINKER_FLAGS
+    "${CMAKE_EXE_LINKER_FLAGS} -Wl,-lto_library -Wl,${DARWIN_LTO_LIBRARY}")
+  set(CMAKE_SHARED_LINKER_FLAGS
+    "${CMAKE_SHARED_LINKER_FLAGS} -Wl,-lto_library -Wl,${DARWIN_LTO_LIBRARY}")
+  set(CMAKE_MODULE_LINKER_FLAGS
+    "${CMAKE_MODULE_LINKER_FLAGS} -Wl,-lto_library -Wl,${DARWIN_LTO_LIBRARY}")
+endif()
+
+# Work around a broken bfd ld behavior. When linking a binary with a
+# foo.so library, it will try to find any library that foo.so uses and
+# check its symbols. This is wasteful (the check was done when foo.so
+# was created) and can fail since it is not the dynamic linker and
+# doesn't know how to handle search paths correctly.
+if (UNIX AND NOT APPLE AND NOT ${CMAKE_SYSTEM_NAME} MATCHES "SunOS")
+  set(CMAKE_EXE_LINKER_FLAGS
+      "${CMAKE_EXE_LINKER_FLAGS} -Wl,-allow-shlib-undefined")
 endif()
 
 set(CMAKE_INCLUDE_CURRENT_DIR ON)
 
 include_directories( ${LLVM_INCLUDE_DIR} ${LLVM_MAIN_INCLUDE_DIR})
 
-if( ${CMAKE_SYSTEM_NAME} MATCHES FreeBSD )
+# when crosscompiling import the executable targets from a file
+if(LLVM_USE_HOST_TOOLS)
+  include(CrossCompile)
+endif(LLVM_USE_HOST_TOOLS)
+if(LLVM_TARGET_IS_CROSSCOMPILE_HOST)
+# Dummy use to avoid CMake Wraning: Manually-specified variables were not used
+# (this is a variable that CrossCompile sets on recursive invocations)
+endif()
+
+if(${CMAKE_SYSTEM_NAME} MATCHES "(FreeBSD|DragonFly)")
   # On FreeBSD, /usr/local/* is not used by default. In order to build LLVM
   # with libxml2, iconv.h, etc., we must add /usr/local paths.
   include_directories("/usr/local/include")
   link_directories("/usr/local/lib")
-endif( ${CMAKE_SYSTEM_NAME} MATCHES FreeBSD )
+endif(${CMAKE_SYSTEM_NAME} MATCHES "(FreeBSD|DragonFly)")
 
 if( ${CMAKE_SYSTEM_NAME} MATCHES SunOS )
    SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -include llvm/Support/Solaris.h")
 endif( ${CMAKE_SYSTEM_NAME} MATCHES SunOS )
 
 # Make sure we don't get -rdynamic in every binary. For those that need it,
-# use set_target_properties(target PROPERTIES ENABLE_EXPORTS 1)
+# use export_executable_symbols(target).
 set(CMAKE_SHARED_LIBRARY_LINK_CXX_FLAGS "")
+
+set(LLVM_PROFDATA_FILE "" CACHE FILEPATH
+  "Profiling data file to use when compiling in order to improve runtime performance.")
+
+if(LLVM_PROFDATA_FILE AND EXISTS ${LLVM_PROFDATA_FILE})
+  if ("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang" )
+    add_definitions("-fprofile-instr-use=${LLVM_PROFDATA_FILE}")
+  else()
+    message(FATAL_ERROR "LLVM_PROFDATA_FILE can only be specified when compiling with clang")
+  endif()
+endif()
 
 include(AddLLVM)
 include(TableGen)
@@ -521,6 +667,12 @@ if(LLVM_INCLUDE_TESTS)
   add_subdirectory(utils/unittest)
 endif()
 
+foreach( binding ${LLVM_BINDINGS_LIST} )
+  if( EXISTS "${LLVM_MAIN_SRC_DIR}/bindings/${binding}/CMakeLists.txt" )
+    add_subdirectory(bindings/${binding})
+  endif()
+endforeach()
+
 add_subdirectory(projects)
 
 if(WITH_POLLY)
@@ -538,6 +690,13 @@ if( LLVM_INCLUDE_EXAMPLES )
 endif()
 
 if( LLVM_INCLUDE_TESTS )
+  if(EXISTS ${LLVM_MAIN_SRC_DIR}/projects/test-suite AND TARGET clang)
+    include(LLVMExternalProjectUtils)
+    llvm_ExternalProject_Add(test-suite ${LLVM_MAIN_SRC_DIR}/projects/test-suite
+      USE_TOOLCHAIN
+      EXCLUDE_FROM_ALL
+      NO_INSTALL)
+  endif()
   add_subdirectory(test)
   add_subdirectory(unittests)
   if (MSVC)
@@ -570,6 +729,7 @@ add_subdirectory(cmake/modules)
 if (NOT LLVM_INSTALL_TOOLCHAIN_ONLY)
   install(DIRECTORY include/llvm include/llvm-c
     DESTINATION include
+    COMPONENT llvm-headers
     FILES_MATCHING
     PATTERN "*.def"
     PATTERN "*.h"
@@ -581,6 +741,7 @@ if (NOT LLVM_INSTALL_TOOLCHAIN_ONLY)
 
   install(DIRECTORY ${LLVM_INCLUDE_DIR}/llvm
     DESTINATION include
+    COMPONENT llvm-headers
     FILES_MATCHING
     PATTERN "*.def"
     PATTERN "*.h"
@@ -591,4 +752,12 @@ if (NOT LLVM_INSTALL_TOOLCHAIN_ONLY)
     PATTERN "config.h" EXCLUDE
     PATTERN ".svn" EXCLUDE
     )
+
+  if (NOT CMAKE_CONFIGURATION_TYPES)
+    add_custom_target(installhdrs
+                      DEPENDS ${name}
+                      COMMAND "${CMAKE_COMMAND}"
+                              -DCMAKE_INSTALL_COMPONENT=llvm-headers
+                              -P "${CMAKE_BINARY_DIR}/cmake_install.cmake")
+  endif()
 endif()

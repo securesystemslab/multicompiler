@@ -32,7 +32,7 @@ function(tablegen project ofn)
     # The file in LLVM_TARGET_DEFINITIONS may be not in the current
     # directory and local_tds may not contain it, so we must
     # explicitly list it here:
-    DEPENDS ${${project}_TABLEGEN_EXE} ${local_tds} ${global_tds}
+    DEPENDS ${${project}_TABLEGEN_TARGET} ${local_tds} ${global_tds}
     ${LLVM_TARGET_DEFINITIONS_ABSOLUTE}
     COMMENT "Building ${ofn}..."
     )
@@ -70,38 +70,31 @@ function(add_public_tablegen_target target)
   set(LLVM_COMMON_DEPENDS ${LLVM_COMMON_DEPENDS} ${target} PARENT_SCOPE)
 endfunction()
 
-if(CMAKE_CROSSCOMPILING)
-  set(CX_NATIVE_TG_DIR "${CMAKE_BINARY_DIR}/native")
+if(LLVM_USE_HOST_TOOLS)
+  add_custom_command(OUTPUT LIB_LLVMSUPPORT
+      COMMAND ${CMAKE_COMMAND} --build . --target LLVMSupport --config Release
+      DEPENDS CONFIGURE_LLVM_NATIVE
+      WORKING_DIRECTORY ${LLVM_NATIVE_BUILD}
+      COMMENT "Building libLLVMSupport for native TableGen...")
+  add_custom_target(NATIVE_LIB_LLVMSUPPORT DEPENDS LIB_LLVMSUPPORT)
 
-  add_custom_command(OUTPUT ${CX_NATIVE_TG_DIR}
-    COMMAND ${CMAKE_COMMAND} -E make_directory ${CX_NATIVE_TG_DIR}
-    COMMENT "Creating ${CX_NATIVE_TG_DIR}...")
-
-  # Forward a subset of configure options to discover additional tablegen modules.
-  get_cmake_property(_variableNames CACHE_VARIABLES)
-  foreach (_variableName ${_variableNames})
-    if (_variableName MATCHES "^(LLVM_EXTERNAL_.*_SOURCE_DIR)$")
-      list(APPEND CX_CMAKE_ARGUMENTS "-D${_variableName}=\"${${_variableName}}\"")
-    endif ()
-  endforeach()
-
-  add_custom_command(OUTPUT ${CX_NATIVE_TG_DIR}/CMakeCache.txt
-    # TODO: Clear the old CMakeCache.txt somehow without breaking restat.
-    COMMAND ${CMAKE_COMMAND} -UMAKE_TOOLCHAIN_FILE -DCMAKE_BUILD_TYPE=Release
-                             -DLLVM_BUILD_POLLY=OFF ${CX_CMAKE_ARGUMENTS}
-                             -G "${CMAKE_GENERATOR}" ${CMAKE_SOURCE_DIR}
-    WORKING_DIRECTORY ${CX_NATIVE_TG_DIR}
-    DEPENDS ${CX_NATIVE_TG_DIR}
-    COMMENT "Configuring native TableGen...")
-
-  add_custom_target(ConfigureNativeTableGen DEPENDS ${CX_NATIVE_TG_DIR}/CMakeCache.txt)
-
-  set_directory_properties(PROPERTIES ADDITIONAL_MAKE_CLEAN_FILES ${CX_NATIVE_TG_DIR})
-endif()
+  add_custom_command(OUTPUT LIB_LLVMTABLEGEN
+      COMMAND ${CMAKE_COMMAND} --build . --target LLVMTableGen --config Release
+      DEPENDS CONFIGURE_LLVM_NATIVE
+      WORKING_DIRECTORY ${LLVM_NATIVE_BUILD}
+      COMMENT "Building libLLVMTableGen for native TableGen...")
+  add_custom_target(NATIVE_LIB_LLVMTABLEGEN DEPENDS LIB_LLVMTABLEGEN)
+endif(LLVM_USE_HOST_TOOLS)
 
 macro(add_tablegen target project)
   set(${target}_OLD_LLVM_LINK_COMPONENTS ${LLVM_LINK_COMPONENTS})
   set(LLVM_LINK_COMPONENTS ${LLVM_LINK_COMPONENTS} TableGen)
+
+  if(NOT XCODE)
+    # FIXME: It leaks to user, callee of add_tablegen.
+    set(LLVM_ENABLE_OBJLIB ON)
+  endif()
+
   add_llvm_utility(${target} ${ARGN})
   set(LLVM_LINK_COMPONENTS ${${target}_OLD_LLVM_LINK_COMPONENTS})
 
@@ -119,21 +112,24 @@ macro(add_tablegen target project)
 
   # Effective tblgen executable to be used:
   set(${project}_TABLEGEN_EXE ${${project}_TABLEGEN} PARENT_SCOPE)
+  set(${project}_TABLEGEN_TARGET ${${project}_TABLEGEN} PARENT_SCOPE)
 
-  if(CMAKE_CROSSCOMPILING)
+  if(LLVM_USE_HOST_TOOLS)
     if( ${${project}_TABLEGEN} STREQUAL "${target}" )
-      set(${project}_TABLEGEN_EXE "${CX_NATIVE_TG_DIR}/bin/${target}")
+      if (NOT CMAKE_CONFIGURATION_TYPES)
+        set(${project}_TABLEGEN_EXE "${LLVM_NATIVE_BUILD}/bin/${target}")
+      else()
+        set(${project}_TABLEGEN_EXE "${LLVM_NATIVE_BUILD}/Release/bin/${target}")
+      endif()
       set(${project}_TABLEGEN_EXE ${${project}_TABLEGEN_EXE} PARENT_SCOPE)
 
       add_custom_command(OUTPUT ${${project}_TABLEGEN_EXE}
-        COMMAND ${CMAKE_BUILD_TOOL} ${target}
-        DEPENDS ${CX_NATIVE_TG_DIR}/CMakeCache.txt
-        WORKING_DIRECTORY ${CX_NATIVE_TG_DIR}
+        COMMAND ${CMAKE_COMMAND} --build . --target ${target} --config Release
+        DEPENDS ${target} NATIVE_LIB_LLVMSUPPORT NATIVE_LIB_LLVMTABLEGEN
+        WORKING_DIRECTORY ${LLVM_NATIVE_BUILD}
         COMMENT "Building native TableGen...")
-      add_custom_target(${project}NativeTableGen DEPENDS ${${project}_TABLEGEN_EXE})
-      add_dependencies(${project}NativeTableGen ConfigureNativeTableGen)
-
-      add_dependencies(${target} ${project}NativeTableGen)
+      add_custom_target(${project}-tablegen-host DEPENDS ${${project}_TABLEGEN_EXE})
+      set(${project}_TABLEGEN_TARGET ${project}-tablegen-host PARENT_SCOPE)
     endif()
   endif()
 

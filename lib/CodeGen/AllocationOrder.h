@@ -14,8 +14,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LLVM_CODEGEN_ALLOCATIONORDER_H
-#define LLVM_CODEGEN_ALLOCATIONORDER_H
+#ifndef LLVM_LIB_CODEGEN_ALLOCATIONORDER_H
+#define LLVM_LIB_CODEGEN_ALLOCATIONORDER_H
 
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/MC/MCRegisterInfo.h"
@@ -24,8 +24,9 @@ namespace llvm {
 
 class RegisterClassInfo;
 class VirtRegMap;
+class LiveRegMatrix;
 
-class AllocationOrder {
+class LLVM_LIBRARY_VISIBILITY AllocationOrder {
   SmallVector<MCPhysReg, 16> Hints;
   ArrayRef<MCPhysReg> Order;
   int Pos;
@@ -37,7 +38,8 @@ public:
   /// @param RegClassInfo Information about reserved and allocatable registers.
   AllocationOrder(unsigned VirtReg,
                   const VirtRegMap &VRM,
-                  const RegisterClassInfo &RegClassInfo);
+                  const RegisterClassInfo &RegClassInfo,
+                  const LiveRegMatrix *Matrix);
 
   /// Get the allocation order without reordered hints.
   ArrayRef<MCPhysReg> getOrder() const { return Order; }

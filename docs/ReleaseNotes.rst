@@ -1,5 +1,5 @@
 ======================
-LLVM 3.5 Release Notes
+LLVM 3.8 Release Notes
 ======================
 
 .. contents::
@@ -10,7 +10,7 @@ Introduction
 ============
 
 This document contains the release notes for the LLVM Compiler Infrastructure,
-release 3.5.  Here we describe the status of LLVM, including major improvements
+release 3.8.  Here we describe the status of LLVM, including major improvements
 from the previous release, improvements in various subprojects of LLVM, and
 some of the current users of the code.  All LLVM releases may be downloaded
 from the `LLVM releases web site <http://llvm.org/releases/>`_.
@@ -18,302 +18,261 @@ from the `LLVM releases web site <http://llvm.org/releases/>`_.
 For more information about LLVM, including information about the latest
 release, please check out the `main LLVM web site <http://llvm.org/>`_.  If you
 have questions or comments, the `LLVM Developer's Mailing List
-<http://lists.cs.uiuc.edu/mailman/listinfo/llvmdev>`_ is a good place to send
+<http://lists.llvm.org/mailman/listinfo/llvm-dev>`_ is a good place to send
 them.
 
 Non-comprehensive list of changes in this release
 =================================================
+* With this release, the minimum Windows version required for running LLVM is
+  Windows 7. Earlier versions, including Windows Vista and XP are no longer
+  supported.
+
+* With this release, the autoconf build system is deprecated. It will be removed
+  in the 3.9 release. Please migrate to using CMake. For more information see:
+  `Building LLVM with CMake <CMake.html>`_
+
+* We have documented our C API stability guarantees for both development and
+  release branches, as well as documented how to extend the C API. Please see
+  the `developer documentation <DeveloperPolicy.html#c-api-changes>`_ for more
+  information.
+
+* The C API function ``LLVMLinkModules`` is deprecated. It will be removed in the
+  3.9 release. Please migrate to ``LLVMLinkModules2``. Unlike the old function the
+  new one
+
+   * Doesn't take an unused parameter.
+   * Destroys the source instead of only damaging it.
+   * Does not record a message. Use the diagnostic handler instead.
+
+* The C API functions ``LLVMParseBitcode``, ``LLVMParseBitcodeInContext``,
+  ``LLVMGetBitcodeModuleInContext`` and ``LLVMGetBitcodeModule`` have been deprecated.
+  They will be removed in 3.9. Please migrate to the versions with a 2 suffix.
+  Unlike the old ones the new ones do not record a diagnostic message. Use
+  the diagnostic handler instead.
+
+* The deprecated C APIs ``LLVMGetBitcodeModuleProviderInContext`` and
+  ``LLVMGetBitcodeModuleProvider`` have been removed.
+
+* The deprecated C APIs ``LLVMCreateExecutionEngine``, ``LLVMCreateInterpreter``,
+  ``LLVMCreateJITCompiler``, ``LLVMAddModuleProvider`` and ``LLVMRemoveModuleProvider``
+  have been removed.
+
+* With this release, the C API headers have been reorganized to improve build
+  time. Type specific declarations have been moved to Type.h, and error
+  handling routines have been moved to ErrorHandling.h. Both are included in
+  Core.h so nothing should change for projects directly including the headers,
+  but transitive dependencies may be affected.
+
+* llvm-ar now supports thin archives.
+
+* llvm doesn't produce ``.data.rel.ro.local`` or ``.data.rel`` sections anymore.
+
+* Aliases to ``available_externally`` globals are now rejected by the verifier.
+
+* The IR Linker has been split into ``IRMover`` that moves bits from one module to
+  another and Linker proper that decides what to link.
+
+* Support for dematerializing has been dropped.
+
+* ``RegisterScheduler::setDefault`` was removed. Targets that used to call into the
+  command line parser to set the ``DAGScheduler``, and that don't have enough
+  control with ``setSchedulingPreference``, should look into overriding the
+  ``SubTargetHook`` "``getDAGScheduler()``".
+
+* ``ilist_iterator<T>`` no longer has implicit conversions to and from ``T*``,
+  since ``ilist_iterator<T>`` may be pointing at the sentinel (which is usually
+  not of type ``T`` at all).  To convert from an iterator ``I`` to a pointer,
+  use ``&*I``; to convert from a pointer ``P`` to an iterator, use
+  ``P->getIterator()``.  Alternatively, explicit conversions via
+  ``static_cast<T>(U)`` are still available.
+
+* ``ilist_node<T>::getNextNode()`` and ``ilist_node<T>::getPrevNode()`` now
+  fail at compile time when the node cannot access its parent list.
+  Previously, when the sentinel was was an ``ilist_half_node<T>``, this API
+  could return the sentinel instead of ``nullptr``.  Frustrated callers should
+  be updated to use ``iplist<T>::getNextNode(T*)`` instead.  Alternatively, if
+  the node ``N`` is guaranteed not to be the last in the list, it is safe to
+  call ``&*++N->getIterator()`` directly.
+
+* The `Kaleidoscope tutorials <tutorial/index.html>`_ have been updated to use
+  the ORC JIT APIs.
+
+* ORC now has a basic set of C bindings.
+
+* Optional support for linking clang and the LLVM tools with a single libLLVM
+  shared library. To enable this, pass ``-DLLVM_LINK_LLVM_DYLIB=ON`` to CMake.
+  See `Building LLVM with CMake`_ for more details.
+
+* The optimization to move the prologue and epilogue of functions in colder
+  code path (shrink-wrapping) is now enabled by default.
+
+* A new target-independent gcc-compatible emulated Thread Local Storage mode
+  is added.  When ``-femultated-tls`` flag is used, all accesses to TLS
+  variables are converted to calls to ``__emutls_get_address`` in the runtime
+  library.
+
+* MSVC-compatible exception handling has been completely overhauled. New
+  instructions have been introduced to facilitate this:
+  `New exception handling instructions <ExceptionHandling.html#new-exception-handling-instructions>`_. 
+  While we have done our best to test this feature thoroughly, it would
+  not be completely surprising if there were a few lingering issues that
+  early adopters might bump into.
+
+
+Changes to the ARM Backends
+---------------------------
+
+During this release the AArch64 target has:
+
+* Added support for more sanitizers (MSAN, TSAN) and made them compatible with
+  all VMA kernel configurations (currently tested on 39 and 42 bits).
+* Gained initial LLD support in the new ELF back-end
+* Extended the Load/Store optimiser and cleaned up some of the bad decisions
+  made earlier.
+* Expanded LLDB support, including watchpoints, native building, Renderscript,
+  LLDB-server, debugging 32-bit applications.
+* Added support for the ``Exynos M1`` chip.
+
+During this release the ARM target has:
+
+* Gained massive performance improvements on embedded benchmarks due to finally
+  running the stride vectorizer in full form, incrementing the performance gains
+  that we already had in the previous releases with limited stride vectorization.
+* Expanded LLDB support, including watchpoints, unwind tables
+* Extended the Load/Store optimiser and cleaned up some of the bad decisions
+  made earlier.
+* Simplified code generation for global variable addresses in ELF, resulting in
+  a significant (4% in Chromium) reduction in code size.
+* Gained some additional code size improvements, though there's still a long road
+  ahead, especially for older cores.
+* Added some EABI floating point comparison functions to Compiler-RT
+* Added support for Windows+GNU triple, ``+features`` in ``-mcpu``/``-march`` options.
+
 
 Changes to the MIPS Target
 --------------------------
 
-* A large number of bugs have been fixed for big-endian Mips targets using the
-  N32 and N64 ABI's. Please note that some of these bugs will still affect
-  LLVM-IR generated by LLVM 3.5 since correct code generation depends on
-  appropriate usage of the ``inreg``, ``signext``, and ``zeroext`` attributes
-  on all function arguments and returns.
+During this release the MIPS target has:
 
-* The registers used to return a structure containing a single 128-bit floating
-  point member on the N32/N64 ABI's have been changed from those specified by
-  the ABI documentation to match those used by GCC. The documentation specifies
-  that ``$f0`` and ``$f2`` should be used but GCC has used ``$f0`` and ``$f1``
-  for many years.
+* Significantly extended support for the Integrated Assembler. See below for
+  more information
+* Added support for the ``P5600`` processor.
+* Added support for the ``interrupt`` attribute for MIPS32R2 and later. This
+  attribute will generate a function which can be used as a interrupt handler
+  on bare metal MIPS targets using the static relocation model.
+* Added support for the ``ERETNC`` instruction found in MIPS32R5 and later.
+* Added support for OpenCL. See http://portablecl.org/.
 
-* Returning a zero-byte struct no longer causes incorrect code generation when
-  using the O32 ABI.
+* Address spaces 1 to 255 are now reserved for software use and conversions
+  between them are no-op casts.
 
-* Passing structures of less than 32-bits using the O32 ABI on a big-endian
-  target has been fixed.
+* Removed the ``mips16`` value for the ``-mcpu`` option since it is an :abbr:`ASE
+  (Application Specific Extension)` and not a processor. If you were using this,
+  please specify another CPU and use ``-mips16`` to enable MIPS16.
+* Removed ``copy_u.w`` from 32-bit MSA and ``copy_u.d`` from 64-bit MSA since
+  they have been removed from the MSA specification due to forward compatibility
+  issues.  For example, 32-bit MSA code containing ``copy_u.w`` would behave
+  differently on a 64-bit processor supporting MSA. The corresponding intrinsics
+  are still available and may expand to ``copy_s.[wd]`` where this is
+  appropriate for forward compatibility purposes.
+* Relaxed the ``-mnan`` option to allow ``-mnan=2008`` on MIPS32R2/MIPS64R2 for
+  compatibility with GCC.
+* Made MIPS64R6 the default CPU for 64-bit Android triples.
 
-* The exception personality has been changed for 64-bit Mips targets to
-  eliminate warnings about relocations in a read-only section.
+The MIPS target has also fixed various bugs including the following notable
+fixes:
 
-* Incorrect usage of odd-numbered single-precision floating point registers
-  has been fixed when the fastcc calling convention is used with 64-bit FPU's
-  and -mno-odd-spreg.
+* Fixed reversed operands on ``mthi``/``mtlo`` in the DSP :abbr:`ASE
+  (Application Specific Extension)`.
+* The code generator no longer uses ``jal`` for calls to absolute immediate
+  addresses.
+* Disabled fast instruction selection on MIPS32R6 and MIPS64R6 since this is not
+  yet supported.
+* Corrected addend for ``R_MIPS_HI16`` and ``R_MIPS_PCHI16`` in MCJIT
+* The code generator no longer crashes when handling subregisters of an 64-bit
+  FPU register with undefined value.
+* The code generator no longer attempts to use ``$zero`` for operands that do
+  not permit ``$zero``.
+* Corrected the opcode used for ``ll``/``sc`` when using MIPS32R6/MIPS64R6 and
+  the Integrated Assembler.
+* Added support for atomic load and atomic store.
+* Corrected debug info when dynamically re-aligning the stack.
 
-* For inline assembly, the 'z' print-modifier print modifier can now be used on
-  non-immediate values.
+We have made a large number of improvements to the integrated assembler for
+MIPS. In this release, the integrated assembler isn't quite production-ready
+since there are a few known issues related to bare-metal support, checking
+immediates on instructions, and the N32/N64 ABI's. However, the current support
+should be sufficient for many users of the O32 ABI, particularly those targeting
+MIPS32 on Linux or bare-metal MIPS32.
 
-* Attempting to disassemble l[wd]c[23], s[wd]c[23], cache, and pref no longer
-  triggers an assertion.
-
-Non-comprehensive list of changes in 3.5
-========================================
-
-* All backends have been changed to use the MC asm printer and support for the
-  non MC one has been removed.
-
-* Clang can now successfully self-host itself on Linux/Sparc64 and on
-  FreeBSD/Sparc64.
-
-* LLVM now assumes the assembler supports ``.loc`` for generating debug line
-  numbers. The old support for printing the debug line info directly was only
-  used by ``llc`` and has been removed.
-
-* All inline assembly is parsed by the integrated assembler when it is enabled.
-  Previously this was only the case for object-file output. It is now the case
-  for assembly output as well. The integrated assembler can be disabled with
-  the ``-no-integrated-as`` option.
-
-* llvm-ar now handles IR files like regular object files. In particular, a
-  regular symbol table is created for symbols defined in IR files, including
-  those in file scope inline assembly.
-
-* LLVM now always uses cfi directives for producing most stack
-  unwinding information.
-
-* The prefix for loop vectorizer hint metadata has been changed from
-  ``llvm.vectorizer`` to ``llvm.loop.vectorize``.  In addition,
-  ``llvm.vectorizer.unroll`` metadata has been renamed
-  ``llvm.loop.interleave.count``.
-
-* Some backends previously implemented Atomic NAND(x,y) as ``x & ~y``. Now 
-  all backends implement it as ``~(x & y)``, matching the semantics of GCC 4.4
-  and later.
-
-.. NOTE
-   For small 1-3 sentence descriptions, just add an entry at the end of
-   this list. If your description won't fit comfortably in one bullet
-   point (e.g. maybe you would like to give an example of the
-   functionality, or simply have a lot to talk about), see the `NOTE` below
-   for adding a new subsection.
-
-* ... next change ...
-
-.. NOTE
-   If you would like to document a larger change, then you can add a
-   subsection about it right here. You can copy the following boilerplate
-   and un-indent it (the indentation causes it to be inside this comment).
-
-   Special New Feature
-   -------------------
-
-   Makes programs 10x faster by doing Special New Thing.
-
-Changes to the ARM Backend
---------------------------
-
-Since release 3.3, a lot of new features have been included in the ARM
-back-end but weren't production ready (ie. well tested) on release 3.4.
-Just after the 3.4 release, we started heavily testing two major parts
-of the back-end: the integrated assembler (IAS) and the ARM exception
-handling (EHABI), and now they are enabled by default on LLVM/Clang.
-
-The IAS received a lot of GNU extensions and directives, as well as some
-specific pre-UAL instructions. Not all remaining directives will be
-implemented, as we made judgement calls on the need versus the complexity,
-and have chosen simplicity and future compatibility where hard decisions
-had to be made. The major difference is, as stated above, the IAS validates
-all inline ASM, not just for object emission, and that cause trouble with
-some uses of inline ASM as pre-processor magic.
-
-So, while the IAS is good enough to compile large projects (including most
-of the Linux kernel), there are a few things that we can't (and probably
-won't) do. For those cases, please use ``-fno-integrated-as`` in Clang.
-
-Exception handling is another big change. After extensive testing and
-changes to cooperate with Dwarf unwinding, EHABI is enabled by default.
-The options ``-arm-enable-ehabi`` and ``-arm-enable-ehabi-descriptors``,
-which were used to enable EHABI in the previous releases, are removed now.
-
-This means all ARM code will emit EH unwind tables, or CFI unwinding (for
-debug/profiling), or both. To avoid run-time inconsistencies, C code will
-also emit EH tables (in case they interoperate with C++ code), as is the
-case for other architectures (ex. x86_64).
-
-Changes to the MIPS Target
---------------------------
-
-There has been a large amount of improvements to the MIPS target which can be
-broken down into subtarget, ABI, and Integrated Assembler changes.
-
-Subtargets
-^^^^^^^^^^
-
-Added support for Release 6 of the MIPS32 and MIPS64 architecture (MIPS32r6
-and MIPS64r6). Release 6 makes a number of significant changes to the MIPS32
-and MIPS64 architectures. For example, FPU registers are always 64-bits wide,
-FPU NaN values conform to IEEE 754 (2008), and the unaligned memory instructions
-(such as lwl and lwr) have been replaced with a requirement for ordinary memory
-operations to support unaligned operations. Full details of MIPS32 and MIPS64
-Release 6 can be found on the `MIPS64 Architecture page at Imagination
-Technologies <http://www.imgtec.com/mips/architectures/mips64.asp>`_.
-
-This release also adds experimental support for MIPS-IV, cnMIPS, and Cavium
-Octeon CPU's.
-
-Support for the MIPS SIMD Architecture (MSA) has been improved to support MSA
-on MIPS64.
-
-Support for IEEE 754 (2008) NaN values has been added.
-
-ABI and ABI extensions
-^^^^^^^^^^^^^^^^^^^^^^
-
-There has also been considerable ABI work since the 3.4 release. This release
-adds support for the N32 ABI, the O32-FPXX ABI Extension, the O32-FP64 ABI
-Extension, and the O32-FP64A ABI Extension.
-
-The N32 ABI is an existing ABI that has now been implemented in LLVM. It is a
-64-bit ABI that is similar to N64 but retains 32-bit pointers. N64 remains the
-default 64-bit ABI in LLVM. This differs from GCC where N32 is the default
-64-bit ABI.
-
-The O32-FPXX ABI Extension is 100% compatible with the O32-ABI and the O32-FP64
-ABI Extension and may be linked with either but may not be linked with both of
-these simultaneously. It extends the O32 ABI to allow the same code to execute
-without modification on processors with 32-bit FPU registers as well as 64-bit
-FPU registers. The O32-FPXX ABI Extension is enabled by default for the O32 ABI
-on mips*-img-linux-gnu and mips*-mti-linux-gnu triples and is selected with
--mfpxx. It is expected that future releases of LLVM will enable the FPXX
-Extension for O32 on all triples.
-
-The O32-FP64 ABI Extension is an extension to the O32 ABI to fully exploit FPU's
-with 64-bit registers and is enabled with -mfp64. This replaces an undocumented
-and unsupported O32 extension which was previously enabled with -mfp64. It is
-100% compatible with the O32-FPXX ABI Extension.
-
-The O32-FP64A ABI Extension is a restricted form of the O32-FP64 ABI Extension
-which allows interlinking with unmodified binaries that use the base O32 ABI.
-
-Integrated Assembler
-^^^^^^^^^^^^^^^^^^^^
-
-The MIPS Integrated Assembler has undergone a substantial overhaul including a
-rewrite of the assembly parser. It's not ready for general use in this release
-but adventurous users may wish to enable it using ``-fintegrated-as``.
-
-In this release, the integrated assembler supports the majority of MIPS-I,
-MIPS-II, MIPS-III, MIPS-IV, MIPS-V, MIPS32, MIPS32r2, MIPS32r6, MIPS64,
-MIPS64r2, and MIPS64r6 as well as some of the Application Specific Extensions
-such as MSA. It also supports several of the MIPS specific assembler directives
-such as ``.set``, ``.module``, ``.cpload``, etc.
-
-Changes to the AArch64 Target
------------------------------
-
-The AArch64 target in LLVM 3.5 is based on substantially different code to the
-one in LLVM 3.4, having been created as the result of merging code released by
-Apple for targetting iOS with the previously existing backend.
-
-We hope the result is a general improvement in the project. Particularly notable
-changes are:
-
-* We should produce faster code, having combined optimisations and ideas from
-  both sources in the final backend.
-* We have a FastISel for AArch64, which should compile time for debug builds (at
-  -O0).
-* We can now target iOS platforms (using the triple ``arm64-apple-ios7.0``).
-
-Background
-^^^^^^^^^^
-
-During the 3.5 release cycle, Apple released the source used to generate 64-bit
-ARM programs on iOS platforms. This took the form of a separate backend that had
-been developed in parallel to, and largely isolation from, the existing
-code.
-
-We decided that maintaining the two backends indefinitely was not an option,
-since their features almost entirely overlapped. However, the implementation
-details in both were different enough that any merge had to firmly start with
-one backend as the core and cherry-pick the best features and optimisations from
-the other.
-
-After discussion, we decided to start with the Apple backend (called ARM64 at
-the time) since it was older, more thoroughly tested in production use, and had
-fewer idiosyncracies in the implementation details.
-
-Many people from across the community worked throughout April and May to ensure
-that this merge destination had all the features we wanted, from both
-sources. In many cases we could simply copy code across; others needed heavy
-modification for the new host; in the most worthwhile, we looked at both
-implementations and combined the best features of each in an entirely new way.
-
-We had also decided that the name of the combined backend should be AArch64,
-following ARM's official documentation. So, at the end of May the old
-AArch64 directory was removed, and ARM64 renamed into its place.
+If you would like to try the integrated assembler, please use
+``-fintegrated-as``.
 
 Changes to the PowerPC Target
 -----------------------------
 
-The PowerPC 64-bit Little Endian subtarget (powerpc64le-unknown-linux-gnu) is
-now fully supported.  This includes support for the Altivec instruction set.
+There are numerous improvements to the PowerPC target in this release:
 
-The Power Architecture 64-Bit ELFv2 ABI Specification is now supported, and
-is the default ABI for Little Endian.  The ELFv1 ABI remains the default ABI
-for Big Endian.  Currently, it is not possible to override these defaults.
-That capability will be available (albeit not recommended) in a future release.
+* Shrink wrapping optimization has been enabled for PowerPC Little Endian
 
-Links to the ELFv2 ABI specification and to the Power ISA Version 2.07
-specification may be found `here <https://www-03.ibm.com/technologyconnect/tgcm/TGCMServlet.wss?alias=OpenPOWER&linkid=1n0000>`_ (free registration required).
-Efforts are underway to move this to a location that doesn't require
-registration, but the planned site isn't ready yet.
+* Direct move instructions are used when converting scalars to vectors
 
-Experimental support for the VSX instruction set introduced with ISA 2.06
-is now available using the ``-mvsx`` switch.  Work remains on this, so it
-is not recommended for production use.  VSX is disabled for Little Endian
-regardless of this switch setting.
+* Thread Sanitizer (TSAN) is now supported for PowerPC
 
-Load/store cost estimates have been improved.
+* New MI peephole pass to clean up redundant XXPERMDI instructions  
 
-Constant hoisting has been enabled.
+* Add branch hints to highly biased branch instructions (code reaching
+  unreachable terminators and exceptional control flow constructs)
 
-Global named register support has been enabled.
+* Promote boolean return values to integer to prevent excessive usage of
+  condition registers
 
-Initial support for PIC code has been added for the 32-bit ELF subtarget.
-Further support will be available in a future release.
+* Additional vector APIs for vector comparisons and vector merges have been
+  added to altivec.h
+
+* Many bugs have been identified and fixed
 
 
-Changes to CMake build system
+Changes to the X86 Target
 -----------------------------
 
-* Building and installing LLVM, Clang and lld sphinx documentation can now be
-  done in CMake builds. If ``LLVM_ENABLE_SPHINX`` is enabled the
-  "``docs-<project>-html``" and "``docs-<project>-man``" targets (e.g.
-  ``docs-llvm-html``) become available which can be invoked directly (e.g.
-  ``make docs-llvm-html``) to build only the relevant sphinx documentation. If
-  ``LLVM_BUILD_DOCS`` is enabled then the sphinx documentation will also be
-  built as part of the normal build. Enabling this variable also means that if
-  the ``install`` target is invoked then the built documentation will be
-  installed.  See :ref:`LLVM-specific variables`.
+* TLS is enabled for Cygwin as emutls.
 
-* Both the Autoconf/Makefile and CMake build systems now generate
-  ``LLVMConfig.cmake`` (and other files) to export installed libraries. This
-  means that projects using CMake to build against LLVM libraries can now build
-  against an installed LLVM built by the Autoconf/Makefile system. See
-  :ref:`Embedding LLVM in your project` for details.
+* Smaller code for materializing 32-bit 1 and -1 constants at ``-Os``.
 
-* Use of ``llvm_map_components_to_libraries()`` by external projects is
-  deprecated and the new ``llvm_map_components_to_libnames()`` should be used
-  instead.
+* More efficient code for wide integer compares. (E.g. 64-bit compares
+  on 32-bit targets.)
 
-External Open Source Projects Using LLVM 3.5
+* Tail call support for ``thiscall``, ``stdcall``, ``vectorcall``, and
+  ``fastcall`` functions.
+
+Changes to the Hexagon Target
+-----------------------------
+
+In addition to general code size and performance improvements, Hexagon target
+now has basic support for Hexagon V60 architecture and Hexagon Vector
+Extensions (HVX).
+
+Changes to the AVR Target
+-------------------------
+
+Slightly less than half of the AVR backend has been merged in at this point. It is still
+missing a number large parts which cause it to be unusable, but is well on the
+road to being completely merged and workable.
+
+Changes to the OCaml bindings
+-----------------------------
+
+* The ocaml function link_modules has been replaced with link_modules' which
+  uses LLVMLinkModules2.
+
+
+External Open Source Projects Using LLVM 3.8
 ============================================
 
 An exciting aspect of LLVM is that it is used as an enabling technology for
 a lot of other language and tools projects. This section lists some of the
-projects that have already been updated to work with LLVM 3.5.
+projects that have already been updated to work with LLVM 3.8.
 
 LDC - the LLVM-based D compiler
 -------------------------------
@@ -326,61 +285,8 @@ to concurrency and offers many classical paradigms.
 
 `LDC <http://wiki.dlang.org/LDC>`_ uses the frontend from the reference compiler
 combined with LLVM as backend to produce efficient native code. LDC targets
-x86/x86_64 systems like Linux, OS X, FreeBSD and Windows and also Linux/PPC64.
-Ports to other architectures like ARM, AArch64 and MIPS64 are underway.
-
-Portable Computing Language (pocl)
-----------------------------------
-
-In addition to producing an easily portable open source OpenCL
-implementation, another major goal of `pocl <http://portablecl.org/>`_
-is improving performance portability of OpenCL programs with
-compiler optimizations, reducing the need for target-dependent manual
-optimizations. An important part of pocl is a set of LLVM passes used to
-statically parallelize multiple work-items with the kernel compiler, even in
-the presence of work-group barriers. This enables static parallelization of
-the fine-grained static concurrency in the work groups in multiple ways. 
-
-TTA-based Co-design Environment (TCE)
--------------------------------------
-
-`TCE <http://tce.cs.tut.fi/>`_ is a toolset for designing new
-exposed datapath processors based on the Transport triggered architecture (TTA). 
-The toolset provides a complete co-design flow from C/C++
-programs down to synthesizable VHDL/Verilog and parallel program binaries.
-Processor customization points include the register files, function units,
-supported operations, and the interconnection network.
-
-TCE uses Clang and LLVM for C/C++/OpenCL C language support, target independent 
-optimizations and also for parts of code generation. It generates
-new LLVM-based code generators "on the fly" for the designed processors and
-loads them in to the compiler backend as runtime libraries to avoid
-per-target recompilation of larger parts of the compiler chain. 
-
-ISPC
-----
-
-`ISPC <http://ispc.github.io/>`_ is a C-based language based on the SPMD
-(single program, multiple data) programming model that generates efficient
-SIMD code for modern processors without the need for complex analysis and
-autovectorization. The language exploits the concept of “varying” data types,
-which ensure vector-friendly data layout, explicit vectorization and compact
-representation of the program. The project uses the LLVM infrastructure for
-optimization and code generation.
-
-Likely
-------
-
-`Likely <http://www.liblikely.org>`_ is an embeddable just-in-time Lisp for
-image recognition and heterogenous architectures. Algorithms are just-in-time
-compiled using LLVM’s MCJIT infrastructure to execute on single or
-multi-threaded CPUs and potentially OpenCL SPIR or CUDA enabled GPUs. Likely
-exploits the observation that while image processing and statistical learning
-kernels must be written generically to handle any matrix datatype, at runtime
-they tend to be executed repeatedly on the same type. Likely also seeks to
-explore new optimizations for statistical learning algorithms by moving them
-from an offline model generation step to a compile-time simplification of a
-function (the learning algorithm) with constant arguments (the training set).
+x86/x86_64 systems like Linux, OS X and Windows and also PowerPC (32/64 bit)
+and ARM. Ports to other architectures like AArch64 and MIPS64 are underway.
 
 
 Additional Information
@@ -395,4 +301,3 @@ going into the ``llvm/docs/`` directory in the LLVM tree.
 
 If you have any questions or comments about LLVM, please feel free to contact
 us via the `mailing lists <http://llvm.org/docs/#maillist>`_.
-

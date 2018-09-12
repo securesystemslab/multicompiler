@@ -30,6 +30,7 @@ namespace llvm {
 /// StringMapEntryBase - Shared base class of StringMapEntry instances.
 class StringMapEntryBase {
   unsigned StrLen;
+
 public:
   explicit StringMapEntryBase(unsigned Len) : StrLen(Len) {}
 
@@ -48,6 +49,7 @@ protected:
   unsigned NumItems;
   unsigned NumTombstones;
   unsigned ItemSize;
+
 protected:
   explicit StringMapImpl(unsigned itemSize)
       : TheTable(nullptr),
@@ -85,8 +87,10 @@ protected:
   /// RemoveKey - Remove the StringMapEntry for the specified key from the
   /// table, returning it.  If the key is not in the table, this returns null.
   StringMapEntryBase *RemoveKey(StringRef Key);
+
 private:
   void init(unsigned Size);
+
 public:
   static StringMapEntryBase *getTombstoneVal() {
     return (StringMapEntryBase*)-1;
@@ -111,14 +115,16 @@ public:
 /// and data.
 template<typename ValueTy>
 class StringMapEntry : public StringMapEntryBase {
-  StringMapEntry(StringMapEntry &E) LLVM_DELETED_FUNCTION;
+  StringMapEntry(StringMapEntry &E) = delete;
+
 public:
   ValueTy second;
 
   explicit StringMapEntry(unsigned strLen)
     : StringMapEntryBase(strLen), second() {}
-  StringMapEntry(unsigned strLen, ValueTy V)
-      : StringMapEntryBase(strLen), second(std::move(V)) {}
+  template <class InitTy>
+  StringMapEntry(unsigned strLen, InitTy &&V)
+      : StringMapEntryBase(strLen), second(std::forward<InitTy>(V)) {}
 
   StringRef getKey() const {
     return StringRef(getKeyData(), getKeyLength());
@@ -138,10 +144,9 @@ public:
 
   /// Create - Create a StringMapEntry for the specified key and default
   /// construct the value.
-  template<typename AllocatorTy, typename InitType>
-  static StringMapEntry *Create(StringRef Key,
-                                AllocatorTy &Allocator,
-                                InitType InitVal) {
+  template <typename AllocatorTy, typename InitType>
+  static StringMapEntry *Create(StringRef Key, AllocatorTy &Allocator,
+                                InitType &&InitVal) {
     unsigned KeyLength = Key.size();
 
     // Allocate a new item with space for the string at the end and a null
@@ -154,11 +159,12 @@ public:
       static_cast<StringMapEntry*>(Allocator.Allocate(AllocSize,Alignment));
 
     // Default construct the value.
-    new (NewItem) StringMapEntry(KeyLength, std::move(InitVal));
+    new (NewItem) StringMapEntry(KeyLength, std::forward<InitType>(InitVal));
 
     // Copy the string information.
     char *StrBuffer = const_cast<char*>(NewItem->getKeyData());
-    memcpy(StrBuffer, Key.data(), KeyLength);
+    if (KeyLength > 0)
+      memcpy(StrBuffer, Key.data(), KeyLength);
     StrBuffer[KeyLength] = 0;  // Null terminate for convenience of clients.
     return NewItem;
   }
@@ -170,26 +176,13 @@ public:
 
   /// Create - Create a StringMapEntry with normal malloc/free.
   template<typename InitType>
-  static StringMapEntry *Create(StringRef Key, InitType InitVal) {
+  static StringMapEntry *Create(StringRef Key, InitType &&InitVal) {
     MallocAllocator A;
-    return Create(Key, A, std::move(InitVal));
+    return Create(Key, A, std::forward<InitType>(InitVal));
   }
 
   static StringMapEntry *Create(StringRef Key) {
     return Create(Key, ValueTy());
-  }
-
-  /// GetStringMapEntryFromValue - Given a value that is known to be embedded
-  /// into a StringMapEntry, return the StringMapEntry itself.
-  static StringMapEntry &GetStringMapEntryFromValue(ValueTy &V) {
-    StringMapEntry *EPtr = 0;
-    char *Ptr = reinterpret_cast<char*>(&V) -
-                  (reinterpret_cast<char*>(&EPtr->second) -
-                   reinterpret_cast<char*>(EPtr));
-    return *reinterpret_cast<StringMapEntry*>(Ptr);
-  }
-  static const StringMapEntry &GetStringMapEntryFromValue(const ValueTy &V) {
-    return GetStringMapEntryFromValue(const_cast<ValueTy&>(V));
   }
 
   /// GetStringMapEntryFromKeyData - Given key data that is known to be embedded
@@ -217,7 +210,6 @@ public:
   }
 };
 
-
 /// StringMap - This is an unconventional map that is specialized for handling
 /// keys that are "strings", which are basically ranges of bytes. This does some
 /// funky memory allocation and hashing things to make it extremely efficient,
@@ -225,9 +217,10 @@ public:
 template<typename ValueTy, typename AllocatorTy = MallocAllocator>
 class StringMap : public StringMapImpl {
   AllocatorTy Allocator;
+
 public:
   typedef StringMapEntry<ValueTy> MapEntryTy;
-  
+
   StringMap() : StringMapImpl(static_cast<unsigned>(sizeof(MapEntryTy))) {}
   explicit StringMap(unsigned InitialSize)
     : StringMapImpl(InitialSize, static_cast<unsigned>(sizeof(MapEntryTy))) {}
@@ -238,6 +231,13 @@ public:
   StringMap(unsigned InitialSize, AllocatorTy A)
     : StringMapImpl(InitialSize, static_cast<unsigned>(sizeof(MapEntryTy))),
       Allocator(A) {}
+
+  StringMap(std::initializer_list<std::pair<StringRef, ValueTy>> List)
+      : StringMapImpl(static_cast<unsigned>(sizeof(MapEntryTy))) {
+    for (const auto &P : List) {
+      insert(P);
+    }
+  }
 
   StringMap(StringMap &&RHS)
       : StringMapImpl(std::move(RHS)), Allocator(std::move(RHS.Allocator)) {}
@@ -296,7 +296,7 @@ public:
   }
 
   ValueTy &operator[](StringRef Key) {
-    return GetOrCreateValue(Key).getValue();
+    return insert(std::make_pair(Key, ValueTy())).first->second;
   }
 
   /// count - Return 1 if the element is in the map, 0 otherwise.
@@ -363,18 +363,6 @@ public:
     NumTombstones = 0;
   }
 
-  /// GetOrCreateValue - Look up the specified key in the table.  If a value
-  /// exists, return it.  Otherwise, default construct a value, insert it, and
-  /// return.
-  template <typename InitTy>
-  MapEntryTy &GetOrCreateValue(StringRef Key, InitTy Val) {
-    return *insert(std::make_pair(Key, std::move(Val))).first;
-  }
-
-  MapEntryTy &GetOrCreateValue(StringRef Key) {
-    return GetOrCreateValue(Key, ValueTy());
-  }
-
   /// remove - Remove the specified key/value pair from the map, but do not
   /// erase it.  This aborts if the key is not in the map.
   void remove(MapEntryTy *KeyValue) {
@@ -410,11 +398,10 @@ public:
   }
 };
 
-
-template<typename ValueTy>
-class StringMapConstIterator {
+template <typename ValueTy> class StringMapConstIterator {
 protected:
   StringMapEntryBase **Ptr;
+
 public:
   typedef StringMapEntry<ValueTy> value_type;
 
@@ -471,7 +458,6 @@ public:
     return static_cast<StringMapEntry<ValueTy>*>(*this->Ptr);
   }
 };
-
 }
 
 #endif

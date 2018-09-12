@@ -58,6 +58,11 @@ LLVM_OBJ_ROOT   := $(call realpath, @abs_top_builddir@)
 PROJ_SRC_ROOT   := $(LLVM_SRC_ROOT)
 PROJ_SRC_DIR    := $(LLVM_SRC_ROOT)$(patsubst $(PROJ_OBJ_ROOT)%,%,$(PROJ_OBJ_DIR))
 
+# See: http://lists.llvm.org/pipermail/llvm-commits/Week-of-Mon-20150323/268067.html
+ifeq ($(LLVM_SRC_ROOT), $(LLVM_OBJ_ROOT))
+  $(error In-source builds are not allowed. Please configure from a separate build directory!)
+endif
+
 ifneq ($(CLANG_SRC_ROOT),)
   CLANG_SRC_ROOT:= $(call realpath, $(CLANG_SRC_ROOT))
   PROJ_SRC_DIR  := $(patsubst $(LLVM_SRC_ROOT)/tools/clang%,$(CLANG_SRC_ROOT)%,$(PROJ_SRC_DIR))
@@ -202,10 +207,8 @@ DOT        := @DOT@
 DOXYGEN    := @DOXYGEN@
 GROFF      := @GROFF@
 GZIPBIN    := @GZIPBIN@
-OCAMLC     := @OCAMLC@
-OCAMLOPT   := @OCAMLOPT@
-OCAMLDEP   := @OCAMLDEP@
-OCAMLDOC   := @OCAMLDOC@
+GO         := @GO@
+OCAMLFIND  := @OCAMLFIND@
 GAS        := @GAS@
 POD2HTML   := @POD2HTML@
 POD2MAN    := @POD2MAN@
@@ -216,6 +219,9 @@ HAVE_LIBZ  := @HAVE_LIBZ@
 HAVE_DLOPEN := @HAVE_DLOPEN@
 HAVE_PTHREAD := @HAVE_PTHREAD@
 HAVE_TERMINFO := @HAVE_TERMINFO@
+
+HAVE_OCAMLOPT := @HAVE_OCAMLOPT@
+HAVE_OCAML_OUNIT := @HAVE_OCAML_OUNIT@
 
 LIBS       := @LIBS@
 
@@ -291,6 +297,11 @@ ENABLE_TERMINFO = @ENABLE_TERMINFO@
 # code will include expensive checks, otherwise they are excluded.
 #ENABLE_EXPENSIVE_CHECKS = 0
 @ENABLE_EXPENSIVE_CHECKS@
+
+# --enable-abi-breaking-checks : decide whether we should compile in asserts and
+# checks that make the build ABI incompatible with an llvm built without these
+# checks enabled.
+ENABLE_ABI_BREAKING_CHECKS = @ENABLE_ABI_BREAKING_CHECKS@
 
 # When DEBUG_RUNTIME is enabled, the runtime libraries will retain debug
 # symbols.
@@ -370,7 +381,6 @@ HUGE_VAL_SANITY = @HUGE_VAL_SANITY@
 
 # Bindings that we should build
 BINDINGS_TO_BUILD := @BINDINGS_TO_BUILD@
-ALL_BINDINGS      := @ALL_BINDINGS@
 OCAML_LIBDIR      := @OCAML_LIBDIR@
 
 # When compiling under Mingw/Cygwin, executables such as tblgen
@@ -386,8 +396,8 @@ endif
 BINUTILS_INCDIR := @BINUTILS_INCDIR@
 
 # Optional flags supported by the compiler
-# -Wno-missing-field-initializers
-NO_MISSING_FIELD_INITIALIZERS = @NO_MISSING_FIELD_INITIALIZERS@
+# -Wmissing-field-initializers
+MISSING_FIELD_INITIALIZERS = @MISSING_FIELD_INITIALIZERS@
 # -Wno-variadic-macros
 NO_VARIADIC_MACROS = @NO_VARIADIC_MACROS@
 # -Wcovered-switch-default
@@ -396,6 +406,8 @@ COVERED_SWITCH_DEFAULT = @COVERED_SWITCH_DEFAULT@
 NO_UNINITIALIZED = @NO_UNINITIALIZED@
 # -Wno-maybe-uninitialized
 NO_MAYBE_UNINITIALIZED = @NO_MAYBE_UNINITIALIZED@
+# -Wno-comment
+NO_COMMENT = @NO_COMMENT@
 
 # Was polly found in tools/polly?
 LLVM_HAS_POLLY = @LLVM_HAS_POLLY@

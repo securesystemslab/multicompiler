@@ -11,8 +11,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LIBS_ASMPARSER_LLTOKEN_H
-#define LIBS_ASMPARSER_LLTOKEN_H
+#ifndef LLVM_LIB_ASMPARSER_LLTOKEN_H
+#define LLVM_LIB_ASMPARSER_LLTOKEN_H
 
 namespace llvm {
 namespace lltok {
@@ -28,9 +28,8 @@ namespace lltok {
     lbrace, rbrace,    // {  }
     less, greater,     // <  >
     lparen, rparen,    // (  )
-    backslash,         // \    (not /)
     exclaim,           // !
-    hash,              // #
+    bar,               // |
 
     kw_x,
     kw_true,    kw_false,
@@ -39,8 +38,6 @@ namespace lltok {
 
     kw_private,
     kw_internal,
-    kw_linker_private,          // NOTE: deprecated, for parser compatibility
-    kw_linker_private_weak,     // NOTE: deprecated, for parser compatibility
     kw_linkonce, kw_linkonce_odr,
     kw_weak, // Used as a linkage, and a modifier for "cmpxchg".
     kw_weak_odr, kw_appending,
@@ -52,10 +49,14 @@ namespace lltok {
     kw_external, kw_thread_local,
     kw_localdynamic, kw_initialexec, kw_localexec,
     kw_zeroinitializer,
-    kw_undef, kw_null,
+    kw_undef, kw_null, kw_none,
     kw_to,
+    kw_caller,
+    kw_within,
+    kw_from,
     kw_tail,
     kw_musttail,
+    kw_notail,
     kw_target,
     kw_triple,
     kw_unwind,
@@ -85,11 +86,12 @@ namespace lltok {
     kw_inteldialect,
     kw_gc,
     kw_prefix,
+    kw_prologue,
     kw_c,
 
     kw_cc, kw_ccc, kw_fastcc, kw_coldcc,
     kw_intel_ocl_bicc,
-    kw_x86_stdcallcc, kw_x86_fastcallcc, kw_x86_thiscallcc,
+    kw_x86_stdcallcc, kw_x86_fastcallcc, kw_x86_thiscallcc, kw_x86_vectorcallcc,
     kw_arm_apcscc, kw_arm_aapcscc, kw_arm_aapcs_vfpcc,
     kw_msp430_intrcc,
     kw_ptx_kernel, kw_ptx_device,
@@ -97,16 +99,25 @@ namespace lltok {
     kw_x86_64_sysvcc, kw_x86_64_win64cc,
     kw_webkit_jscc, kw_anyregcc,
     kw_preserve_mostcc, kw_preserve_allcc,
+    kw_ghccc,
+    kw_x86_intrcc,
+    kw_hhvmcc, kw_hhvm_ccc,
+    kw_cxx_fast_tlscc,
 
     // Attributes:
     kw_attributes,
     kw_alwaysinline,
+    kw_argmemonly,
     kw_sanitize_address,
     kw_builtin,
     kw_byval,
     kw_inalloca,
     kw_cold,
+    kw_convergent,
     kw_dereferenceable,
+    kw_dereferenceable_or_null,
+    kw_inaccessiblememonly,
+    kw_inaccessiblemem_or_argmemonly,
     kw_inlinehint,
     kw_inreg,
     kw_jumptable,
@@ -119,6 +130,7 @@ namespace lltok {
     kw_noduplicate,
     kw_noimplicitfloat,
     kw_noinline,
+    kw_norecurse,
     kw_nonlazybind,
     kw_nonnull,
     kw_noredzone,
@@ -134,6 +146,7 @@ namespace lltok {
     kw_ssp,
     kw_sspreq,
     kw_sspstrong,
+    kw_safestack,
     kw_sret,
     kw_sanitize_thread,
     kw_sanitize_memory,
@@ -174,13 +187,20 @@ namespace lltok {
     kw_landingpad, kw_personality, kw_cleanup, kw_catch, kw_filter,
 
     kw_ret, kw_br, kw_switch, kw_indirectbr, kw_invoke, kw_resume,
-    kw_unreachable,
+    kw_unreachable, kw_cleanupret, kw_catchswitch, kw_catchret, kw_catchpad,
+    kw_cleanuppad,
 
     kw_alloca, kw_load, kw_store, kw_fence, kw_cmpxchg, kw_atomicrmw,
     kw_getelementptr,
 
     kw_extractelement, kw_insertelement, kw_shufflevector,
     kw_extractvalue, kw_insertvalue, kw_blockaddress,
+
+    // Metadata types.
+    kw_distinct,
+
+    // Use-list order directives.
+    kw_uselistorder, kw_uselistorder_bb,
 
     // Unsigned Valued tokens (UIntVal).
     GlobalID,          // @42
@@ -194,6 +214,13 @@ namespace lltok {
     LocalVar,          // %foo %"foo"
     MetadataVar,       // !foo
     StringConstant,    // "foo"
+    DwarfTag,          // DW_TAG_foo
+    DwarfAttEncoding,  // DW_ATE_foo
+    DwarfVirtuality,   // DW_VIRTUALITY_foo
+    DwarfLang,         // DW_LANG_foo
+    DwarfOp,           // DW_OP_foo
+    DIFlag,            // DIFlagFoo
+    DwarfMacinfo,      // DW_MACINFO_foo
 
     // Type valued tokens (TyVal).
     Type,

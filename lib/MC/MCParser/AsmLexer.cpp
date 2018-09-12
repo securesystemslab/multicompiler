@@ -21,7 +21,7 @@
 #include <cstdlib>
 using namespace llvm;
 
-AsmLexer::AsmLexer(const MCAsmInfo &_MAI) : MAI(_MAI)  {
+AsmLexer::AsmLexer(const MCAsmInfo &MAI) : MAI(MAI) {
   CurPtr = nullptr;
   isAtStartOfLine = true;
   AllowAtInIdentifier = !StringRef(MAI.getCommentString()).startswith("@");
@@ -417,7 +417,7 @@ AsmToken AsmLexer::LexQuote() {
 StringRef AsmLexer::LexUntilEndOfStatement() {
   TokStart = CurPtr;
 
-  while (!isAtStartOfComment(*CurPtr) &&    // Start of line comment.
+  while (!isAtStartOfComment(CurPtr) &&     // Start of line comment.
          !isAtStatementSeparator(CurPtr) && // End of statement marker.
          *CurPtr != '\n' && *CurPtr != '\r' &&
          (*CurPtr != 0 || CurPtr != CurBuf.end())) {
@@ -436,7 +436,8 @@ StringRef AsmLexer::LexUntilEndOfLine() {
   return StringRef(TokStart, CurPtr-TokStart);
 }
 
-const AsmToken AsmLexer::peekTok(bool ShouldSkipSpace) {
+size_t AsmLexer::peekTokens(MutableArrayRef<AsmToken> Buf,
+                            bool ShouldSkipSpace) {
   const char *SavedTokStart = TokStart;
   const char *SavedCurPtr = CurPtr;
   bool SavedAtStartOfLine = isAtStartOfLine;
@@ -446,7 +447,16 @@ const AsmToken AsmLexer::peekTok(bool ShouldSkipSpace) {
   SMLoc SavedErrLoc = getErrLoc();
 
   SkipSpace = ShouldSkipSpace;
-  AsmToken Token = LexToken();
+
+  size_t ReadCount;
+  for (ReadCount = 0; ReadCount < Buf.size(); ++ReadCount) {
+    AsmToken Token = LexToken();
+
+    Buf[ReadCount] = Token;
+
+    if (Token.is(AsmToken::Eof))
+      break;
+  }
 
   SetError(SavedErrLoc, SavedErr);
 
@@ -455,12 +465,20 @@ const AsmToken AsmLexer::peekTok(bool ShouldSkipSpace) {
   CurPtr = SavedCurPtr;
   TokStart = SavedTokStart;
 
-  return Token;
+  return ReadCount;
 }
 
-bool AsmLexer::isAtStartOfComment(char Char) {
-  // FIXME: This won't work for multi-character comment indicators like "//".
-  return Char == *MAI.getCommentString();
+bool AsmLexer::isAtStartOfComment(const char *Ptr) {
+  const char *CommentString = MAI.getCommentString();
+
+  if (CommentString[1] == '\0')
+    return CommentString[0] == Ptr[0];
+
+  // FIXME: special case for the bogus "##" comment string in X86MCAsmInfoDarwin
+  if (CommentString[1] == '#')
+    return CommentString[0] == Ptr[0];
+
+  return strncmp(Ptr, CommentString, strlen(CommentString)) == 0;
 }
 
 bool AsmLexer::isAtStatementSeparator(const char *Ptr) {
@@ -473,7 +491,7 @@ AsmToken AsmLexer::LexToken() {
   // This always consumes at least one character.
   int CurChar = getNextChar();
 
-  if (isAtStartOfComment(CurChar)) {
+  if (isAtStartOfComment(TokStart)) {
     // If this comment starts with a '#', then return the Hash token and let
     // the assembler parser see if it can be parsed as a cpp line filename
     // comment. We do this only if we are at the start of a line.

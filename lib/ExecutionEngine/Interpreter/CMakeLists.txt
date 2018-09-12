@@ -13,7 +13,7 @@ add_llvm_library(LLVMInterpreter
   )
 
 if( LLVM_ENABLE_FFI )
-  target_link_libraries( LLVMInterpreter ${FFI_LIBRARY_PATH} )
+  target_link_libraries( LLVMInterpreter PRIVATE ${FFI_LIBRARY_PATH} )
 endif()
 
 add_dependencies(LLVMInterpreter intrinsics_gen)

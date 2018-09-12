@@ -12,8 +12,8 @@
 !llvm.dbg.cu = !{!0}
 !llvm.module.flags = !{!3, !4}
 
-!0 = metadata !{i32 786449, metadata !1, i32 12, metadata !"clang version 3.4 (trunk 191846) (llvm/trunk 191866)", i1 false, metadata !"", i32 0, metadata !2, metadata !2, metadata !2, metadata !2, metadata !2, metadata !""} ; [ DW_TAG_compile_unit ] [/usr/local/google/home/echristo/tmp/foo.c] [DW_LANG_C99]
-!1 = metadata !{metadata !"foo.c", metadata !"/usr/local/google/home/echristo/tmp"}
-!2 = metadata !{}
-!3 = metadata !{i32 2, metadata !"Dwarf Version", i32 4}
-!4 = metadata !{i32 1, metadata !"Debug Info Version", i32 1}
+!0 = distinct !DICompileUnit(language: DW_LANG_C99, producer: "clang version 3.4 (trunk 191846) (llvm/trunk 191866)", isOptimized: false, emissionKind: 0, file: !1, enums: !2, retainedTypes: !2, subprograms: !2, globals: !2, imports: !2)
+!1 = !DIFile(filename: "foo.c", directory: "/usr/local/google/home/echristo/tmp")
+!2 = !{}
+!3 = !{i32 2, !"Dwarf Version", i32 4}
+!4 = !{i32 1, !"Debug Info Version", i32 3}

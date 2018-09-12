@@ -18,6 +18,7 @@
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/ilist_node.h"
 #include "llvm/IR/DebugLoc.h"
+#include "llvm/IR/SymbolTableListTraits.h"
 #include "llvm/IR/User.h"
 
 namespace llvm {
@@ -25,13 +26,17 @@ namespace llvm {
 class FastMathFlags;
 class LLVMContext;
 class MDNode;
+class BasicBlock;
+struct AAMDNodes;
 
-template<typename ValueSubClass, typename ItemParentClass>
-  class SymbolTableListTraits;
+template <>
+struct SymbolTableListSentinelTraits<Instruction>
+    : public ilist_half_embedded_sentinel_traits<Instruction> {};
 
-class Instruction : public User, public ilist_node<Instruction> {
-  void operator=(const Instruction &) LLVM_DELETED_FUNCTION;
-  Instruction(const Instruction &) LLVM_DELETED_FUNCTION;
+class Instruction : public User,
+                    public ilist_node_with_parent<Instruction, BasicBlock> {
+  void operator=(const Instruction &) = delete;
+  Instruction(const Instruction &) = delete;
 
   BasicBlock *Parent;
   DebugLoc DbgLoc;                         // 'dbg' Metadata cache.
@@ -43,7 +48,7 @@ class Instruction : public User, public ilist_node<Instruction> {
   };
 public:
   // Out of line virtual method, so the vtable, etc has a home.
-  ~Instruction();
+  ~Instruction() override;
 
   /// user_back - Specialize the methods defined in Value, as we know that an
   /// instruction can only be used by other instructions.
@@ -53,7 +58,20 @@ public:
   inline const BasicBlock *getParent() const { return Parent; }
   inline       BasicBlock *getParent()       { return Parent; }
 
-  const DataLayout *getDataLayout() const;
+  /// \brief Return the module owning the function this instruction belongs to
+  /// or nullptr it the function does not have a module.
+  ///
+  /// Note: this is undefined behavior if the instruction does not have a
+  /// parent, or the parent basic block does not have a parent function.
+  const Module *getModule() const;
+  Module *getModule();
+
+  /// \brief Return the function this instruction belongs to.
+  ///
+  /// Note: it is undefined behavior to call this on an instruction not
+  /// currently inserted into a function.
+  const Function *getFunction() const;
+  Function *getFunction();
 
   /// removeFromParent - This method unlinks 'this' from the containing basic
   /// block, but does not delete it.
@@ -63,14 +81,15 @@ public:
   /// eraseFromParent - This method unlinks 'this' from the containing basic
   /// block and deletes it.
   ///
-  void eraseFromParent();
+  /// \returns an iterator pointing to the element after the erased one
+  SymbolTableList<Instruction>::iterator eraseFromParent();
 
-  /// insertBefore - Insert an unlinked instructions into a basic block
-  /// immediately before the specified instruction.
+  /// Insert an unlinked instruction into a basic block immediately before
+  /// the specified instruction.
   void insertBefore(Instruction *InsertPos);
 
-  /// insertAfter - Insert an unlinked instructions into a basic block
-  /// immediately after the specified instruction.
+  /// Insert an unlinked instruction into a basic block immediately after the
+  /// specified instruction.
   void insertAfter(Instruction *InsertPos);
 
   /// moveBefore - Unlink this instruction from its current basic block and
@@ -90,6 +109,7 @@ public:
   bool isBinaryOp() const { return isBinaryOp(getOpcode()); }
   bool isShift() { return isShift(getOpcode()); }
   bool isCast() const { return isCast(getOpcode()); }
+  bool isFuncletPad() const { return isFuncletPad(getOpcode()); }
 
   static const char* getOpcodeName(unsigned OpCode);
 
@@ -122,15 +142,18 @@ public:
     return OpCode >= CastOpsBegin && OpCode < CastOpsEnd;
   }
 
+  /// @brief Determine if the OpCode is one of the FuncletPadInst instructions.
+  static inline bool isFuncletPad(unsigned OpCode) {
+    return OpCode >= FuncletPadOpsBegin && OpCode < FuncletPadOpsEnd;
+  }
+
   //===--------------------------------------------------------------------===//
   // Metadata manipulation.
   //===--------------------------------------------------------------------===//
 
   /// hasMetadata() - Return true if this instruction has any metadata attached
   /// to it.
-  bool hasMetadata() const {
-    return !DbgLoc.isUnknown() || hasMetadataHashEntry();
-  }
+  bool hasMetadata() const { return DbgLoc || hasMetadataHashEntry(); }
 
   /// hasMetadataOtherThanDebugLoc - Return true if this instruction has
   /// metadata attached to it other than a debug location.
@@ -155,18 +178,24 @@ public:
   /// getAllMetadata - Get all metadata attached to this Instruction.  The first
   /// element of each pair returned is the KindID, the second element is the
   /// metadata value.  This list is returned sorted by the KindID.
-  void getAllMetadata(SmallVectorImpl<std::pair<unsigned, MDNode*> > &MDs)const{
+  void
+  getAllMetadata(SmallVectorImpl<std::pair<unsigned, MDNode *>> &MDs) const {
     if (hasMetadata())
       getAllMetadataImpl(MDs);
   }
 
   /// getAllMetadataOtherThanDebugLoc - This does the same thing as
   /// getAllMetadata, except that it filters out the debug location.
-  void getAllMetadataOtherThanDebugLoc(SmallVectorImpl<std::pair<unsigned,
-                                       MDNode*> > &MDs) const {
+  void getAllMetadataOtherThanDebugLoc(
+      SmallVectorImpl<std::pair<unsigned, MDNode *>> &MDs) const {
     if (hasMetadataOtherThanDebugLoc())
       getAllMetadataOtherThanDebugLocImpl(MDs);
   }
+
+  /// getAAMetadata - Fills the AAMDNodes structure with AA metadata from
+  /// this instruction. When Merge is true, the existing AA metadata is
+  /// merged with that from this instruction providing the most-general result.
+  void getAAMetadata(AAMDNodes &N, bool Merge = false) const;
 
   /// setMetadata - Set the metadata of the specified kind to the specified
   /// node.  This updates/replaces metadata if already present, or removes it if
@@ -174,23 +203,29 @@ public:
   void setMetadata(unsigned KindID, MDNode *Node);
   void setMetadata(StringRef Kind, MDNode *Node);
 
-  /// \brief Drop unknown metadata.
+  /// Drop all unknown metadata except for debug locations.
+  /// @{
   /// Passes are required to drop metadata they don't understand. This is a
   /// convenience method for passes to do so.
-  void dropUnknownMetadata(ArrayRef<unsigned> KnownIDs);
-  void dropUnknownMetadata() {
-    return dropUnknownMetadata(ArrayRef<unsigned>());
+  void dropUnknownNonDebugMetadata(ArrayRef<unsigned> KnownIDs);
+  void dropUnknownNonDebugMetadata() {
+    return dropUnknownNonDebugMetadata(None);
   }
-  void dropUnknownMetadata(unsigned ID1) {
-    return dropUnknownMetadata(makeArrayRef(ID1));
+  void dropUnknownNonDebugMetadata(unsigned ID1) {
+    return dropUnknownNonDebugMetadata(makeArrayRef(ID1));
   }
-  void dropUnknownMetadata(unsigned ID1, unsigned ID2) {
+  void dropUnknownNonDebugMetadata(unsigned ID1, unsigned ID2) {
     unsigned IDs[] = {ID1, ID2};
-    return dropUnknownMetadata(IDs);
+    return dropUnknownNonDebugMetadata(IDs);
   }
+  /// @}
+
+  /// setAAMetadata - Sets the metadata on this instruction from the
+  /// AAMDNodes structure.
+  void setAAMetadata(const AAMDNodes &N);
 
   /// setDebugLoc - Set the debug location information for this instruction.
-  void setDebugLoc(const DebugLoc &Loc) { DbgLoc = Loc; }
+  void setDebugLoc(DebugLoc Loc) { DbgLoc = std::move(Loc); }
 
   /// getDebugLoc - Return the debug location for this node as a DebugLoc.
   const DebugLoc &getDebugLoc() const { return DbgLoc; }
@@ -220,10 +255,15 @@ public:
   /// this flag.
   void setHasAllowReciprocal(bool B);
 
-  /// Convenience function for setting all the fast-math flags on this
+  /// Convenience function for setting multiple fast-math flags on this
   /// instruction, which must be an operator which supports these flags. See
-  /// LangRef.html for the meaning of these flats.
+  /// LangRef.html for the meaning of these flags.
   void setFastMathFlags(FastMathFlags FMF);
+
+  /// Convenience function for transferring all fast-math flag values to this
+  /// instruction, which must be an operator which supports these flags. See
+  /// LangRef.html for the meaning of these flags.
+  void copyFastMathFlags(FastMathFlags FMF);
 
   /// Determine whether the unsafe-algebra flag is set.
   bool hasUnsafeAlgebra() const;
@@ -242,7 +282,7 @@ public:
 
   /// Convenience function for getting all the fast-math flags, which must be an
   /// operator which supports these flags. See LangRef.html for the meaning of
-  /// these flats.
+  /// these flags.
   FastMathFlags getFastMathFlags() const;
 
   /// Copy I's fast-math flags
@@ -258,9 +298,10 @@ private:
   // These are all implemented in Metadata.cpp.
   MDNode *getMetadataImpl(unsigned KindID) const;
   MDNode *getMetadataImpl(StringRef Kind) const;
-  void getAllMetadataImpl(SmallVectorImpl<std::pair<unsigned,MDNode*> > &)const;
-  void getAllMetadataOtherThanDebugLocImpl(SmallVectorImpl<std::pair<unsigned,
-                                           MDNode*> > &) const;
+  void
+  getAllMetadataImpl(SmallVectorImpl<std::pair<unsigned, MDNode *>> &) const;
+  void getAllMetadataOtherThanDebugLocImpl(
+      SmallVectorImpl<std::pair<unsigned, MDNode *>> &) const;
   void clearMetadataHashEntries();
 public:
   //===--------------------------------------------------------------------===//
@@ -323,6 +364,11 @@ public:
     return mayReadFromMemory() || mayWriteToMemory();
   }
 
+  /// isAtomic - Return true if this instruction has an
+  /// AtomicOrdering of unordered or higher.
+  ///
+  bool isAtomic() const;
+
   /// mayThrow - Return true if this instruction may throw an exception.
   ///
   bool mayThrow() const;
@@ -337,10 +383,23 @@ public:
   ///
   /// Note that this does not consider malloc and alloca to have side
   /// effects because the newly allocated memory is completely invisible to
-  /// instructions which don't used the returned value.  For cases where this
+  /// instructions which don't use the returned value.  For cases where this
   /// matters, isSafeToSpeculativelyExecute may be more appropriate.
   bool mayHaveSideEffects() const {
     return mayWriteToMemory() || mayThrow() || !mayReturn();
+  }
+
+  /// \brief Return true if the instruction is a variety of EH-block.
+  bool isEHPad() const {
+    switch (getOpcode()) {
+    case Instruction::CatchSwitch:
+    case Instruction::CatchPad:
+    case Instruction::CleanupPad:
+    case Instruction::LandingPad:
+      return true;
+    default:
+      return false;
+    }
   }
 
   /// clone() - Create a copy of 'this' instruction that is identical in all
@@ -423,6 +482,13 @@ public:
 #include "llvm/IR/Instruction.def"
   };
 
+  enum FuncletPadOps {
+#define  FIRST_FUNCLETPAD_INST(N)             FuncletPadOpsBegin = N,
+#define HANDLE_FUNCLETPAD_INST(N, OPC, CLASS) OPC = N,
+#define   LAST_FUNCLETPAD_INST(N)             FuncletPadOpsEnd = N+1
+#include "llvm/IR/Instruction.def"
+  };
+
   enum OtherOps {
 #define  FIRST_OTHER_INST(N)             OtherOpsBegin = N,
 #define HANDLE_OTHER_INST(N, OPC, CLASS) OPC = N,
@@ -444,7 +510,7 @@ private:
                          (V ? HasMetadataBit : 0));
   }
 
-  friend class SymbolTableListTraits<Instruction, BasicBlock>;
+  friend class SymbolTableListTraits<Instruction>;
   void setParent(BasicBlock *P);
 protected:
   // Instruction subclasses can stick up to 15 bits of stuff into the
@@ -464,8 +530,10 @@ protected:
               Instruction *InsertBefore = nullptr);
   Instruction(Type *Ty, unsigned iType, Use *Ops, unsigned NumOps,
               BasicBlock *InsertAtEnd);
-  virtual Instruction *clone_impl() const = 0;
 
+private:
+  /// Create a copy of this instruction.
+  Instruction *cloneImpl() const;
 };
 
 // Instruction* is only 4-byte aligned.

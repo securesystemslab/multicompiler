@@ -1,5 +1,5 @@
 ; RUN: opt -strip-dead-debug-info -disable-output < %s
-define i32 @foo() nounwind ssp {
+define i32 @foo() nounwind ssp !dbg !0 {
 entry:
   ret i32 0, !dbg !8
 }
@@ -7,18 +7,18 @@ entry:
 !llvm.dbg.cu = !{!2}
 !llvm.module.flags = !{!14}
 
-!0 = metadata !{i32 524334, metadata !10, metadata !1, metadata !"foo", metadata !"foo", metadata !"foo", i32 3, metadata !3, i1 false, i1 true, i32 0, i32 0, null, i1 false, i1 false, i32 ()* @foo, null, null, null, i32 0} ; [ DW_TAG_subprogram ]
-!1 = metadata !{i32 524329, metadata !10} ; [ DW_TAG_file_type ]
-!2 = metadata !{i32 524305, metadata !10, i32 12, metadata !"clang version 2.8 (trunk 112062)", i1 true, metadata !"", i32 0, metadata !11, metadata !11, metadata !12, metadata !13, null, metadata !"", i32 1} ; [ DW_TAG_compile_unit ]
-!3 = metadata !{i32 524309, metadata !10, metadata !1, metadata !"", i32 0, i64 0, i64 0, i64 0, i32 0, null, metadata !4, i32 0, null, null, null} ; [ DW_TAG_subroutine_type ] [line 0, size 0, align 0, offset 0] [from ]
-!4 = metadata !{metadata !5}
-!5 = metadata !{i32 524324, metadata !10, metadata !1, metadata !"int", i32 0, i64 32, i64 32, i64 0, i32 0, i32 5} ; [ DW_TAG_base_type ]
-!6 = metadata !{i32 524340, i32 0, metadata !1, metadata !"i", metadata !"i", metadata !"i", metadata !1, i32 2, metadata !7, i1 true, i1 true, i32 0, null} ; [ DW_TAG_variable ]
-!7 = metadata !{i32 524326, metadata !10, metadata !1, metadata !"", i32 0, i64 0, i64 0, i64 0, i32 0, metadata !5} ; [ DW_TAG_const_type ]
-!8 = metadata !{i32 3, i32 13, metadata !9, null}
-!9 = metadata !{i32 524299, metadata !10, metadata !0, i32 3, i32 11, i32 0} ; [ DW_TAG_lexical_block ]
-!10 = metadata !{metadata !"/tmp/a.c", metadata !"/Volumes/Lalgate/clean/D.CW"}
-!11 = metadata !{i32 0}
-!12 = metadata !{metadata !0}
-!13 = metadata !{metadata !6}
-!14 = metadata !{i32 1, metadata !"Debug Info Version", i32 1}
+!0 = distinct !DISubprogram(name: "foo", linkageName: "foo", line: 3, isLocal: false, isDefinition: true, virtualIndex: 6, isOptimized: false, file: !10, scope: !1, type: !3)
+!1 = !DIFile(filename: "/tmp/a.c", directory: "/Volumes/Lalgate/clean/D.CW")
+!2 = distinct !DICompileUnit(language: DW_LANG_C99, producer: "clang version 2.8 (trunk 112062)", isOptimized: true, emissionKind: 1, file: !10, enums: !11, retainedTypes: !11, subprograms: !12, globals: !13)
+!3 = !DISubroutineType(types: !4)
+!4 = !{!5}
+!5 = !DIBasicType(tag: DW_TAG_base_type, name: "int", size: 32, align: 32, encoding: DW_ATE_signed)
+!6 = !DIGlobalVariable(name: "i", linkageName: "i", line: 2, isLocal: true, isDefinition: true, scope: !1, file: !1, type: !7)
+!7 = !DIDerivedType(tag: DW_TAG_const_type, file: !10, scope: !1, baseType: !5)
+!8 = !DILocation(line: 3, column: 13, scope: !9)
+!9 = distinct !DILexicalBlock(line: 3, column: 11, file: !10, scope: !0)
+!10 = !DIFile(filename: "/tmp/a.c", directory: "/Volumes/Lalgate/clean/D.CW")
+!11 = !{}
+!12 = !{!0}
+!13 = !{!6}
+!14 = !{i32 1, !"Debug Info Version", i32 3}

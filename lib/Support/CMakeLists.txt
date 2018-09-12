@@ -1,3 +1,33 @@
+set(system_libs)
+if( NOT MSVC )
+  if( MINGW )
+    # libuuid required for FOLDERID_Profile usage in lib/Support/Windows/Path.inc.
+    set(system_libs ${system_libs} psapi shell32 ole32 uuid)
+  elseif( CMAKE_HOST_UNIX )
+    if( HAVE_LIBRT )
+      set(system_libs ${system_libs} rt)
+    endif()
+    if( HAVE_LIBDL )
+      set(system_libs ${system_libs} ${CMAKE_DL_LIBS})
+    endif()
+    if(LLVM_ENABLE_TERMINFO)
+      if(HAVE_TERMINFO)
+        set(system_libs ${system_libs} ${TERMINFO_LIBS})
+      endif()
+    endif()
+    if( LLVM_ENABLE_THREADS AND HAVE_LIBATOMIC )
+      set(system_libs ${system_libs} atomic)
+    endif()
+    if( LLVM_ENABLE_THREADS AND HAVE_LIBPTHREAD )
+      set(system_libs ${system_libs} pthread)
+    endif()
+    if ( LLVM_ENABLE_ZLIB AND HAVE_LIBZ )
+      set(system_libs ${system_libs} z)
+    endif()
+    set(system_libs ${system_libs} m)
+  endif( MINGW )
+endif( NOT MSVC )
+
 add_llvm_library(LLVMSupport
   APFloat.cpp
   APInt.cpp
@@ -8,6 +38,7 @@ add_llvm_library(LLVMSupport
   BlockFrequency.cpp
   BranchProbability.cpp
   circular_raw_ostream.cpp
+  COM.cpp
   CommandLine.cpp
   Compression.cpp
   ConvertUTF.c
@@ -29,16 +60,17 @@ add_llvm_library(LLVMSupport
   IntEqClasses.cpp
   IntervalMap.cpp
   IntrusiveRefCntPtr.cpp
-  IsInf.cpp
-  IsNAN.cpp
+  JamCRC.cpp
   LEB128.cpp
   LineIterator.cpp
   Locale.cpp
   LockFileManager.cpp
   ManagedStatic.cpp
+  MathExtras.cpp
   MemoryBuffer.cpp
   MemoryObject.cpp
   MD5.cpp
+  Options.cpp
   PluginLoader.cpp
   PrettyStackTrace.cpp
   RandomNumberGenerator.cpp
@@ -49,13 +81,15 @@ add_llvm_library(LLVMSupport
   SourceMgr.cpp
   SpecialCaseList.cpp
   Statistic.cpp
-  StreamableMemoryObject.cpp
+  StreamingMemoryObject.cpp
   StringExtras.cpp
   StringMap.cpp
   StringPool.cpp
+  StringSaver.cpp
   StringRef.cpp
-  StringRefMemoryObject.cpp
   SystemUtils.cpp
+  TargetParser.cpp
+  ThreadPool.cpp
   Timer.cpp
   ToolOutputFile.cpp
   Triple.cpp
@@ -76,7 +110,6 @@ add_llvm_library(LLVMSupport
   DynamicLibrary.cpp
   Errno.cpp
   Host.cpp
-  IncludeFile.cpp
   Memory.cpp
   Mutex.cpp
   Path.cpp
@@ -92,62 +125,12 @@ add_llvm_library(LLVMSupport
   Valgrind.cpp
   Watchdog.cpp
 
-  ADDITIONAL_HEADERS
-  Unix/Host.inc
-  Unix/Memory.inc
-  Unix/Mutex.inc
-  Unix/Path.inc
-  Unix/Process.inc
-  Unix/Program.inc
-  Unix/RWMutex.inc
-  Unix/Signals.inc
-  Unix/ThreadLocal.inc
-  Unix/TimeValue.inc
-  Unix/Watchdog.inc
-  Windows/DynamicLibrary.inc
-  Windows/Host.inc
-  Windows/Memory.inc
-  Windows/Mutex.inc
-  Windows/Path.inc
-  Windows/Process.inc
-  Windows/Program.inc
-  Windows/RWMutex.inc
-  Windows/Signals.inc
-  Windows/ThreadLocal.inc
-  Windows/TimeValue.inc
-  Windows/Watchdog.inc
+  ADDITIONAL_HEADER_DIRS
+  Unix
+  Windows
+  ${LLVM_MAIN_INCLUDE_DIR}/llvm/Support
+
+  LINK_LIBS ${system_libs}
   )
-set(system_libs)
-if( NOT MSVC )
-  if( MINGW )
-    set(system_libs ${system_libs} imagehlp psapi shell32)
-  elseif( CMAKE_HOST_UNIX )
-    if( HAVE_LIBRT )
-      set(system_libs ${system_libs} rt)
-    endif()
-    if( HAVE_LIBDL )
-      set(system_libs ${system_libs} ${CMAKE_DL_LIBS})
-    endif()
-    if(LLVM_ENABLE_TERMINFO)
-      if(HAVE_TERMINFO)
-        set(system_libs ${system_libs} ${TERMINFO_LIBS})
-      endif()
-    endif()
-    if( LLVM_ENABLE_THREADS AND HAVE_LIBPTHREAD )
-      set(system_libs ${system_libs} pthread)
-    endif()
-    if ( LLVM_ENABLE_ZLIB AND HAVE_LIBZ )
-      set(system_libs ${system_libs} z)
-    endif()
-  endif( MINGW )
-endif( NOT MSVC )
-
-
-if(POLICY CMP0022 AND BUILD_SHARED_LIBS)
-  # FIXME: Should this be really PUBLIC?
-  target_link_libraries(LLVMSupport PUBLIC ${system_libs})
-else()
-  target_link_libraries(LLVMSupport ${cmake_2_8_12_INTERFACE} ${system_libs})
-endif()
 
 set_property(TARGET LLVMSupport PROPERTY LLVM_SYSTEM_LIBS "${system_libs}")

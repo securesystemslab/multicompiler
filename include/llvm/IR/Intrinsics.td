@@ -73,6 +73,11 @@ def IntrNoReturn : IntrinsicProperty;
 // Parallels the noduplicate attribute on LLVM IR functions.
 def IntrNoDuplicate : IntrinsicProperty;
 
+// IntrConvergent - Calls to this intrinsic are convergent and may not be made
+// control-dependent on any additional values.
+// Parallels the convergent attribute on LLVM IR functions.
+def IntrConvergent : IntrinsicProperty;
+
 //===----------------------------------------------------------------------===//
 // Types used by intrinsics.
 //===----------------------------------------------------------------------===//
@@ -112,12 +117,19 @@ class LLVMMatchType<int num>
 // the intrinsic is overloaded, so the matched type should be declared as iAny.
 class LLVMExtendedType<int num> : LLVMMatchType<num>;
 class LLVMTruncatedType<int num> : LLVMMatchType<num>;
+class LLVMVectorSameWidth<int num, LLVMType elty>
+  : LLVMMatchType<num> {
+  ValueType ElTy = elty.VT;
+}
+class LLVMPointerTo<int num> : LLVMMatchType<num>;
+class LLVMVectorOfPointersToElt<int num> : LLVMMatchType<num>;
 
 // Match the type of another intrinsic parameter that is expected to be a
 // vector type, but change the element count to be half as many
 class LLVMHalfElementsVectorType<int num> : LLVMMatchType<num>;
 
 def llvm_void_ty       : LLVMType<isVoid>;
+def llvm_any_ty        : LLVMType<Any>;
 def llvm_anyint_ty     : LLVMType<iAny>;
 def llvm_anyfloat_ty   : LLVMType<fAny>;
 def llvm_anyvector_ty  : LLVMType<vAny>;
@@ -138,16 +150,20 @@ def llvm_anyptr_ty     : LLVMAnyPointerType<llvm_i8_ty>;          // (space)i8*
 def llvm_empty_ty      : LLVMType<OtherVT>;                       // { }
 def llvm_descriptor_ty : LLVMPointerType<llvm_empty_ty>;          // { }*
 def llvm_metadata_ty   : LLVMType<MetadataVT>;                    // !{...}
+def llvm_token_ty      : LLVMType<token>;                         // token
 
 def llvm_x86mmx_ty     : LLVMType<x86mmx>;
 def llvm_ptrx86mmx_ty  : LLVMPointerType<llvm_x86mmx_ty>;         // <1 x i64>*
 
-def llvm_v2i1_ty       : LLVMType<v2i1>;     //  2 x i1
-def llvm_v4i1_ty       : LLVMType<v4i1>;     //  4 x i1
-def llvm_v8i1_ty       : LLVMType<v8i1>;     //  8 x i1
-def llvm_v16i1_ty      : LLVMType<v16i1>;    // 16 x i1
-def llvm_v32i1_ty      : LLVMType<v32i1>;    // 32 x i1
-def llvm_v64i1_ty      : LLVMType<v64i1>;    // 64 x i1
+def llvm_v2i1_ty       : LLVMType<v2i1>;     //   2 x i1
+def llvm_v4i1_ty       : LLVMType<v4i1>;     //   4 x i1
+def llvm_v8i1_ty       : LLVMType<v8i1>;     //   8 x i1
+def llvm_v16i1_ty      : LLVMType<v16i1>;    //  16 x i1
+def llvm_v32i1_ty      : LLVMType<v32i1>;    //  32 x i1
+def llvm_v64i1_ty      : LLVMType<v64i1>;    //  64 x i1
+def llvm_v512i1_ty     : LLVMType<v512i1>;   // 512 x i1
+def llvm_v1024i1_ty    : LLVMType<v1024i1>;  //1024 x i1
+
 def llvm_v1i8_ty       : LLVMType<v1i8>;     //  1 x i8
 def llvm_v2i8_ty       : LLVMType<v2i8>;     //  2 x i8
 def llvm_v4i8_ty       : LLVMType<v4i8>;     //  4 x i8
@@ -155,6 +171,8 @@ def llvm_v8i8_ty       : LLVMType<v8i8>;     //  8 x i8
 def llvm_v16i8_ty      : LLVMType<v16i8>;    // 16 x i8
 def llvm_v32i8_ty      : LLVMType<v32i8>;    // 32 x i8
 def llvm_v64i8_ty      : LLVMType<v64i8>;    // 64 x i8
+def llvm_v128i8_ty     : LLVMType<v128i8>;   //128 x i8
+def llvm_v256i8_ty     : LLVMType<v256i8>;   //256 x i8
 
 def llvm_v1i16_ty      : LLVMType<v1i16>;    //  1 x i16
 def llvm_v2i16_ty      : LLVMType<v2i16>;    //  2 x i16
@@ -162,17 +180,25 @@ def llvm_v4i16_ty      : LLVMType<v4i16>;    //  4 x i16
 def llvm_v8i16_ty      : LLVMType<v8i16>;    //  8 x i16
 def llvm_v16i16_ty     : LLVMType<v16i16>;   // 16 x i16
 def llvm_v32i16_ty     : LLVMType<v32i16>;   // 32 x i16
+def llvm_v64i16_ty     : LLVMType<v64i16>;   // 64 x i16
+def llvm_v128i16_ty    : LLVMType<v128i16>;  //128 x i16
 
 def llvm_v1i32_ty      : LLVMType<v1i32>;    //  1 x i32
 def llvm_v2i32_ty      : LLVMType<v2i32>;    //  2 x i32
 def llvm_v4i32_ty      : LLVMType<v4i32>;    //  4 x i32
 def llvm_v8i32_ty      : LLVMType<v8i32>;    //  8 x i32
 def llvm_v16i32_ty     : LLVMType<v16i32>;   // 16 x i32
+def llvm_v32i32_ty     : LLVMType<v32i32>;   // 32 x i32
+def llvm_v64i32_ty     : LLVMType<v64i32>;   // 64 x i32
+
 def llvm_v1i64_ty      : LLVMType<v1i64>;    //  1 x i64
 def llvm_v2i64_ty      : LLVMType<v2i64>;    //  2 x i64
 def llvm_v4i64_ty      : LLVMType<v4i64>;    //  4 x i64
 def llvm_v8i64_ty      : LLVMType<v8i64>;    //  8 x i64
 def llvm_v16i64_ty     : LLVMType<v16i64>;   // 16 x i64
+def llvm_v32i64_ty     : LLVMType<v32i64>;   // 32 x i64
+
+def llvm_v1i128_ty     : LLVMType<v1i128>;   //  1 x i128
 
 def llvm_v2f16_ty      : LLVMType<v2f16>;    //  2 x half (__fp16)
 def llvm_v4f16_ty      : LLVMType<v4f16>;    //  4 x half (__fp16)
@@ -255,16 +281,30 @@ def int_gcwrite : Intrinsic<[],
 def int_returnaddress : Intrinsic<[llvm_ptr_ty], [llvm_i32_ty], [IntrNoMem]>;
 def int_frameaddress  : Intrinsic<[llvm_ptr_ty], [llvm_i32_ty], [IntrNoMem]>;
 def int_read_register  : Intrinsic<[llvm_anyint_ty], [llvm_metadata_ty],
-                                   [IntrNoMem], "llvm.read_register">;
+                                   [IntrReadMem], "llvm.read_register">;
 def int_write_register : Intrinsic<[], [llvm_metadata_ty, llvm_anyint_ty],
                                    [], "llvm.write_register">;
 
+// Gets the address of the local variable area. This is typically a copy of the
+// stack, frame, or base pointer depending on the type of prologue.
+def int_localaddress : Intrinsic<[llvm_ptr_ty], [], [IntrNoMem]>;
+
+// Escapes local variables to allow access from other functions.
+def int_localescape : Intrinsic<[], [llvm_vararg_ty]>;
+
+// Given a function and the localaddress of a parent frame, returns a pointer
+// to an escaped allocation indicated by the index.
+def int_localrecover : Intrinsic<[llvm_ptr_ty],
+                                 [llvm_ptr_ty, llvm_ptr_ty, llvm_i32_ty],
+                                 [IntrNoMem]>;
 // Note: we treat stacksave/stackrestore as writemem because we don't otherwise
 // model their dependencies on allocas.
 def int_stacksave     : Intrinsic<[llvm_ptr_ty]>,
                         GCCBuiltin<"__builtin_stack_save">;
 def int_stackrestore  : Intrinsic<[], [llvm_ptr_ty]>,
                         GCCBuiltin<"__builtin_stack_restore">;
+
+def int_get_dynamic_area_offset : Intrinsic<[llvm_anyint_ty]>;
 
 // IntrReadWriteArgMem is more pessimistic than strictly necessary for prefetch,
 // however it does conveniently prevent the prefetch from being reordered
@@ -277,11 +317,29 @@ def int_pcmarker      : Intrinsic<[], [llvm_i32_ty]>;
 
 def int_readcyclecounter : Intrinsic<[llvm_i64_ty]>;
 
+// The assume intrinsic is marked as arbitrarily writing so that proper
+// control dependencies will be maintained.
+def int_assume        : Intrinsic<[], [llvm_i1_ty], []>;
+
 // Stack Protector Intrinsic - The stackprotector intrinsic writes the stack
 // guard to the correct place on the stack frame.
 def int_stackprotector : Intrinsic<[], [llvm_ptr_ty, llvm_ptrptr_ty], []>;
 def int_stackprotectorcheck : Intrinsic<[], [llvm_ptrptr_ty],
                                         [IntrReadWriteArgMem]>;
+
+// A counter increment for instrumentation based profiling.
+def int_instrprof_increment : Intrinsic<[],
+                                        [llvm_ptr_ty, llvm_i64_ty,
+                                         llvm_i32_ty, llvm_i32_ty],
+                                        []>;
+
+// A call to profile runtime for value profiling of target expressions
+// through instrumentation based profiling.
+def int_instrprof_value_profile : Intrinsic<[],
+                                            [llvm_ptr_ty, llvm_i64_ty,
+                                             llvm_i64_ty, llvm_i32_ty,
+                                             llvm_i32_ty],
+                                            []>;
 
 //===------------------- Standard C Library Intrinsics --------------------===//
 //
@@ -324,6 +382,8 @@ let Properties = [IntrNoMem] in {
   def int_exp  : Intrinsic<[llvm_anyfloat_ty], [LLVMMatchType<0>]>;
   def int_exp2 : Intrinsic<[llvm_anyfloat_ty], [LLVMMatchType<0>]>;
   def int_fabs : Intrinsic<[llvm_anyfloat_ty], [LLVMMatchType<0>]>;
+  def int_minnum : Intrinsic<[llvm_anyfloat_ty], [LLVMMatchType<0>, LLVMMatchType<0>]>;
+  def int_maxnum : Intrinsic<[llvm_anyfloat_ty], [LLVMMatchType<0>, LLVMMatchType<0>]>;
   def int_copysign : Intrinsic<[llvm_anyfloat_ty],
                                [LLVMMatchType<0>, LLVMMatchType<0>]>;
   def int_floor : Intrinsic<[llvm_anyfloat_ty], [LLVMMatchType<0>]>;
@@ -332,6 +392,8 @@ let Properties = [IntrNoMem] in {
   def int_rint  : Intrinsic<[llvm_anyfloat_ty], [LLVMMatchType<0>]>;
   def int_nearbyint : Intrinsic<[llvm_anyfloat_ty], [LLVMMatchType<0>]>;
   def int_round : Intrinsic<[llvm_anyfloat_ty], [LLVMMatchType<0>]>;
+  def int_canonicalize : Intrinsic<[llvm_anyfloat_ty], [LLVMMatchType<0>],
+                                   [IntrNoMem]>;
 }
 
 // NOTE: these are internal interfaces.
@@ -359,6 +421,7 @@ let Properties = [IntrNoMem] in {
   def int_ctpop: Intrinsic<[llvm_anyint_ty], [LLVMMatchType<0>]>;
   def int_ctlz : Intrinsic<[llvm_anyint_ty], [LLVMMatchType<0>, llvm_i1_ty]>;
   def int_cttz : Intrinsic<[llvm_anyint_ty], [LLVMMatchType<0>, llvm_i1_ty]>;
+  def int_bitreverse : Intrinsic<[llvm_anyint_ty], [LLVMMatchType<0>]>;
 }
 
 //===------------------------ Debugger Intrinsics -------------------------===//
@@ -369,9 +432,12 @@ let Properties = [IntrNoMem] in {
 // places.
 let Properties = [IntrNoMem] in {
   def int_dbg_declare      : Intrinsic<[],
-                                       [llvm_metadata_ty, llvm_metadata_ty]>;
+                                       [llvm_metadata_ty,
+                                       llvm_metadata_ty,
+                                       llvm_metadata_ty]>;
   def int_dbg_value        : Intrinsic<[],
                                        [llvm_metadata_ty, llvm_i64_ty,
+                                        llvm_metadata_ty,
                                         llvm_metadata_ty]>;
 }
 
@@ -384,6 +450,14 @@ def int_eh_typeid_for : Intrinsic<[llvm_i32_ty], [llvm_ptr_ty], [IntrNoMem]>;
 
 def int_eh_return_i32 : Intrinsic<[], [llvm_i32_ty, llvm_ptr_ty]>;
 def int_eh_return_i64 : Intrinsic<[], [llvm_i64_ty, llvm_ptr_ty]>;
+
+// eh.exceptionpointer returns the pointer to the exception caught by
+// the given `catchpad`.
+def int_eh_exceptionpointer : Intrinsic<[llvm_anyptr_ty], [llvm_token_ty],
+                                        [IntrNoMem]>;
+
+// Gets the exception code from a catchpad token. Only used on some platforms.
+def int_eh_exceptioncode : Intrinsic<[llvm_i32_ty], [llvm_token_ty], [IntrNoMem]>;
 
 // __builtin_unwind_init is an undocumented GCC intrinsic that causes all
 // callee-saved registers to be saved and restored (regardless of whether they
@@ -400,6 +474,7 @@ let Properties = [IntrNoMem] in {
 def int_eh_sjlj_functioncontext : Intrinsic<[], [llvm_ptr_ty]>;
 def int_eh_sjlj_setjmp          : Intrinsic<[llvm_i32_ty], [llvm_ptr_ty]>;
 def int_eh_sjlj_longjmp         : Intrinsic<[], [llvm_ptr_ty], [IntrNoReturn]>;
+def int_eh_sjlj_setup_dispatch  : Intrinsic<[], []>;
 
 //===---------------- Generic Variable Attribute Intrinsics----------------===//
 //
@@ -468,6 +543,10 @@ def int_invariant_end   : Intrinsic<[],
                                      llvm_ptr_ty],
                                     [IntrReadWriteArgMem, NoCapture<2>]>;
 
+def int_invariant_group_barrier : Intrinsic<[llvm_ptr_ty], 
+                                            [llvm_ptr_ty], 
+                                            [IntrNoMem]>;
+
 //===------------------------ Stackmap Intrinsics -------------------------===//
 //
 def int_experimental_stackmap : Intrinsic<[],
@@ -476,11 +555,29 @@ def int_experimental_stackmap : Intrinsic<[],
 def int_experimental_patchpoint_void : Intrinsic<[],
                                                  [llvm_i64_ty, llvm_i32_ty,
                                                   llvm_ptr_ty, llvm_i32_ty,
-                                                  llvm_vararg_ty]>;
+                                                  llvm_vararg_ty],
+                                                  [Throws]>;
 def int_experimental_patchpoint_i64 : Intrinsic<[llvm_i64_ty],
                                                 [llvm_i64_ty, llvm_i32_ty,
                                                  llvm_ptr_ty, llvm_i32_ty,
-                                                 llvm_vararg_ty]>;
+                                                 llvm_vararg_ty],
+                                                 [Throws]>;
+
+
+//===------------------------ Garbage Collection Intrinsics ---------------===//
+// These are documented in docs/Statepoint.rst
+
+def int_experimental_gc_statepoint : Intrinsic<[llvm_token_ty],
+                               [llvm_i64_ty, llvm_i32_ty,
+                                llvm_anyptr_ty, llvm_i32_ty,
+                                llvm_i32_ty, llvm_vararg_ty],
+                                [Throws]>;
+
+def int_experimental_gc_result   : Intrinsic<[llvm_any_ty], [llvm_token_ty],
+                                             [IntrReadMem]>;
+def int_experimental_gc_relocate : Intrinsic<[llvm_any_ty],
+                                [llvm_token_ty, llvm_i32_ty, llvm_i32_ty],
+                                [IntrReadMem]>;
 
 //===-------------------------- Other Intrinsics --------------------------===//
 //
@@ -528,6 +625,34 @@ def int_convertuu  : Intrinsic<[llvm_anyint_ty],
 def int_clear_cache : Intrinsic<[], [llvm_ptr_ty, llvm_ptr_ty],
                                 [], "llvm.clear_cache">;
 
+//===-------------------------- Masked Intrinsics -------------------------===//
+//
+def int_masked_store : Intrinsic<[], [llvm_anyvector_ty, LLVMPointerTo<0>,
+                                      llvm_i32_ty,
+                                      LLVMVectorSameWidth<0, llvm_i1_ty>],
+                                 [IntrReadWriteArgMem]>;
+
+def int_masked_load  : Intrinsic<[llvm_anyvector_ty],
+                                 [LLVMPointerTo<0>, llvm_i32_ty,
+                                  LLVMVectorSameWidth<0, llvm_i1_ty>, LLVMMatchType<0>],
+                                 [IntrReadArgMem]>;
+
+def int_masked_gather: Intrinsic<[llvm_anyvector_ty],
+                                 [LLVMVectorOfPointersToElt<0>, llvm_i32_ty,
+                                  LLVMVectorSameWidth<0, llvm_i1_ty>,
+                                  LLVMMatchType<0>],
+                                 [IntrReadArgMem]>;
+
+def int_masked_scatter: Intrinsic<[],
+                                  [llvm_anyvector_ty,
+                                   LLVMVectorOfPointersToElt<0>, llvm_i32_ty,
+                                   LLVMVectorSameWidth<0, llvm_i1_ty>],
+                                  [IntrReadWriteArgMem]>;
+
+// Intrinsics to support bit sets.
+def int_bitset_test : Intrinsic<[llvm_i1_ty], [llvm_ptr_ty, llvm_metadata_ty],
+                                [IntrNoMem]>;
+
 //===----------------------------------------------------------------------===//
 // Target-specific intrinsics
 //===----------------------------------------------------------------------===//
@@ -540,4 +665,7 @@ include "llvm/IR/IntrinsicsXCore.td"
 include "llvm/IR/IntrinsicsHexagon.td"
 include "llvm/IR/IntrinsicsNVVM.td"
 include "llvm/IR/IntrinsicsMips.td"
-include "llvm/IR/IntrinsicsR600.td"
+include "llvm/IR/IntrinsicsAMDGPU.td"
+include "llvm/IR/IntrinsicsBPF.td"
+include "llvm/IR/IntrinsicsSystemZ.td"
+include "llvm/IR/IntrinsicsWebAssembly.td"

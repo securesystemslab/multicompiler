@@ -57,6 +57,7 @@ class COFFAsmParser : public MCAsmParserExtension {
     addDirectiveHandler<&COFFAsmParser::ParseDirectiveEndef>(".endef");
     addDirectiveHandler<&COFFAsmParser::ParseDirectiveSecRel32>(".secrel32");
     addDirectiveHandler<&COFFAsmParser::ParseDirectiveSecIdx>(".secidx");
+    addDirectiveHandler<&COFFAsmParser::ParseDirectiveSafeSEH>(".safeseh");
     addDirectiveHandler<&COFFAsmParser::ParseDirectiveLinkOnce>(".linkonce");
 
     // Win64 EH directives.
@@ -97,11 +98,10 @@ class COFFAsmParser : public MCAsmParserExtension {
                               SectionKind::getText());
   }
   bool ParseSectionDirectiveData(StringRef, SMLoc) {
-    return ParseSectionSwitch(".data",
-                              COFF::IMAGE_SCN_CNT_INITIALIZED_DATA
-                            | COFF::IMAGE_SCN_MEM_READ
-                            | COFF::IMAGE_SCN_MEM_WRITE,
-                              SectionKind::getDataRel());
+    return ParseSectionSwitch(".data", COFF::IMAGE_SCN_CNT_INITIALIZED_DATA |
+                                           COFF::IMAGE_SCN_MEM_READ |
+                                           COFF::IMAGE_SCN_MEM_WRITE,
+                              SectionKind::getData());
   }
   bool ParseSectionDirectiveBSS(StringRef, SMLoc) {
     return ParseSectionSwitch(".bss",
@@ -118,6 +118,7 @@ class COFFAsmParser : public MCAsmParserExtension {
   bool ParseDirectiveEndef(StringRef, SMLoc);
   bool ParseDirectiveSecRel32(StringRef, SMLoc);
   bool ParseDirectiveSecIdx(StringRef, SMLoc);
+  bool ParseDirectiveSafeSEH(StringRef, SMLoc);
   bool parseCOMDATType(COFF::COMDATType &Type);
   bool ParseDirectiveLinkOnce(StringRef, SMLoc);
 
@@ -151,7 +152,7 @@ static SectionKind computeSectionKind(unsigned Flags) {
   if (Flags & COFF::IMAGE_SCN_MEM_READ &&
       (Flags & COFF::IMAGE_SCN_MEM_WRITE) == 0)
     return SectionKind::getReadOnly();
-  return SectionKind::getDataRel();
+  return SectionKind::getData();
 }
 
 bool COFFAsmParser::ParseSectionFlags(StringRef FlagsString, unsigned* Flags) {
@@ -272,7 +273,7 @@ bool COFFAsmParser::ParseDirectiveSymbolAttribute(StringRef Directive, SMLoc) {
       if (getParser().parseIdentifier(Name))
         return TokError("expected identifier in directive");
 
-      MCSymbol *Sym = getContext().GetOrCreateSymbol(Name);
+      MCSymbol *Sym = getContext().getOrCreateSymbol(Name);
 
       getStreamer().EmitSymbolAttribute(Sym, Attr);
 
@@ -359,10 +360,14 @@ bool COFFAsmParser::ParseDirectiveSection(StringRef, SMLoc) {
   COFF::COMDATType Type = (COFF::COMDATType)0;
   StringRef COMDATSymName;
   if (getLexer().is(AsmToken::Comma)) {
-    Type = COFF::IMAGE_COMDAT_SELECT_ANY;;
+    Type = COFF::IMAGE_COMDAT_SELECT_ANY;
     Lex();
 
     Flags |= COFF::IMAGE_SCN_LNK_COMDAT;
+
+    if (!getLexer().is(AsmToken::Identifier))
+      return TokError("expected comdat type such as 'discard' or 'largest' "
+                      "after protection bits");
 
     if (parseCOMDATType(Type))
       return true;
@@ -394,7 +399,7 @@ bool COFFAsmParser::ParseDirectiveDef(StringRef, SMLoc) {
   if (getParser().parseIdentifier(SymbolName))
     return TokError("expected identifier in directive");
 
-  MCSymbol *Sym = getContext().GetOrCreateSymbol(SymbolName);
+  MCSymbol *Sym = getContext().getOrCreateSymbol(SymbolName);
 
   getStreamer().BeginCOFFSymbolDef(Sym);
 
@@ -442,10 +447,25 @@ bool COFFAsmParser::ParseDirectiveSecRel32(StringRef, SMLoc) {
   if (getLexer().isNot(AsmToken::EndOfStatement))
     return TokError("unexpected token in directive");
 
-  MCSymbol *Symbol = getContext().GetOrCreateSymbol(SymbolID);
+  MCSymbol *Symbol = getContext().getOrCreateSymbol(SymbolID);
 
   Lex();
   getStreamer().EmitCOFFSecRel32(Symbol);
+  return false;
+}
+
+bool COFFAsmParser::ParseDirectiveSafeSEH(StringRef, SMLoc) {
+  StringRef SymbolID;
+  if (getParser().parseIdentifier(SymbolID))
+    return TokError("expected identifier in directive");
+
+  if (getLexer().isNot(AsmToken::EndOfStatement))
+    return TokError("unexpected token in directive");
+
+  MCSymbol *Symbol = getContext().getOrCreateSymbol(SymbolID);
+
+  Lex();
+  getStreamer().EmitCOFFSafeSEH(Symbol);
   return false;
 }
 
@@ -457,7 +477,7 @@ bool COFFAsmParser::ParseDirectiveSecIdx(StringRef, SMLoc) {
   if (getLexer().isNot(AsmToken::EndOfStatement))
     return TokError("unexpected token in directive");
 
-  MCSymbol *Symbol = getContext().GetOrCreateSymbol(SymbolID);
+  MCSymbol *Symbol = getContext().getOrCreateSymbol(SymbolID);
 
   Lex();
   getStreamer().EmitCOFFSectionIndex(Symbol);
@@ -520,7 +540,7 @@ bool COFFAsmParser::ParseSEHDirectiveStartProc(StringRef, SMLoc) {
   if (getLexer().isNot(AsmToken::EndOfStatement))
     return TokError("unexpected token in directive");
 
-  MCSymbol *Symbol = getContext().GetOrCreateSymbol(SymbolID);
+  MCSymbol *Symbol = getContext().getOrCreateSymbol(SymbolID);
 
   Lex();
   getStreamer().EmitWinCFIStartProc(Symbol);
@@ -564,7 +584,7 @@ bool COFFAsmParser::ParseSEHDirectiveHandler(StringRef, SMLoc) {
   if (getLexer().isNot(AsmToken::EndOfStatement))
     return TokError("unexpected token in directive");
 
-  MCSymbol *handler = getContext().GetOrCreateSymbol(SymbolID);
+  MCSymbol *handler = getContext().getOrCreateSymbol(SymbolID);
 
   Lex();
   getStreamer().EmitWinEHHandler(handler, unwind, except);
@@ -578,7 +598,7 @@ bool COFFAsmParser::ParseSEHDirectiveHandlerData(StringRef, SMLoc) {
 }
 
 bool COFFAsmParser::ParseSEHDirectivePushReg(StringRef, SMLoc L) {
-  unsigned Reg;
+  unsigned Reg = 0;
   if (ParseSEHRegisterNumber(Reg))
     return true;
 
@@ -591,7 +611,7 @@ bool COFFAsmParser::ParseSEHDirectivePushReg(StringRef, SMLoc L) {
 }
 
 bool COFFAsmParser::ParseSEHDirectiveSetFrame(StringRef, SMLoc L) {
-  unsigned Reg;
+  unsigned Reg = 0;
   int64_t Off;
   if (ParseSEHRegisterNumber(Reg))
     return true;
@@ -632,7 +652,7 @@ bool COFFAsmParser::ParseSEHDirectiveAllocStack(StringRef, SMLoc) {
 }
 
 bool COFFAsmParser::ParseSEHDirectiveSaveReg(StringRef, SMLoc L) {
-  unsigned Reg;
+  unsigned Reg = 0;
   int64_t Off;
   if (ParseSEHRegisterNumber(Reg))
     return true;
@@ -659,7 +679,7 @@ bool COFFAsmParser::ParseSEHDirectiveSaveReg(StringRef, SMLoc L) {
 // FIXME: This method is inherently x86-specific. It should really be in the
 // x86 backend.
 bool COFFAsmParser::ParseSEHDirectiveSaveXMM(StringRef, SMLoc L) {
-  unsigned Reg;
+  unsigned Reg = 0;
   int64_t Off;
   if (ParseSEHRegisterNumber(Reg))
     return true;

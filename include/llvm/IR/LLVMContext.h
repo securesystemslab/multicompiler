@@ -15,9 +15,9 @@
 #ifndef LLVM_IR_LLVMCONTEXT_H
 #define LLVM_IR_LLVMCONTEXT_H
 
-#include "llvm-c/Core.h"
 #include "llvm/Support/CBindingWrapping.h"
 #include "llvm/Support/Compiler.h"
+#include "llvm/Support/Options.h"
 
 namespace llvm {
 
@@ -52,7 +52,27 @@ public:
     MD_fpmath = 3,  // "fpmath"
     MD_range = 4, // "range"
     MD_tbaa_struct = 5, // "tbaa.struct"
-    MD_invariant_load = 6 // "invariant.load"
+    MD_invariant_load = 6, // "invariant.load"
+    MD_alias_scope = 7, // "alias.scope"
+    MD_noalias = 8, // "noalias",
+    MD_nontemporal = 9, // "nontemporal"
+    MD_mem_parallel_loop_access = 10, // "llvm.mem.parallel_loop_access"
+    MD_nonnull = 11, // "nonnull"
+    MD_dereferenceable = 12, // "dereferenceable"
+    MD_dereferenceable_or_null = 13, // "dereferenceable_or_null"
+    MD_make_implicit = 14, // "make.implicit"
+    MD_unpredictable = 15, // "unpredictable"
+    MD_invariant_group = 16, // "invariant.group"
+    MD_align = 17 // "align"
+  };
+
+  /// Known operand bundle tag IDs, which always have the same value.  All
+  /// operand bundle tags that LLVM has special knowledge of are listed here.
+  /// Additionally, this scheme allows LLVM to efficiently check for specific
+  /// operand bundle tags without comparing strings.
+  enum {
+    OB_deopt = 0,   // "deopt"
+    OB_funclet = 1, // "funclet"
   };
 
   /// getMDKindID - Return a unique non-zero ID for the specified metadata kind.
@@ -62,6 +82,26 @@ public:
   /// getMDKindNames - Populate client supplied SmallVector with the name for
   /// custom metadata IDs registered in this LLVMContext.
   void getMDKindNames(SmallVectorImpl<StringRef> &Result) const;
+
+  /// getOperandBundleTags - Populate client supplied SmallVector with the
+  /// bundle tags registered in this LLVMContext.  The bundle tags are ordered
+  /// by increasing bundle IDs.
+  /// \see LLVMContext::getOperandBundleTagID
+  void getOperandBundleTags(SmallVectorImpl<StringRef> &Result) const;
+
+  /// getOperandBundleTagID - Maps a bundle tag to an integer ID.  Every bundle
+  /// tag registered with an LLVMContext has an unique ID.
+  uint32_t getOperandBundleTagID(StringRef Tag) const;
+
+
+  /// Define the GC for a function
+  void setGC(const Function &Fn, std::string GCName);
+
+  /// Return the GC for a function
+  const std::string &getGC(const Function &Fn);
+
+  /// Remove the GC for a function
+  void deleteGC(const Function &Fn);
 
 
   typedef void (*InlineAsmDiagHandlerTy)(const SMDiagnostic&, void *Context,
@@ -97,12 +137,14 @@ public:
   /// setDiagnosticHandler - This method sets a handler that is invoked
   /// when the backend needs to report anything to the user.  The first
   /// argument is a function pointer and the second is a context pointer that
-  /// gets passed into the DiagHandler.
+  /// gets passed into the DiagHandler.  The third argument should be set to
+  /// true if the handler only expects enabled diagnostics.
   ///
   /// LLVMContext doesn't take ownership or interpret either of these
   /// pointers.
   void setDiagnosticHandler(DiagnosticHandlerTy DiagHandler,
-                            void *DiagContext = nullptr);
+                            void *DiagContext = nullptr,
+                            bool RespectFilters = false);
 
   /// getDiagnosticHandler - Return the diagnostic handler set by
   /// setDiagnosticHandler.
@@ -112,14 +154,16 @@ public:
   /// setDiagnosticContext.
   void *getDiagnosticContext() const;
 
-  /// diagnose - Report a message to the currently installed diagnostic handler.
+  /// \brief Report a message to the currently installed diagnostic handler.
+  ///
   /// This function returns, in particular in the case of error reporting
-  /// (DI.Severity == RS_Error), so the caller should leave the compilation
+  /// (DI.Severity == \a DS_Error), so the caller should leave the compilation
   /// process in a self-consistent state, even though the generated code
   /// need not be correct.
-  /// The diagnostic message will be implicitly prefixed with a severity
-  /// keyword according to \p DI.getSeverity(), i.e., "error: "
-  /// for RS_Error, "warning: " for RS_Warning, and "note: " for RS_Note.
+  ///
+  /// The diagnostic message will be implicitly prefixed with a severity keyword
+  /// according to \p DI.getSeverity(), i.e., "error: " for \a DS_Error,
+  /// "warning: " for \a DS_Warning, and "note: " for \a DS_Note.
   void diagnose(const DiagnosticInfo &DI);
 
   /// \brief Registers a yield callback with the given context.
@@ -157,9 +201,17 @@ public:
   void emitError(const Instruction *I, const Twine &ErrorStr);
   void emitError(const Twine &ErrorStr);
 
+  /// \brief Query for a debug option's value.
+  ///
+  /// This function returns typed data populated from command line parsing.
+  template <typename ValT, typename Base, ValT(Base::*Mem)>
+  ValT getOption() const {
+    return OptionRegistry::instance().template get<ValT, Base, Mem>();
+  }
+
 private:
-  LLVMContext(LLVMContext&) LLVM_DELETED_FUNCTION;
-  void operator=(LLVMContext&) LLVM_DELETED_FUNCTION;
+  LLVMContext(LLVMContext&) = delete;
+  void operator=(LLVMContext&) = delete;
 
   /// addModule - Register a module as being instantiated in this context.  If
   /// the context is deleted, the module will be deleted as well.

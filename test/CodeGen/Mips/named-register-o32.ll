@@ -14,4 +14,4 @@ declare i32 @llvm.read_register.i32(metadata)
 
 !llvm.named.register.$28 = !{!0}
 
-!0 = metadata !{metadata !"$28"}
+!0 = !{!"$28"}

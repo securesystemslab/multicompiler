@@ -31,7 +31,32 @@ endfunction(is_llvm_target_library)
 
 
 macro(llvm_config executable)
-  explicit_llvm_config(${executable} ${ARGN})
+  cmake_parse_arguments(ARG "USE_SHARED" "" "" ${ARGN})
+  set(link_components ${ARG_UNPARSED_ARGUMENTS})
+
+  if(USE_SHARED)
+    # If USE_SHARED is specified, then we link against libLLVM,
+    # but also against the component libraries below. This is
+    # done in case libLLVM does not contain all of the components
+    # the target requires.
+    #
+    # Strip LLVM_DYLIB_COMPONENTS out of link_components.
+    # To do this, we need special handling for "all", since that
+    # may imply linking to libraries that are not included in
+    # libLLVM.
+
+    if (DEFINED link_components AND DEFINED LLVM_DYLIB_COMPONENTS)
+      if("${LLVM_DYLIB_COMPONENTS}" STREQUAL "all")
+        set(link_components "")
+      else()
+        list(REMOVE_ITEM link_components ${LLVM_DYLIB_COMPONENTS})
+      endif()
+    endif()
+
+    target_link_libraries(${executable} LLVM)
+  endif()
+
+  explicit_llvm_config(${executable} ${link_components})
 endmacro(llvm_config)
 
 
@@ -40,10 +65,10 @@ function(explicit_llvm_config executable)
 
   llvm_map_components_to_libnames(LIBRARIES ${link_components})
   get_target_property(t ${executable} TYPE)
-  if("${t}" STREQUAL "STATIC_LIBRARY")
-    target_link_libraries(${executable} ${cmake_2_8_12_INTERFACE} ${LIBRARIES})
-  elseif("${t}" STREQUAL "SHARED_LIBRARY" OR "${t}" STREQUAL "MODULE_LIBRARY")
-    target_link_libraries(${executable} ${cmake_2_8_12_PRIVATE} ${LIBRARIES})
+  if("x${t}" STREQUAL "xSTATIC_LIBRARY")
+    target_link_libraries(${executable} INTERFACE ${LIBRARIES})
+  elseif("x${t}" STREQUAL "xSHARED_LIBRARY" OR "x${t}" STREQUAL "xMODULE_LIBRARY")
+    target_link_libraries(${executable} PRIVATE ${LIBRARIES})
   else()
     # Use plain form for legacy user.
     target_link_libraries(${executable} ${LIBRARIES})
@@ -132,6 +157,41 @@ function(llvm_map_components_to_libnames out_libs)
       # already processed
     elseif( c STREQUAL "all" )
       list(APPEND expanded_components ${LLVM_AVAILABLE_LIBS})
+    elseif( c STREQUAL "AllTargetsAsmPrinters" )
+      # Link all the asm printers from all the targets
+      foreach(t ${LLVM_TARGETS_TO_BUILD})
+        if( TARGET LLVM${t}AsmPrinter )
+          list(APPEND expanded_components "LLVM${t}AsmPrinter")
+        endif()
+      endforeach(t)
+    elseif( c STREQUAL "AllTargetsAsmParsers" )
+      # Link all the asm parsers from all the targets
+      foreach(t ${LLVM_TARGETS_TO_BUILD})
+        if( TARGET LLVM${t}AsmParser )
+          list(APPEND expanded_components "LLVM${t}AsmParser")
+        endif()
+      endforeach(t)
+    elseif( c STREQUAL "AllTargetsDescs" )
+      # Link all the descs from all the targets
+      foreach(t ${LLVM_TARGETS_TO_BUILD})
+        if( TARGET LLVM${t}Desc )
+          list(APPEND expanded_components "LLVM${t}Desc")
+        endif()
+      endforeach(t)
+    elseif( c STREQUAL "AllTargetsDisassemblers" )
+      # Link all the disassemblers from all the targets
+      foreach(t ${LLVM_TARGETS_TO_BUILD})
+        if( TARGET LLVM${t}Disassembler )
+          list(APPEND expanded_components "LLVM${t}Disassembler")
+        endif()
+      endforeach(t)
+    elseif( c STREQUAL "AllTargetsInfos" )
+      # Link all the infos from all the targets
+      foreach(t ${LLVM_TARGETS_TO_BUILD})
+        if( TARGET LLVM${t}Info )
+          list(APPEND expanded_components "LLVM${t}Info")
+        endif()
+      endforeach(t)
     else( NOT idx LESS 0 )
       # Canonize the component name:
       string(TOUPPER "${c}" capitalized)
@@ -152,29 +212,39 @@ function(llvm_map_components_to_libnames out_libs)
   set(${out_libs} ${expanded_components} PARENT_SCOPE)
 endfunction()
 
+# Perform a post-order traversal of the dependency graph.
+# This duplicates the algorithm used by llvm-config, originally
+# in tools/llvm-config/llvm-config.cpp, function ComputeLibsForComponents.
+function(expand_topologically name required_libs visited_libs)
+  list(FIND visited_libs ${name} found)
+  if( found LESS 0 )
+    list(APPEND visited_libs ${name})
+    set(visited_libs ${visited_libs} PARENT_SCOPE)
+
+    get_property(lib_deps GLOBAL PROPERTY LLVMBUILD_LIB_DEPS_${name})
+    foreach( lib_dep ${lib_deps} )
+      expand_topologically(${lib_dep} "${required_libs}" "${visited_libs}")
+      set(required_libs ${required_libs} PARENT_SCOPE)
+      set(visited_libs ${visited_libs} PARENT_SCOPE)
+    endforeach()
+
+    list(APPEND required_libs ${name})
+    set(required_libs ${required_libs} PARENT_SCOPE)
+  endif()
+endfunction()
+
 # Expand dependencies while topologically sorting the list of libraries:
 function(llvm_expand_dependencies out_libs)
   set(expanded_components ${ARGN})
-  list(LENGTH expanded_components lst_size)
-  set(cursor 0)
-  set(processed)
-  while( cursor LESS lst_size )
-    list(GET expanded_components ${cursor} lib)
-    get_property(lib_deps GLOBAL PROPERTY LLVMBUILD_LIB_DEPS_${lib})
-    list(APPEND expanded_components ${lib_deps})
-    # Remove duplicates at the front:
-    list(REVERSE expanded_components)
-    list(REMOVE_DUPLICATES expanded_components)
-    list(REVERSE expanded_components)
-    list(APPEND processed ${lib})
-    # Find the maximum index that doesn't have to be re-processed:
-    while(NOT "${expanded_components}" MATCHES "^${processed}.*" )
-      list(REMOVE_AT processed -1)
-    endwhile()
-    list(LENGTH processed cursor)
-    list(LENGTH expanded_components lst_size)
-  endwhile( cursor LESS lst_size )
-  set(${out_libs} ${expanded_components} PARENT_SCOPE)
+
+  set(required_libs)
+  set(visited_libs)
+  foreach( lib ${expanded_components} )
+    expand_topologically(${lib} "${required_libs}" "${visited_libs}")
+  endforeach()
+
+  list(REVERSE required_libs)
+  set(${out_libs} ${required_libs} PARENT_SCOPE)
 endfunction()
 
 function(explicit_map_components_to_libraries out_libs)

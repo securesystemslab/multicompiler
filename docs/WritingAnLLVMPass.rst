@@ -47,14 +47,11 @@ source tree in the ``lib/Transforms/Hello`` directory.
 Setting up the build environment
 --------------------------------
 
-.. FIXME: Why does this recommend to build in-tree?
-
-First, configure and build LLVM.  This needs to be done directly inside the
-LLVM source tree rather than in a separate objects directory.  Next, you need
-to create a new directory somewhere in the LLVM source base.  For this example,
-we'll assume that you made ``lib/Transforms/Hello``.  Finally, you must set up
-a build script (``Makefile``) that will compile the source code for the new
-pass.  To do this, copy the following into ``Makefile``:
+First, configure and build LLVM.  Next, you need to create a new directory
+somewhere in the LLVM source base.  For this example, we'll assume that you
+made ``lib/Transforms/Hello``.  Finally, you must set up a build script
+(``Makefile``) that will compile the source code for the new pass.  To do this,
+copy the following into ``Makefile``:
 
 .. code-block:: make
 
@@ -146,7 +143,7 @@ to avoid using expensive C++ runtime information.
 
 .. code-block:: c++
 
-      virtual bool runOnFunction(Function &F) {
+      bool runOnFunction(Function &F) override {
         errs() << "Hello: ";
         errs().write_escaped(F.getName()) << "\n";
         return false;
@@ -194,7 +191,7 @@ As a whole, the ``.cpp`` file looks like:
         static char ID;
         Hello() : FunctionPass(ID) {}
 
-        virtual bool runOnFunction(Function &F) {
+        bool runOnFunction(Function &F) override {
           errs() << "Hello: ";
           errs().write_escaped(F.getName()) << '\n';
           return false;
@@ -206,9 +203,8 @@ As a whole, the ``.cpp`` file looks like:
     static RegisterPass<Hello> X("hello", "Hello World Pass", false, false);
 
 Now that it's all together, compile the file with a simple "``gmake``" command
-in the local directory and you should get a new file
-"``Debug+Asserts/lib/Hello.so``" under the top level directory of the LLVM
-source tree (not in the local directory).  Note that everything in this file is
+from the top level of your build directory and you should get a new file
+"``Debug+Asserts/lib/Hello.so``".  Note that everything in this file is
 contained in an anonymous namespace --- this reflects the fact that passes
 are self contained units that do not need external interfaces (although they
 can have them) to be useful.
@@ -228,7 +224,7 @@ will work):
 
 .. code-block:: console
 
-  $ opt -load ../../../Debug+Asserts/lib/Hello.so -hello < hello.bc > /dev/null
+  $ opt -load ../../Debug+Asserts/lib/Hello.so -hello < hello.bc > /dev/null
   Hello: __main
   Hello: puts
   Hello: main
@@ -245,7 +241,7 @@ To see what happened to the other string you registered, try running
 
 .. code-block:: console
 
-  $ opt -load ../../../Debug+Asserts/lib/Hello.so -help
+  $ opt -load ../../Debug+Asserts/lib/Hello.so -help
   OVERVIEW: llvm .bc -> .bc modular optimizer
 
   USAGE: opt [options] <input bitcode>
@@ -272,7 +268,7 @@ you queue up.  For example:
 
 .. code-block:: console
 
-  $ opt -load ../../../Debug+Asserts/lib/Hello.so -hello -time-passes < hello.bc > /dev/null
+  $ opt -load ../../Debug+Asserts/lib/Hello.so -hello -time-passes < hello.bc > /dev/null
   Hello: __main
   Hello: puts
   Hello: main
@@ -434,9 +430,8 @@ The ``doFinalization(CallGraph &)`` method
   virtual bool doFinalization(CallGraph &CG);
 
 The ``doFinalization`` method is an infrequently used method that is called
-when the pass framework has finished calling :ref:`runOnFunction
-<writing-an-llvm-pass-runOnFunction>` for every function in the program being
-compiled.
+when the pass framework has finished calling :ref:`runOnSCC
+<writing-an-llvm-pass-runOnSCC>` for every SCC in the program being compiled.
 
 .. _writing-an-llvm-pass-FunctionPass:
 
@@ -456,7 +451,7 @@ To be explicit, ``FunctionPass`` subclasses are not allowed to:
 #. Inspect or modify a ``Function`` other than the one currently being processed.
 #. Add or remove ``Function``\ s from the current ``Module``.
 #. Add or remove global variables from the current ``Module``.
-#. Maintain state across invocations of:ref:`runOnFunction
+#. Maintain state across invocations of :ref:`runOnFunction
    <writing-an-llvm-pass-runOnFunction>` (including global data).
 
 Implementing a ``FunctionPass`` is usually straightforward (See the :ref:`Hello
@@ -854,7 +849,7 @@ Example implementations of ``getAnalysisUsage``
   // This example modifies the program, but does not modify the CFG
   void LICM::getAnalysisUsage(AnalysisUsage &AU) const {
     AU.setPreservesCFG();
-    AU.addRequired<LoopInfo>();
+    AU.addRequired<LoopInfoWrapperPass>();
   }
 
 .. _writing-an-llvm-pass-getAnalysis:
@@ -871,7 +866,7 @@ you want, and returns a reference to that pass.  For example:
 .. code-block:: c++
 
   bool LICM::runOnFunction(Function &F) {
-    LoopInfo &LI = getAnalysis<LoopInfo>();
+    LoopInfo &LI = getAnalysis<LoopInfoWrapperPass>().getLoopInfo();
     //...
   }
 
@@ -1093,7 +1088,7 @@ passes.  Lets try it out with the gcse and licm passes:
 
 .. code-block:: console
 
-  $ opt -load ../../../Debug+Asserts/lib/Hello.so -gcse -licm --debug-pass=Structure < hello.bc > /dev/null
+  $ opt -load ../../Debug+Asserts/lib/Hello.so -gcse -licm --debug-pass=Structure < hello.bc > /dev/null
   Module Pass Manager
     Function Pass Manager
       Dominator Set Construction
@@ -1130,7 +1125,7 @@ Lets see how this changes when we run the :ref:`Hello World
 
 .. code-block:: console
 
-  $ opt -load ../../../Debug+Asserts/lib/Hello.so -gcse -hello -licm --debug-pass=Structure < hello.bc > /dev/null
+  $ opt -load ../../Debug+Asserts/lib/Hello.so -gcse -hello -licm --debug-pass=Structure < hello.bc > /dev/null
   Module Pass Manager
     Function Pass Manager
       Dominator Set Construction
@@ -1163,7 +1158,7 @@ all!  To fix this, we need to add the following :ref:`getAnalysisUsage
 .. code-block:: c++
 
   // We don't modify the program, so we preserve all analyses
-  virtual void getAnalysisUsage(AnalysisUsage &AU) const {
+  void getAnalysisUsage(AnalysisUsage &AU) const override {
     AU.setPreservesAll();
   }
 
@@ -1171,7 +1166,7 @@ Now when we run our pass, we get this output:
 
 .. code-block:: console
 
-  $ opt -load ../../../Debug+Asserts/lib/Hello.so -gcse -hello -licm --debug-pass=Structure < hello.bc > /dev/null
+  $ opt -load ../../Debug+Asserts/lib/Hello.so -gcse -hello -licm --debug-pass=Structure < hello.bc > /dev/null
   Pass Arguments:  -gcse -hello -licm
   Module Pass Manager
     Function Pass Manager

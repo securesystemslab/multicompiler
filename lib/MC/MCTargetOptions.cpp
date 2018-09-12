@@ -7,14 +7,20 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "llvm/ADT/StringRef.h"
 #include "llvm/MC/MCTargetOptions.h"
 
 namespace llvm {
 
 MCTargetOptions::MCTargetOptions()
     : SanitizeAddress(false), MCRelaxAll(false), MCNoExecStack(false),
-      MCSaveTempLabels(false), MCUseDwarfDirectory(false),
+      MCFatalWarnings(false), MCNoWarn(false), MCSaveTempLabels(false),
+      MCUseDwarfDirectory(false), MCIncrementalLinkerCompatible(false),
       ShowMCEncoding(false), ShowMCInst(false), AsmVerbose(false),
-      DwarfVersion(0) {}
+      DwarfVersion(0), ABIName() {}
+
+StringRef MCTargetOptions::getABIName() const {
+  return ABIName;
+}
 
 } // end namespace llvm

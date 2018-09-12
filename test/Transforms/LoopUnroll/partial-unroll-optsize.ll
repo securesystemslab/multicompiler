@@ -1,7 +1,9 @@
 ; RUN: opt < %s -S -loop-unroll -unroll-allow-partial | FileCheck %s
+; RUN: sed -e 's/optsize/minsize/' %s | opt -S -loop-unroll -unroll-allow-partial | FileCheck %s
+
 ; Loop size = 3, when the function has the optsize attribute, the
 ; OptSizeUnrollThreshold, i.e. 50, is used, hence the loop should be unrolled
-; by 16 times because 3 * 16 < 50.
+; by 32 times because (1 * 32) + 2 < 50 (whereas (1 * 64 + 2) is not).
 define void @unroll_opt_for_size() nounwind optsize {
 entry:
   br label %loop
@@ -17,6 +19,22 @@ exit:
 }
 
 ; CHECK:      add
+; CHECK-NEXT: add
+; CHECK-NEXT: add
+; CHECK-NEXT: add
+; CHECK-NEXT: add
+; CHECK-NEXT: add
+; CHECK-NEXT: add
+; CHECK-NEXT: add
+; CHECK-NEXT: add
+; CHECK-NEXT: add
+; CHECK-NEXT: add
+; CHECK-NEXT: add
+; CHECK-NEXT: add
+; CHECK-NEXT: add
+; CHECK-NEXT: add
+; CHECK-NEXT: add
+; CHECK-NEXT: add
 ; CHECK-NEXT: add
 ; CHECK-NEXT: add
 ; CHECK-NEXT: add

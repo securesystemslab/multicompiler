@@ -9,10 +9,10 @@
 
 #include "llvm/AsmParser/Parser.h"
 #include "llvm/IR/Function.h"
+#include "llvm/IR/Instructions.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/User.h"
-#include "llvm/IR/Instructions.h"
 #include "llvm/Support/SourceMgr.h"
 #include "gtest/gtest.h"
 using namespace llvm;
@@ -65,7 +65,7 @@ TEST(UserTest, ValueOpIteration) {
                              "  ret void\n"
                              "}\n";
   SMDiagnostic Err;
-  Module *M = ParseAssemblyString(ModuleString, nullptr, Err, C);
+  std::unique_ptr<Module> M = parseAssemblyString(ModuleString, Err, C);
 
   Function *F = M->getFunction("f");
   BasicBlock &ExitBB = F->back();
@@ -91,6 +91,30 @@ TEST(UserTest, ValueOpIteration) {
   I++;
   EXPECT_EQ(P.getOperand(6), I[2]);
   EXPECT_EQ(P.value_op_end(), (I - 2) + 8);
+}
+
+TEST(UserTest, PersonalityUser) {
+  Module M("", getGlobalContext());
+  FunctionType *RetVoidTy =
+      FunctionType::get(Type::getVoidTy(getGlobalContext()), false);
+  Function *PersonalityF = Function::Create(
+      RetVoidTy, GlobalValue::ExternalLinkage, "PersonalityFn", &M);
+  Function *TestF =
+      Function::Create(RetVoidTy, GlobalValue::ExternalLinkage, "TestFn", &M);
+
+  // Set up the personality function
+  TestF->setPersonalityFn(PersonalityF);
+  auto PersonalityUsers = PersonalityF->user_begin();
+
+  // One user and that user is the Test function
+  EXPECT_EQ(*PersonalityUsers, TestF);
+  EXPECT_EQ(++PersonalityUsers, PersonalityF->user_end());
+
+  // Reset the personality function
+  TestF->setPersonalityFn(nullptr);
+
+  // No users should remain
+  EXPECT_TRUE(TestF->user_empty());
 }
 
 } // end anonymous namespace

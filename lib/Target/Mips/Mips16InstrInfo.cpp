@@ -1,4 +1,3 @@
-
 //===-- Mips16InstrInfo.cpp - Mips16 Instruction Information --------------===//
 //
 //                     The LLVM Compiler Infrastructure
@@ -25,6 +24,7 @@
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/TargetRegistry.h"
+#include "llvm/Support/raw_ostream.h"
 #include <cctype>
 
 using namespace llvm;
@@ -32,7 +32,7 @@ using namespace llvm;
 #define DEBUG_TYPE "mips16-instrinfo"
 
 Mips16InstrInfo::Mips16InstrInfo(const MipsSubtarget &STI)
-    : MipsInstrInfo(STI, Mips::Bimm16), RI(STI) {}
+    : MipsInstrInfo(STI, Mips::Bimm16), RI() {}
 
 const MipsRegisterInfo &Mips16InstrInfo::getRegisterInfo() const {
   return RI;
@@ -144,7 +144,6 @@ bool Mips16InstrInfo::expandPostRAPseudo(MachineBasicBlock::iterator MI) const {
 /// opcode, e.g. turning BEQ to BNE.
 unsigned Mips16InstrInfo::getOppositeBranchOpc(unsigned Opc) const {
   switch (Opc) {
-  default:  llvm_unreachable("Illegal opcode!");
   case Mips::BeqzRxImmX16: return Mips::BnezRxImmX16;
   case Mips::BnezRxImmX16: return Mips::BeqzRxImmX16;
   case Mips::BeqzRxImm16: return Mips::BnezRxImm16;
@@ -166,8 +165,7 @@ unsigned Mips16InstrInfo::getOppositeBranchOpc(unsigned Opc) const {
   case Mips::BtnezT8SltX16: return Mips::BteqzT8SltX16;
   case Mips::BtnezT8SltiX16: return Mips::BteqzT8SltiX16;
   }
-  assert(false && "Implement this function.");
-  return 0;
+  llvm_unreachable("Illegal opcode!");
 }
 
 static void addSaveRestoreRegs(MachineInstrBuilder &MIB,
@@ -198,7 +196,7 @@ static void addSaveRestoreRegs(MachineInstrBuilder &MIB,
 void Mips16InstrInfo::makeFrame(unsigned SP, int64_t FrameSize,
                                 MachineBasicBlock &MBB,
                                 MachineBasicBlock::iterator I) const {
-  DebugLoc DL = I != MBB.end() ? I->getDebugLoc() : DebugLoc();
+  DebugLoc DL;
   MachineFunction &MF = *MBB.getParent();
   MachineFrameInfo *MFI    = MF.getFrameInfo();
   const BitVector Reserved = RI.getReservedRegs(MF);
@@ -265,7 +263,7 @@ void Mips16InstrInfo::adjustStackPtrBig(unsigned SP, int64_t Amount,
                                         MachineBasicBlock &MBB,
                                         MachineBasicBlock::iterator I,
                                         unsigned Reg1, unsigned Reg2) const {
-  DebugLoc DL = I != MBB.end() ? I->getDebugLoc() : DebugLoc();
+  DebugLoc DL;
   //
   // li reg1, constant
   // move reg2, sp
@@ -288,13 +286,16 @@ void Mips16InstrInfo::adjustStackPtrBig(unsigned SP, int64_t Amount,
 void Mips16InstrInfo::adjustStackPtrBigUnrestricted(
     unsigned SP, int64_t Amount, MachineBasicBlock &MBB,
     MachineBasicBlock::iterator I) const {
-   assert(false && "adjust stack pointer amount exceeded");
+   llvm_unreachable("adjust stack pointer amount exceeded");
 }
 
 /// Adjust SP by Amount bytes.
 void Mips16InstrInfo::adjustStackPtr(unsigned SP, int64_t Amount,
                                      MachineBasicBlock &MBB,
                                      MachineBasicBlock::iterator I) const {
+  if (Amount == 0)
+    return;
+
   if (isInt<16>(Amount))  // need to change to addiu sp, ....and isInt<16>
     BuildAddiuSpImm(MBB, I, Amount);
   else
@@ -445,7 +446,7 @@ const MCInstrDesc &Mips16InstrInfo::AddiuSpImm(int64_t Imm) const {
 
 void Mips16InstrInfo::BuildAddiuSpImm
   (MachineBasicBlock &MBB, MachineBasicBlock::iterator I, int64_t Imm) const {
-  DebugLoc DL = I != MBB.end() ? I->getDebugLoc() : DebugLoc();
+  DebugLoc DL;
   BuildMI(MBB, I, DL, AddiuSpImm(Imm)).addImm(Imm);
 }
 

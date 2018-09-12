@@ -17,6 +17,7 @@
 
 #include "MSP430.h"
 #include "MSP430InstrInfo.h"
+#include "MSP430Subtarget.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/CodeGen/MachineFunctionPass.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
@@ -54,7 +55,7 @@ FunctionPass *llvm::createMSP430BranchSelectionPass() {
 
 bool MSP430BSel::runOnMachineFunction(MachineFunction &Fn) {
   const MSP430InstrInfo *TII =
-             static_cast<const MSP430InstrInfo*>(Fn.getTarget().getInstrInfo());
+      static_cast<const MSP430InstrInfo *>(Fn.getSubtarget().getInstrInfo());
   // Give the blocks of the function a dense, in-order, numbering.
   Fn.RenumberBlocks();
   BlockSizes.resize(Fn.getNumBlockIDs());
@@ -63,7 +64,7 @@ bool MSP430BSel::runOnMachineFunction(MachineFunction &Fn) {
   unsigned FuncSize = 0;
   for (MachineFunction::iterator MFI = Fn.begin(), E = Fn.end(); MFI != E;
        ++MFI) {
-    MachineBasicBlock *MBB = MFI;
+    MachineBasicBlock *MBB = &*MFI;
 
     unsigned BlockSize = 0;
     for (MachineBasicBlock::iterator MBBI = MBB->begin(), EE = MBB->end();

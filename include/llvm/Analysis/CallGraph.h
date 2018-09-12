@@ -56,9 +56,9 @@
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/IR/CallSite.h"
 #include "llvm/IR/Function.h"
+#include "llvm/IR/Intrinsics.h"
 #include "llvm/IR/ValueHandle.h"
 #include "llvm/Pass.h"
-#include "llvm/Support/IncludeFile.h"
 #include <map>
 
 namespace llvm {
@@ -75,7 +75,8 @@ class CallGraphNode;
 class CallGraph {
   Module &M;
 
-  typedef std::map<const Function *, CallGraphNode *> FunctionMapTy;
+  typedef std::map<const Function *, std::unique_ptr<CallGraphNode>>
+      FunctionMapTy;
 
   /// \brief A map from \c Function* to \c CallGraphNode*.
   FunctionMapTy FunctionMap;
@@ -90,7 +91,7 @@ class CallGraph {
 
   /// \brief This node has edges to it from all functions making indirect calls
   /// or calling an external function.
-  CallGraphNode *CallsExternalNode;
+  std::unique_ptr<CallGraphNode> CallsExternalNode;
 
   /// \brief Replace the function represented by this node by another.
   ///
@@ -104,7 +105,8 @@ class CallGraph {
   void addToCallGraph(Function *F);
 
 public:
-  CallGraph(Module &M);
+  explicit CallGraph(Module &M);
+  CallGraph(CallGraph &&Arg);
   ~CallGraph();
 
   void print(raw_ostream &OS) const;
@@ -125,21 +127,23 @@ public:
   inline const CallGraphNode *operator[](const Function *F) const {
     const_iterator I = FunctionMap.find(F);
     assert(I != FunctionMap.end() && "Function not in callgraph!");
-    return I->second;
+    return I->second.get();
   }
 
   /// \brief Returns the call graph node for the provided function.
   inline CallGraphNode *operator[](const Function *F) {
     const_iterator I = FunctionMap.find(F);
     assert(I != FunctionMap.end() && "Function not in callgraph!");
-    return I->second;
+    return I->second.get();
   }
 
   /// \brief Returns the \c CallGraphNode which is used to represent
   /// undetermined calls into the callgraph.
   CallGraphNode *getExternalCallingNode() const { return ExternalCallingNode; }
 
-  CallGraphNode *getCallsExternalNode() const { return CallsExternalNode; }
+  CallGraphNode *getCallsExternalNode() const {
+    return CallsExternalNode.get();
+  }
 
   //===---------------------------------------------------------------------
   // Functions to keep a call graph up to date with a function that has been
@@ -230,8 +234,9 @@ public:
   /// \brief Adds a function to the list of functions called by this one.
   void addCalledFunction(CallSite CS, CallGraphNode *M) {
     assert(!CS.getInstruction() || !CS.getCalledFunction() ||
-           !CS.getCalledFunction()->isIntrinsic());
-    CalledFunctions.push_back(std::make_pair(CS.getInstruction(), M));
+           !CS.getCalledFunction()->isIntrinsic() ||
+           !Intrinsic::isLeaf(CS.getCalledFunction()->getIntrinsicID()));
+    CalledFunctions.emplace_back(CS.getInstruction(), M);
     M->AddRef();
   }
 
@@ -274,8 +279,8 @@ private:
   /// CalledFunctions array of this or other CallGraphNodes.
   unsigned NumReferences;
 
-  CallGraphNode(const CallGraphNode &) LLVM_DELETED_FUNCTION;
-  void operator=(const CallGraphNode &) LLVM_DELETED_FUNCTION;
+  CallGraphNode(const CallGraphNode &) = delete;
+  void operator=(const CallGraphNode &) = delete;
 
   void DropRef() { --NumReferences; }
   void AddRef() { ++NumReferences; }
@@ -319,7 +324,7 @@ public:
   static char ID; // Class identification, replacement for typeinfo
 
   CallGraphWrapperPass();
-  virtual ~CallGraphWrapperPass();
+  ~CallGraphWrapperPass() override;
 
   /// \brief The internal \c CallGraph around which the rest of this interface
   /// is wrapped.
@@ -418,13 +423,24 @@ template <> struct GraphTraits<CallGraphNode *> {
 
 template <> struct GraphTraits<const CallGraphNode *> {
   typedef const CallGraphNode NodeType;
-  typedef NodeType::const_iterator ChildIteratorType;
+
+  typedef CallGraphNode::CallRecord CGNPairTy;
+  typedef std::pointer_to_unary_function<CGNPairTy, const CallGraphNode *>
+      CGNDerefFun;
 
   static NodeType *getEntryNode(const CallGraphNode *CGN) { return CGN; }
+
+  typedef mapped_iterator<NodeType::const_iterator, CGNDerefFun>
+      ChildIteratorType;
+
   static inline ChildIteratorType child_begin(NodeType *N) {
-    return N->begin();
+    return map_iterator(N->begin(), CGNDerefFun(CGNDeref));
   }
-  static inline ChildIteratorType child_end(NodeType *N) { return N->end(); }
+  static inline ChildIteratorType child_end(NodeType *N) {
+    return map_iterator(N->end(), CGNDerefFun(CGNDeref));
+  }
+
+  static const CallGraphNode *CGNDeref(CGNPairTy P) { return P.second; }
 };
 
 template <>
@@ -432,8 +448,10 @@ struct GraphTraits<CallGraph *> : public GraphTraits<CallGraphNode *> {
   static NodeType *getEntryNode(CallGraph *CGN) {
     return CGN->getExternalCallingNode(); // Start at the external node!
   }
-  typedef std::pair<const Function *, CallGraphNode *> PairTy;
-  typedef std::pointer_to_unary_function<PairTy, CallGraphNode &> DerefFun;
+  typedef std::pair<const Function *const, std::unique_ptr<CallGraphNode>>
+      PairTy;
+  typedef std::pointer_to_unary_function<const PairTy &, CallGraphNode &>
+      DerefFun;
 
   // nodes_iterator/begin/end - Allow iteration over all nodes in the graph
   typedef mapped_iterator<CallGraph::iterator, DerefFun> nodes_iterator;
@@ -444,24 +462,34 @@ struct GraphTraits<CallGraph *> : public GraphTraits<CallGraphNode *> {
     return map_iterator(CG->end(), DerefFun(CGdereference));
   }
 
-  static CallGraphNode &CGdereference(PairTy P) { return *P.second; }
+  static CallGraphNode &CGdereference(const PairTy &P) { return *P.second; }
 };
 
 template <>
 struct GraphTraits<const CallGraph *> : public GraphTraits<
                                             const CallGraphNode *> {
   static NodeType *getEntryNode(const CallGraph *CGN) {
-    return CGN->getExternalCallingNode();
+    return CGN->getExternalCallingNode(); // Start at the external node!
   }
+  typedef std::pair<const Function *const, std::unique_ptr<CallGraphNode>>
+      PairTy;
+  typedef std::pointer_to_unary_function<const PairTy &, const CallGraphNode &>
+      DerefFun;
+
   // nodes_iterator/begin/end - Allow iteration over all nodes in the graph
-  typedef CallGraph::const_iterator nodes_iterator;
-  static nodes_iterator nodes_begin(const CallGraph *CG) { return CG->begin(); }
-  static nodes_iterator nodes_end(const CallGraph *CG) { return CG->end(); }
+  typedef mapped_iterator<CallGraph::const_iterator, DerefFun> nodes_iterator;
+  static nodes_iterator nodes_begin(const CallGraph *CG) {
+    return map_iterator(CG->begin(), DerefFun(CGdereference));
+  }
+  static nodes_iterator nodes_end(const CallGraph *CG) {
+    return map_iterator(CG->end(), DerefFun(CGdereference));
+  }
+
+  static const CallGraphNode &CGdereference(const PairTy &P) {
+    return *P.second;
+  }
 };
 
 } // End llvm namespace
-
-// Make sure that any clients of this file link in CallGraph.cpp
-FORCE_DEFINING_FILE_TO_BE_LINKED(CallGraph)
 
 #endif

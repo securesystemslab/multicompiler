@@ -73,7 +73,7 @@ bool RegToMem::runOnFunction(Function &F) {
 
   // Insert all new allocas into entry block.
   BasicBlock *BBEntry = &F.getEntryBlock();
-  assert(pred_begin(BBEntry) == pred_end(BBEntry) &&
+  assert(pred_empty(BBEntry) &&
          "Entry block to function must not have predecessors!");
 
   // Find first non-alloca instruction and create insertion point. This is
@@ -82,10 +82,9 @@ bool RegToMem::runOnFunction(Function &F) {
   BasicBlock::iterator I = BBEntry->begin();
   while (isa<AllocaInst>(I)) ++I;
 
-  CastInst *AllocaInsertionPoint =
-    new BitCastInst(Constant::getNullValue(Type::getInt32Ty(F.getContext())),
-                    Type::getInt32Ty(F.getContext()),
-                    "reg2mem alloca point", I);
+  CastInst *AllocaInsertionPoint = new BitCastInst(
+      Constant::getNullValue(Type::getInt32Ty(F.getContext())),
+      Type::getInt32Ty(F.getContext()), "reg2mem alloca point", &*I);
 
   // Find the escaped instructions. But don't create stack slots for
   // allocas in entry block.
@@ -95,7 +94,7 @@ bool RegToMem::runOnFunction(Function &F) {
     for (BasicBlock::iterator iib = ibb->begin(), iie = ibb->end();
          iib != iie; ++iib) {
       if (!(isa<AllocaInst>(iib) && iib->getParent() == BBEntry) &&
-          valueEscapes(iib)) {
+          valueEscapes(&*iib)) {
         WorkList.push_front(&*iib);
       }
     }

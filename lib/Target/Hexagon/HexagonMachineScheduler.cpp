@@ -145,7 +145,7 @@ void VLIWMachineScheduler::schedule() {
         << "********** MI Converging Scheduling VLIW BB#" << BB->getNumber()
         << " " << BB->getName()
         << " in_func " << BB->getParent()->getFunction()->getName()
-        << " at loop depth "  << MLI.getLoopDepth(BB)
+        << " at loop depth "  << MLI->getLoopDepth(BB)
         << " \n");
 
   buildDAGWithRegPressure();
@@ -179,7 +179,11 @@ void VLIWMachineScheduler::schedule() {
   initQueues(TopRoots, BotRoots);
 
   bool IsTopNode = false;
-  while (SUnit *SU = SchedImpl->pickNode(IsTopNode)) {
+  while (true) {
+    DEBUG(dbgs() << "** VLIWMachineScheduler::schedule picking next node\n");
+    SUnit *SU = SchedImpl->pickNode(IsTopNode);
+    if (!SU) break;
+
     if (!checkSchedLimit())
       break;
 
@@ -205,16 +209,17 @@ void ConvergingVLIWScheduler::initialize(ScheduleDAGMI *dag) {
   // Initialize the HazardRecognizers. If itineraries don't exist, are empty, or
   // are disabled, then these HazardRecs will be disabled.
   const InstrItineraryData *Itin = DAG->getSchedModel()->getInstrItineraries();
-  const TargetMachine &TM = DAG->MF.getTarget();
+  const TargetSubtargetInfo &STI = DAG->MF.getSubtarget();
+  const TargetInstrInfo *TII = STI.getInstrInfo();
   delete Top.HazardRec;
   delete Bot.HazardRec;
-  Top.HazardRec = TM.getInstrInfo()->CreateTargetMIHazardRecognizer(Itin, DAG);
-  Bot.HazardRec = TM.getInstrInfo()->CreateTargetMIHazardRecognizer(Itin, DAG);
+  Top.HazardRec = TII->CreateTargetMIHazardRecognizer(Itin, DAG);
+  Bot.HazardRec = TII->CreateTargetMIHazardRecognizer(Itin, DAG);
 
   delete Top.ResourceModel;
   delete Bot.ResourceModel;
-  Top.ResourceModel = new VLIWResourceModel(TM, DAG->getSchedModel());
-  Bot.ResourceModel = new VLIWResourceModel(TM, DAG->getSchedModel());
+  Top.ResourceModel = new VLIWResourceModel(STI, DAG->getSchedModel());
+  Bot.ResourceModel = new VLIWResourceModel(STI, DAG->getSchedModel());
 
   assert((!llvm::ForceTopDown || !llvm::ForceBottomUp) &&
          "-misched-topdown incompatible with -misched-bottomup");

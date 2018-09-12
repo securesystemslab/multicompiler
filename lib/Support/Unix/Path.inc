@@ -62,47 +62,6 @@
 
 using namespace llvm;
 
-namespace {
-  /// This class automatically closes the given file descriptor when it goes out
-  /// of scope. You can take back explicit ownership of the file descriptor by
-  /// calling take(). The destructor does not verify that close was successful.
-  /// Therefore, never allow this class to call close on a file descriptor that
-  /// has been read from or written to.
-  struct AutoFD {
-    int FileDescriptor;
-
-    AutoFD(int fd) : FileDescriptor(fd) {}
-    ~AutoFD() {
-      if (FileDescriptor >= 0)
-        ::close(FileDescriptor);
-    }
-
-    int take() {
-      int ret = FileDescriptor;
-      FileDescriptor = -1;
-      return ret;
-    }
-
-    operator int() const {return FileDescriptor;}
-  };
-}
-
-static std::error_code TempDir(SmallVectorImpl<char> &result) {
-  // FIXME: Don't use TMPDIR if program is SUID or SGID enabled.
-  const char *dir = nullptr;
-  (dir = std::getenv("TMPDIR")) || (dir = std::getenv("TMP")) ||
-      (dir = std::getenv("TEMP")) || (dir = std::getenv("TEMPDIR")) ||
-#ifdef P_tmpdir
-      (dir = P_tmpdir) ||
-#endif
-      (dir = "/tmp");
-
-  result.clear();
-  StringRef d(dir);
-  result.append(d.begin(), d.end());
-  return std::error_code();
-}
-
 namespace llvm {
 namespace sys  {
 namespace fs {
@@ -116,12 +75,12 @@ test_dir(char ret[PATH_MAX], const char *dir, const char *bin)
   char fullpath[PATH_MAX];
 
   snprintf(fullpath, PATH_MAX, "%s/%s", dir, bin);
-  if (realpath(fullpath, ret) == NULL)
-    return (1);
+  if (!realpath(fullpath, ret))
+    return 1;
   if (stat(fullpath, &sb) != 0)
-    return (1);
+    return 1;
 
-  return (0);
+  return 0;
 }
 
 static char *
@@ -132,34 +91,34 @@ getprogpath(char ret[PATH_MAX], const char *bin)
   /* First approach: absolute path. */
   if (bin[0] == '/') {
     if (test_dir(ret, "/", bin) == 0)
-      return (ret);
-    return (NULL);
+      return ret;
+    return nullptr;
   }
 
   /* Second approach: relative path. */
-  if (strchr(bin, '/') != NULL) {
+  if (strchr(bin, '/')) {
     char cwd[PATH_MAX];
-    if (getcwd(cwd, PATH_MAX) == NULL)
-      return (NULL);
+    if (!getcwd(cwd, PATH_MAX))
+      return nullptr;
     if (test_dir(ret, cwd, bin) == 0)
-      return (ret);
-    return (NULL);
+      return ret;
+    return nullptr;
   }
 
   /* Third approach: $PATH */
-  if ((pv = getenv("PATH")) == NULL)
-    return (NULL);
+  if ((pv = getenv("PATH")) == nullptr)
+    return nullptr;
   s = pv = strdup(pv);
-  if (pv == NULL)
-    return (NULL);
-  while ((t = strsep(&s, ":")) != NULL) {
+  if (!pv)
+    return nullptr;
+  while ((t = strsep(&s, ":")) != nullptr) {
     if (test_dir(ret, t, bin) == 0) {
       free(pv);
-      return (ret);
+      return ret;
     }
   }
   free(pv);
-  return (NULL);
+  return nullptr;
 }
 #endif // __FreeBSD__ || __NetBSD__ || __FreeBSD_kernel__
 
@@ -191,11 +150,11 @@ std::string getMainExecutable(const char *argv0, void *MainAddr) {
       // /proc is not always mounted under Linux (chroot for example).
       ssize_t len = readlink(aPath.str().c_str(), exe_path, sizeof(exe_path));
       if (len >= 0)
-          return StringRef(exe_path, len);
+          return std::string(exe_path, len);
   } else {
       // Fall back to the classical detection.
-      if (getprogpath(exe_path, argv0) != NULL)
-          return exe_path;
+      if (getprogpath(exe_path, argv0))
+        return exe_path;
   }
 #elif defined(HAVE_DLFCN_H)
   // Use dladdr to get executable path if available.
@@ -260,28 +219,16 @@ std::error_code current_path(SmallVectorImpl<char> &result) {
   return std::error_code();
 }
 
-std::error_code create_directory(const Twine &path, bool IgnoreExisting) {
+std::error_code create_directory(const Twine &path, bool IgnoreExisting,
+                                 perms Perms) {
   SmallString<128> path_storage;
   StringRef p = path.toNullTerminatedStringRef(path_storage);
 
-  if (::mkdir(p.begin(), S_IRWXU | S_IRWXG) == -1) {
+  if (::mkdir(p.begin(), Perms) == -1) {
     if (errno != EEXIST || !IgnoreExisting)
       return std::error_code(errno, std::generic_category());
   }
 
-  return std::error_code();
-}
-
-std::error_code normalize_separators(SmallVectorImpl<char> &Path) {
-  for (auto PI = Path.begin(), PE = Path.end(); PI < PE; ++PI) {
-    if (*PI == '\\') {
-      auto PN = PI + 1;
-      if (PN < PE && *PN == '\\')
-        ++PI; // increment once, the for loop will move over the escaped slash
-      else
-        *PI = '/';
-    }
-  }
   return std::error_code();
 }
 
@@ -340,48 +287,46 @@ std::error_code rename(const Twine &from, const Twine &to) {
   return std::error_code();
 }
 
-std::error_code resize_file(const Twine &path, uint64_t size) {
-  SmallString<128> path_storage;
-  StringRef p = path.toNullTerminatedStringRef(path_storage);
-
-  if (::truncate(p.begin(), size) == -1)
+std::error_code resize_file(int FD, uint64_t Size) {
+  if (::ftruncate(FD, Size) == -1)
     return std::error_code(errno, std::generic_category());
 
   return std::error_code();
 }
 
-std::error_code exists(const Twine &path, bool &result) {
-  SmallString<128> path_storage;
-  StringRef p = path.toNullTerminatedStringRef(path_storage);
+static int convertAccessMode(AccessMode Mode) {
+  switch (Mode) {
+  case AccessMode::Exist:
+    return F_OK;
+  case AccessMode::Write:
+    return W_OK;
+  case AccessMode::Execute:
+    return R_OK | X_OK; // scripts also need R_OK.
+  }
+  llvm_unreachable("invalid enum");
+}
 
-  if (::access(p.begin(), F_OK) == -1) {
-    if (errno != ENOENT)
-      return std::error_code(errno, std::generic_category());
-    result = false;
-  } else
-    result = true;
+std::error_code access(const Twine &Path, AccessMode Mode) {
+  SmallString<128> PathStorage;
+  StringRef P = Path.toNullTerminatedStringRef(PathStorage);
+
+  if (::access(P.begin(), convertAccessMode(Mode)) == -1)
+    return std::error_code(errno, std::generic_category());
+
+  if (Mode == AccessMode::Execute) {
+    // Don't say that directories are executable.
+    struct stat buf;
+    if (0 != stat(P.begin(), &buf))
+      return errc::permission_denied;
+    if (!S_ISREG(buf.st_mode))
+      return errc::permission_denied;
+  }
 
   return std::error_code();
 }
 
-bool can_write(const Twine &Path) {
-  SmallString<128> PathStorage;
-  StringRef P = Path.toNullTerminatedStringRef(PathStorage);
-  return 0 == access(P.begin(), W_OK);
-}
-
 bool can_execute(const Twine &Path) {
-  SmallString<128> PathStorage;
-  StringRef P = Path.toNullTerminatedStringRef(PathStorage);
-
-  if (0 != access(P.begin(), R_OK | X_OK))
-    return false;
-  struct stat buf;
-  if (0 != stat(P.begin(), &buf))
-    return false;
-  if (!S_ISREG(buf.st_mode))
-    return false;
-  return true;
+  return !access(Path, AccessMode::Execute);
 }
 
 bool equivalent(file_status A, file_status B) {
@@ -472,80 +417,28 @@ std::error_code setLastModificationAndAccessTime(int FD, TimeValue Time) {
 #endif
 }
 
-std::error_code mapped_file_region::init(int FD, bool CloseFD, uint64_t Offset) {
-  AutoFD ScopedFD(FD);
-  if (!CloseFD)
-    ScopedFD.take();
-
-  // Figure out how large the file is.
-  struct stat FileInfo;
-  if (fstat(FD, &FileInfo) == -1)
-    return std::error_code(errno, std::generic_category());
-  uint64_t FileSize = FileInfo.st_size;
-
-  if (Size == 0)
-    Size = FileSize;
-  else if (FileSize < Size) {
-    // We need to grow the file.
-    if (ftruncate(FD, Size) == -1)
-      return std::error_code(errno, std::generic_category());
-  }
+std::error_code mapped_file_region::init(int FD, uint64_t Offset,
+                                         mapmode Mode) {
+  assert(Size != 0);
 
   int flags = (Mode == readwrite) ? MAP_SHARED : MAP_PRIVATE;
   int prot = (Mode == readonly) ? PROT_READ : (PROT_READ | PROT_WRITE);
-#ifdef MAP_FILE
-  flags |= MAP_FILE;
-#endif
   Mapping = ::mmap(nullptr, Size, prot, flags, FD, Offset);
   if (Mapping == MAP_FAILED)
     return std::error_code(errno, std::generic_category());
   return std::error_code();
 }
 
-mapped_file_region::mapped_file_region(const Twine &path,
-                                       mapmode mode,
-                                       uint64_t length,
-                                       uint64_t offset,
-                                       std::error_code &ec)
-  : Mode(mode)
-  , Size(length)
-  , Mapping() {
+mapped_file_region::mapped_file_region(int fd, mapmode mode, uint64_t length,
+                                       uint64_t offset, std::error_code &ec)
+    : Size(length), Mapping() {
   // Make sure that the requested size fits within SIZE_T.
   if (length > std::numeric_limits<size_t>::max()) {
     ec = make_error_code(errc::invalid_argument);
     return;
   }
 
-  SmallString<128> path_storage;
-  StringRef name = path.toNullTerminatedStringRef(path_storage);
-  int oflags = (mode == readonly) ? O_RDONLY : O_RDWR;
-  int ofd = ::open(name.begin(), oflags);
-  if (ofd == -1) {
-    ec = std::error_code(errno, std::generic_category());
-    return;
-  }
-
-  ec = init(ofd, true, offset);
-  if (ec)
-    Mapping = nullptr;
-}
-
-mapped_file_region::mapped_file_region(int fd,
-                                       bool closefd,
-                                       mapmode mode,
-                                       uint64_t length,
-                                       uint64_t offset,
-                                       std::error_code &ec)
-  : Mode(mode)
-  , Size(length)
-  , Mapping() {
-  // Make sure that the requested size fits within SIZE_T.
-  if (length > std::numeric_limits<size_t>::max()) {
-    ec = make_error_code(errc::invalid_argument);
-    return;
-  }
-
-  ec = init(fd, closefd, offset);
+  ec = init(fd, offset, mode);
   if (ec)
     Mapping = nullptr;
 }
@@ -555,16 +448,6 @@ mapped_file_region::~mapped_file_region() {
     ::munmap(Mapping, Size);
 }
 
-mapped_file_region::mapped_file_region(mapped_file_region &&other)
-  : Mode(other.Mode), Size(other.Size), Mapping(other.Mapping) {
-  other.Mapping = nullptr;
-}
-
-mapped_file_region::mapmode mapped_file_region::flags() const {
-  assert(Mapping && "Mapping failed but used anyway!");
-  return Mode;
-}
-
 uint64_t mapped_file_region::size() const {
   assert(Mapping && "Mapping failed but used anyway!");
   return Size;
@@ -572,7 +455,6 @@ uint64_t mapped_file_region::size() const {
 
 char *mapped_file_region::data() const {
   assert(Mapping && "Mapping failed but used anyway!");
-  assert(Mode != readonly && "Cannot get non-const data for readonly mapping!");
   return reinterpret_cast<char*>(Mapping);
 }
 
@@ -582,7 +464,7 @@ const char *mapped_file_region::const_data() const {
 }
 
 int mapped_file_region::alignment() {
-  return process::get_self()->page_size();
+  return Process::getPageSize();
 }
 
 std::error_code detail::directory_iterator_construct(detail::DirIterState &it,
@@ -676,6 +558,95 @@ bool home_directory(SmallVectorImpl<char> &result) {
   }
 
   return false;
+}
+
+static bool getDarwinConfDir(bool TempDir, SmallVectorImpl<char> &Result) {
+  #if defined(_CS_DARWIN_USER_TEMP_DIR) && defined(_CS_DARWIN_USER_CACHE_DIR)
+  // On Darwin, use DARWIN_USER_TEMP_DIR or DARWIN_USER_CACHE_DIR.
+  // macros defined in <unistd.h> on darwin >= 9
+  int ConfName = TempDir ? _CS_DARWIN_USER_TEMP_DIR
+                         : _CS_DARWIN_USER_CACHE_DIR;
+  size_t ConfLen = confstr(ConfName, nullptr, 0);
+  if (ConfLen > 0) {
+    do {
+      Result.resize(ConfLen);
+      ConfLen = confstr(ConfName, Result.data(), Result.size());
+    } while (ConfLen > 0 && ConfLen != Result.size());
+
+    if (ConfLen > 0) {
+      assert(Result.back() == 0);
+      Result.pop_back();
+      return true;
+    }
+
+    Result.clear();
+  }
+  #endif
+  return false;
+}
+
+static bool getUserCacheDir(SmallVectorImpl<char> &Result) {
+  // First try using XDS_CACHE_HOME env variable,
+  // as specified in XDG Base Directory Specification at
+  // http://standards.freedesktop.org/basedir-spec/basedir-spec-latest.html
+  if (const char *XdsCacheDir = std::getenv("XDS_CACHE_HOME")) {
+    Result.clear();
+    Result.append(XdsCacheDir, XdsCacheDir + strlen(XdsCacheDir));
+    return true;
+  }
+
+  // Try Darwin configuration query
+  if (getDarwinConfDir(false, Result))
+    return true;
+
+  // Use "$HOME/.cache" if $HOME is available
+  if (home_directory(Result)) {
+    append(Result, ".cache");
+    return true;
+  }
+
+  return false;
+}
+
+static const char *getEnvTempDir() {
+  // Check whether the temporary directory is specified by an environment
+  // variable.
+  const char *EnvironmentVariables[] = {"TMPDIR", "TMP", "TEMP", "TEMPDIR"};
+  for (const char *Env : EnvironmentVariables) {
+    if (const char *Dir = std::getenv(Env))
+      return Dir;
+  }
+
+  return nullptr;
+}
+
+static const char *getDefaultTempDir(bool ErasedOnReboot) {
+#ifdef P_tmpdir
+  if ((bool)P_tmpdir)
+    return P_tmpdir;
+#endif
+
+  if (ErasedOnReboot)
+    return "/tmp";
+  return "/var/tmp";
+}
+
+void system_temp_directory(bool ErasedOnReboot, SmallVectorImpl<char> &Result) {
+  Result.clear();
+
+  if (ErasedOnReboot) {
+    // There is no env variable for the cache directory.
+    if (const char *RequestedDir = getEnvTempDir()) {
+      Result.append(RequestedDir, RequestedDir + strlen(RequestedDir));
+      return;
+    }
+  }
+
+  if (getDarwinConfDir(ErasedOnReboot, Result))
+    return;
+
+  const char *RequestedDir = getDefaultTempDir(ErasedOnReboot);
+  Result.append(RequestedDir, RequestedDir + strlen(RequestedDir));
 }
 
 } // end namespace path

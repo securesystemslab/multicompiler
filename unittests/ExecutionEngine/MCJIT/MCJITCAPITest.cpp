@@ -1,4 +1,4 @@
-//===- MCJITTest.cpp - Unit tests for the MCJIT ---------------------------===//
+//===- MCJITTest.cpp - Unit tests for the MCJIT -----------------*- C++ -*-===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -85,13 +85,12 @@ public:
     ReservedCodeSize(0), UsedCodeSize(0), ReservedDataSizeRO(0), 
     UsedDataSizeRO(0), ReservedDataSizeRW(0), UsedDataSizeRW(0) {    
   }
-  
-  virtual bool needsToReserveAllocationSpace() {
-    return true;
-  }
 
-  virtual void reserveAllocationSpace(
-      uintptr_t CodeSize, uintptr_t DataSizeRO, uintptr_t DataSizeRW) {
+  bool needsToReserveAllocationSpace() override { return true; }
+
+  void reserveAllocationSpace(uintptr_t CodeSize, uint32_t CodeAlign,
+			      uintptr_t DataSizeRO, uint32_t RODataAlign,
+                              uintptr_t DataSizeRW, uint32_t RWDataAlign) override {
     ReservedCodeSize = CodeSize;
     ReservedDataSizeRO = DataSizeRO;
     ReservedDataSizeRW = DataSizeRW;
@@ -103,15 +102,17 @@ public:
     *UsedSize = AlignedBegin + AlignedSize;
   }
 
-  virtual uint8_t* allocateDataSection(uintptr_t Size, unsigned Alignment,
-      unsigned SectionID, StringRef SectionName, bool IsReadOnly) {
+  uint8_t *allocateDataSection(uintptr_t Size, unsigned Alignment,
+                               unsigned SectionID, StringRef SectionName,
+                               bool IsReadOnly) override {
     useSpace(IsReadOnly ? &UsedDataSizeRO : &UsedDataSizeRW, Size, Alignment);
     return SectionMemoryManager::allocateDataSection(Size, Alignment, 
       SectionID, SectionName, IsReadOnly);
   }
 
-  uint8_t* allocateCodeSection(uintptr_t Size, unsigned Alignment, 
-      unsigned SectionID, StringRef SectionName) {
+  uint8_t *allocateCodeSection(uintptr_t Size, unsigned Alignment,
+                               unsigned SectionID,
+                               StringRef SectionName) override {
     useSpace(&UsedCodeSize, Size, Alignment);
     return SectionMemoryManager::allocateCodeSection(Size, Alignment, 
       SectionID, SectionName);
@@ -127,6 +128,8 @@ protected:
     SupportedArchs.push_back(Triple::aarch64);
     SupportedArchs.push_back(Triple::arm);
     SupportedArchs.push_back(Triple::mips);
+    SupportedArchs.push_back(Triple::mips64);
+    SupportedArchs.push_back(Triple::mips64el);
     SupportedArchs.push_back(Triple::x86);
     SupportedArchs.push_back(Triple::x86_64);
 
@@ -139,12 +142,10 @@ protected:
 
     // The operating systems below are known to be sufficiently incompatible
     // that they will fail the MCJIT C API tests.
-    UnsupportedOSs.push_back(Triple::Cygwin);
-
     UnsupportedEnvironments.push_back(Triple::Cygnus);
   }
-  
-  virtual void SetUp() {
+
+  void SetUp() override {
     didCallAllocateCodeSection = false;
     didAllocateCompactUnwindSection = false;
     didCallYield = false;
@@ -153,8 +154,8 @@ protected:
     Engine = nullptr;
     Error = nullptr;
   }
-  
-  virtual void TearDown() {
+
+  void TearDown() override {
     if (Engine)
       LLVMDisposeExecutionEngine(Engine);
     else if (Module)
@@ -339,14 +340,43 @@ TEST_F(MCJITCAPITest, simple_function) {
   buildMCJITOptions();
   buildMCJITEngine();
   buildAndRunPasses();
-  
-  union {
-    void *raw;
-    int (*usable)();
-  } functionPointer;
-  functionPointer.raw = LLVMGetPointerToGlobal(Engine, Function);
-  
-  EXPECT_EQ(42, functionPointer.usable());
+
+  auto *functionPointer = reinterpret_cast<int (*)()>(
+      reinterpret_cast<uintptr_t>(LLVMGetPointerToGlobal(Engine, Function)));
+
+  EXPECT_EQ(42, functionPointer());
+}
+
+TEST_F(MCJITCAPITest, gva) {
+  SKIP_UNSUPPORTED_PLATFORM;
+
+  Module = LLVMModuleCreateWithName("simple_module");
+  LLVMSetTarget(Module, HostTriple.c_str());
+  LLVMValueRef GlobalVar = LLVMAddGlobal(Module, LLVMInt32Type(), "simple_value");
+  LLVMSetInitializer(GlobalVar, LLVMConstInt(LLVMInt32Type(), 42, 0));
+
+  buildMCJITOptions();
+  buildMCJITEngine();
+  buildAndRunPasses();
+
+  uint64_t raw = LLVMGetGlobalValueAddress(Engine, "simple_value");
+  int32_t *usable  = (int32_t *) raw;
+
+  EXPECT_EQ(42, *usable);
+}
+
+TEST_F(MCJITCAPITest, gfa) {
+  SKIP_UNSUPPORTED_PLATFORM;
+
+  buildSimpleFunction();
+  buildMCJITOptions();
+  buildMCJITEngine();
+  buildAndRunPasses();
+
+  uint64_t raw = LLVMGetFunctionAddress(Engine, "simple_function");
+  int (*usable)() = (int (*)()) raw;
+
+  EXPECT_EQ(42, usable());
 }
 
 TEST_F(MCJITCAPITest, custom_memory_manager) {
@@ -357,14 +387,11 @@ TEST_F(MCJITCAPITest, custom_memory_manager) {
   useRoundTripSectionMemoryManager();
   buildMCJITEngine();
   buildAndRunPasses();
-  
-  union {
-    void *raw;
-    int (*usable)();
-  } functionPointer;
-  functionPointer.raw = LLVMGetPointerToGlobal(Engine, Function);
-  
-  EXPECT_EQ(42, functionPointer.usable());
+
+  auto *functionPointer = reinterpret_cast<int (*)()>(
+      reinterpret_cast<uintptr_t>(LLVMGetPointerToGlobal(Engine, Function)));
+
+  EXPECT_EQ(42, functionPointer());
   EXPECT_TRUE(didCallAllocateCodeSection);
 }
 
@@ -380,14 +407,11 @@ TEST_F(MCJITCAPITest, stackmap_creates_compact_unwind_on_darwin) {
   useRoundTripSectionMemoryManager();
   buildMCJITEngine();
   buildAndRunOptPasses();
-  
-  union {
-    void *raw;
-    int (*usable)();
-  } functionPointer;
-  functionPointer.raw = LLVMGetPointerToGlobal(Engine, Function);
-  
-  EXPECT_EQ(42, functionPointer.usable());
+
+  auto *functionPointer = reinterpret_cast<int (*)()>(
+      reinterpret_cast<uintptr_t>(LLVMGetPointerToGlobal(Engine, Function)));
+
+  EXPECT_EQ(42, functionPointer());
   EXPECT_TRUE(didCallAllocateCodeSection);
   
   // Up to this point, the test is specific only to X86-64. But this next
@@ -414,21 +438,15 @@ TEST_F(MCJITCAPITest, reserve_allocation_space) {
   Options.MCJMM = wrap(MM);
   buildMCJITEngine();
   buildAndRunPasses();
-  
-  union {
-    void *raw;
-    int (*usable)();
-  } GetGlobalFct;
-  GetGlobalFct.raw = LLVMGetPointerToGlobal(Engine, Function);
-  
-  union {
-    void *raw;
-    void (*usable)(int);
-  } SetGlobalFct;
-  SetGlobalFct.raw = LLVMGetPointerToGlobal(Engine, Function2);
-  
-  SetGlobalFct.usable(789);
-  EXPECT_EQ(789, GetGlobalFct.usable());
+
+  auto GetGlobalFct = reinterpret_cast<int (*)()>(
+      reinterpret_cast<uintptr_t>(LLVMGetPointerToGlobal(Engine, Function)));
+
+  auto SetGlobalFct = reinterpret_cast<void (*)(int)>(
+      reinterpret_cast<uintptr_t>(LLVMGetPointerToGlobal(Engine, Function2)));
+
+  SetGlobalFct(789);
+  EXPECT_EQ(789, GetGlobalFct());
   EXPECT_LE(MM->UsedCodeSize, MM->ReservedCodeSize);
   EXPECT_LE(MM->UsedDataSizeRO, MM->ReservedDataSizeRO);
   EXPECT_LE(MM->UsedDataSizeRW, MM->ReservedDataSizeRW);
@@ -446,13 +464,47 @@ TEST_F(MCJITCAPITest, yield) {
   LLVMContextSetYieldCallback(C, yield, nullptr);
   buildAndRunPasses();
 
-  union {
-    void *raw;
-    int (*usable)();
-  } functionPointer;
-  functionPointer.raw = LLVMGetPointerToGlobal(Engine, Function);
+  auto *functionPointer = reinterpret_cast<int (*)()>(
+      reinterpret_cast<uintptr_t>(LLVMGetPointerToGlobal(Engine, Function)));
 
-  EXPECT_EQ(42, functionPointer.usable());
+  EXPECT_EQ(42, functionPointer());
   EXPECT_TRUE(didCallYield);
 }
 
+static int localTestFunc() {
+  return 42;
+}
+
+TEST_F(MCJITCAPITest, addGlobalMapping) {
+  SKIP_UNSUPPORTED_PLATFORM;
+
+  Module = LLVMModuleCreateWithName("testModule");
+  LLVMSetTarget(Module, HostTriple.c_str());
+  LLVMTypeRef FunctionType = LLVMFunctionType(LLVMInt32Type(), nullptr, 0, 0);
+  LLVMValueRef MappedFn = LLVMAddFunction(Module, "mapped_fn", FunctionType);
+
+  Function = LLVMAddFunction(Module, "test_fn", FunctionType);
+  LLVMBasicBlockRef Entry = LLVMAppendBasicBlock(Function, "");
+  LLVMBuilderRef Builder = LLVMCreateBuilder();
+  LLVMPositionBuilderAtEnd(Builder, Entry);
+  LLVMValueRef RetVal = LLVMBuildCall(Builder, MappedFn, nullptr, 0, "");
+  LLVMBuildRet(Builder, RetVal);
+  LLVMDisposeBuilder(Builder);
+
+  LLVMVerifyModule(Module, LLVMAbortProcessAction, &Error);
+  LLVMDisposeMessage(Error);
+
+  buildMCJITOptions();
+  buildMCJITEngine();
+
+  LLVMAddGlobalMapping(
+      Engine, MappedFn,
+      reinterpret_cast<void *>(reinterpret_cast<uintptr_t>(&localTestFunc)));
+
+  buildAndRunPasses();
+
+  uint64_t raw = LLVMGetFunctionAddress(Engine, "test_fn");
+  int (*usable)() = (int (*)()) raw;
+
+  EXPECT_EQ(42, usable());
+}

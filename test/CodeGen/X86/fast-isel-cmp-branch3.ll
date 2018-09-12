@@ -1,4 +1,4 @@
-; RUN: llc < %s -fast-isel -fast-isel-abort -mtriple=x86_64-apple-darwin10 | FileCheck %s
+; RUN: llc < %s -fast-isel -fast-isel-abort=1 -mtriple=x86_64-apple-darwin10 | FileCheck %s
 
 define i32 @fcmp_oeq1(float %x) {
 ; CHECK-LABEL: fcmp_oeq1
@@ -351,7 +351,7 @@ bb1:
 define i32 @icmp_eq(i32 %x) {
 ; CHECK-LABEL: icmp_eq
 ; CHECK-NOT:   cmpl
-; CHECK:       movl $0, %eax
+; CHECK:       xorl %eax, %eax
   %1 = icmp eq i32 %x, %x
   br i1 %1, label %bb1, label %bb2
 bb2:
@@ -387,7 +387,7 @@ bb1:
 define i32 @icmp_uge(i32 %x) {
 ; CHECK-LABEL: icmp_uge
 ; CHECK-NOT:   cmpl
-; CHECK:       movl $0, %eax
+; CHECK:       xorl %eax, %eax
   %1 = icmp uge i32 %x, %x
   br i1 %1, label %bb1, label %bb2
 bb2:
@@ -411,7 +411,7 @@ bb1:
 define i32 @icmp_ule(i32 %x) {
 ; CHECK-LABEL: icmp_ule
 ; CHECK-NOT:   cmpl
-; CHECK:       movl $0, %eax
+; CHECK:       xorl %eax, %eax
   %1 = icmp ule i32 %x, %x
   br i1 %1, label %bb1, label %bb2
 bb2:
@@ -435,7 +435,7 @@ bb1:
 define i32 @icmp_sge(i32 %x) {
 ; CHECK-LABEL: icmp_sge
 ; CHECK-NOT:   cmpl
-; CHECK:       movl $0, %eax
+; CHECK:       xorl %eax, %eax
   %1 = icmp sge i32 %x, %x
   br i1 %1, label %bb1, label %bb2
 bb2:
@@ -459,7 +459,7 @@ bb1:
 define i32 @icmp_sle(i32 %x) {
 ; CHECK-LABEL: icmp_sle
 ; CHECK-NOT:   cmpl
-; CHECK:       movl $0, %eax
+; CHECK:       xorl %eax, %eax
   %1 = icmp sle i32 %x, %x
   br i1 %1, label %bb1, label %bb2
 bb2:

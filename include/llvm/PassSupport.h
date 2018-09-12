@@ -26,7 +26,7 @@
 #include "llvm/PassInfo.h"
 #include "llvm/PassRegistry.h"
 #include "llvm/Support/Atomic.h"
-#include "llvm/Support/Valgrind.h"
+#include "llvm/Support/Compiler.h"
 #include <vector>
 
 namespace llvm {
@@ -81,6 +81,15 @@ class TargetMachine;
   void llvm::initialize##passName##Pass(PassRegistry &Registry) { \
     CALL_ONCE_INITIALIZATION(initialize##passName##PassOnce) \
   }
+
+#define INITIALIZE_PASS_WITH_OPTIONS(PassName, Arg, Name, Cfg, Analysis) \
+  INITIALIZE_PASS_BEGIN(PassName, Arg, Name, Cfg, Analysis) \
+  PassName::registerOptions(); \
+  INITIALIZE_PASS_END(PassName, Arg, Name, Cfg, Analysis)
+
+#define INITIALIZE_PASS_WITH_OPTIONS_BEGIN(PassName, Arg, Name, Cfg, Analysis) \
+  INITIALIZE_PASS_BEGIN(PassName, Arg, Name, Cfg, Analysis) \
+  PassName::registerOptions(); \
 
 template<typename PassName>
 Pass *callDefaultCtor() { return new PassName(); }

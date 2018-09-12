@@ -14,16 +14,23 @@
 #include "AArch64.h"
 #include "AArch64RegisterInfo.h"
 #include "llvm/ADT/Statistic.h"
-#include "llvm/CodeGen/MachineFunctionPass.h"
 #include "llvm/CodeGen/MachineFunction.h"
+#include "llvm/CodeGen/MachineFunctionPass.h"
 #include "llvm/CodeGen/MachineInstr.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
+#include "llvm/Target/TargetSubtargetInfo.h"
 using namespace llvm;
 
 #define DEBUG_TYPE "aarch64-dead-defs"
 
 STATISTIC(NumDeadDefsReplaced, "Number of dead definitions replaced");
+
+namespace llvm {
+void initializeAArch64DeadRegisterDefinitionsPass(PassRegistry &);
+}
+
+#define AARCH64_DEAD_REG_DEF_NAME "AArch64 Dead register definitions"
 
 namespace {
 class AArch64DeadRegisterDefinitions : public MachineFunctionPass {
@@ -34,19 +41,25 @@ private:
   bool usesFrameIndex(const MachineInstr &MI);
 public:
   static char ID; // Pass identification, replacement for typeid.
-  explicit AArch64DeadRegisterDefinitions() : MachineFunctionPass(ID) {}
+  explicit AArch64DeadRegisterDefinitions() : MachineFunctionPass(ID) {
+    initializeAArch64DeadRegisterDefinitionsPass(
+        *PassRegistry::getPassRegistry());
+  }
 
-  virtual bool runOnMachineFunction(MachineFunction &F) override;
+  bool runOnMachineFunction(MachineFunction &F) override;
 
-  const char *getPassName() const override { return "Dead register definitions"; }
+  const char *getPassName() const override { return AARCH64_DEAD_REG_DEF_NAME; }
 
-  virtual void getAnalysisUsage(AnalysisUsage &AU) const override {
+  void getAnalysisUsage(AnalysisUsage &AU) const override {
     AU.setPreservesCFG();
     MachineFunctionPass::getAnalysisUsage(AU);
   }
 };
 char AArch64DeadRegisterDefinitions::ID = 0;
 } // end anonymous namespace
+
+INITIALIZE_PASS(AArch64DeadRegisterDefinitions, "aarch64-dead-defs",
+                AARCH64_DEAD_REG_DEF_NAME, false, false)
 
 bool AArch64DeadRegisterDefinitions::implicitlyDefinesOverlappingReg(
     unsigned Reg, const MachineInstr &MI) {
@@ -119,7 +132,7 @@ bool AArch64DeadRegisterDefinitions::processMachineBasicBlock(
 // Scan the function for instructions that have a dead definition of a
 // register. Replace that register with the zero register when possible.
 bool AArch64DeadRegisterDefinitions::runOnMachineFunction(MachineFunction &MF) {
-  TRI = MF.getTarget().getRegisterInfo();
+  TRI = MF.getSubtarget().getRegisterInfo();
   bool Changed = false;
   DEBUG(dbgs() << "***** AArch64DeadRegisterDefinitions *****\n");
 

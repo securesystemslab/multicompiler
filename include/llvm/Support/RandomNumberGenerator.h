@@ -31,24 +31,8 @@ namespace llvm {
 /// module.
 class RandomNumberGenerator {
 public:
-  typedef std::mt19937_64 RNG;
-  typedef RNG::result_type result_type;
-
-  /// Returns a random number in the range [0, RNG::max()).
-  result_type operator()();
-
-  /// Returns an unbiased random number in the range [0, Max). Max
-  /// must be <= RNG::max().
-  result_type operator()(result_type Max);
-
-  // Must define min and max to be compatible with URNG as used by
-  // std::uniform_*_distribution
-  static LLVM_CONSTEXPR result_type min() {
-    return RNG::min();
-  }
-  static LLVM_CONSTEXPR result_type max() {
-    return RNG::max();
-  }
+  /// Returns a random number in the range [0, Max).
+  uint_fast64_t operator()();
 
 private:
   /// Seeds and salts the underlying RNG engine.
@@ -61,13 +45,11 @@ private:
   // http://en.cppreference.com/w/cpp/numeric/random/mersenne_twister_engine
   // This RNG is deterministically portable across C++11
   // implementations.
-  RNG Generator;
+  std::mt19937_64 Generator;
 
   // Noncopyable.
-  RandomNumberGenerator(const RandomNumberGenerator &other)
-      LLVM_DELETED_FUNCTION;
-  RandomNumberGenerator &
-  operator=(const RandomNumberGenerator &other) LLVM_DELETED_FUNCTION;
+  RandomNumberGenerator(const RandomNumberGenerator &other) = delete;
+  RandomNumberGenerator &operator=(const RandomNumberGenerator &other) = delete;
 
   friend class Module;
 };

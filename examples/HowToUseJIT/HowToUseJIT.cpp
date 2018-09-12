@@ -34,9 +34,9 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/ExecutionEngine/GenericValue.h"
 #include "llvm/ExecutionEngine/Interpreter.h"
-#include "llvm/ExecutionEngine/JIT.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/IRBuilder.h"
@@ -56,7 +56,8 @@ int main() {
   LLVMContext Context;
   
   // Create some module to put our function into it.
-  Module *M = new Module("test", Context);
+  std::unique_ptr<Module> Owner = make_unique<Module>("test", Context);
+  Module *M = Owner.get();
 
   // Create the add1 function entry and insert this entry into module M.  The
   // function will have a return type of "int" and take an argument of "int".
@@ -64,7 +65,7 @@ int main() {
   Function *Add1F =
     cast<Function>(M->getOrInsertFunction("add1", Type::getInt32Ty(Context),
                                           Type::getInt32Ty(Context),
-                                          (Type *)0));
+                                          nullptr));
 
   // Add a basic block to the function. As before, it automatically inserts
   // because of the last argument.
@@ -79,7 +80,7 @@ int main() {
 
   // Get pointers to the integer argument of the add1 function...
   assert(Add1F->arg_begin() != Add1F->arg_end()); // Make sure there's an arg
-  Argument *ArgX = Add1F->arg_begin();  // Get the arg
+  Argument *ArgX = &*Add1F->arg_begin();          // Get the arg
   ArgX->setName("AnArg");            // Give it a nice symbolic name for fun.
 
   // Create the add instruction, inserting it into the end of BB.
@@ -90,12 +91,11 @@ int main() {
 
   // Now, function add1 is ready.
 
-
   // Now we're going to create function `foo', which returns an int and takes no
   // arguments.
   Function *FooF =
     cast<Function>(M->getOrInsertFunction("foo", Type::getInt32Ty(Context),
-                                          (Type *)0));
+                                          nullptr));
 
   // Add a basic block to the FooF function.
   BB = BasicBlock::Create(Context, "EntryBlock", FooF);
@@ -114,7 +114,7 @@ int main() {
   builder.CreateRet(Add1CallRes);
 
   // Now we create the JIT.
-  ExecutionEngine* EE = EngineBuilder(M).create();
+  ExecutionEngine* EE = EngineBuilder(std::move(Owner)).create();
 
   outs() << "We just constructed this LLVM module:\n\n" << *M;
   outs() << "\n\nRunning foo: ";
@@ -126,7 +126,6 @@ int main() {
 
   // Import result of execution:
   outs() << "Result: " << gv.IntVal << "\n";
-  EE->freeMachineCodeForFunction(FooF);
   delete EE;
   llvm_shutdown();
   return 0;

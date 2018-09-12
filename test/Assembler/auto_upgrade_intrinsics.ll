@@ -1,5 +1,6 @@
 ; Test to make sure intrinsics are automatically upgraded.
 ; RUN: llvm-as < %s | llvm-dis | FileCheck %s
+; RUN: verify-uselistorder %s
 
 declare i8 @llvm.ctlz.i8(i8)
 declare i16 @llvm.ctlz.i16(i16)
@@ -54,6 +55,6 @@ define i32 @test.objectsize() {
 ; CHECK-LABEL: @test.objectsize(
 ; CHECK: @llvm.objectsize.i32.p0i8
 ; CHECK-DAG: declare i32 @llvm.objectsize.i32.p0i8
-  %s = call i32 @llvm.objectsize.i32(i8* getelementptr inbounds ([60 x i8]* @a, i32 0, i32 0), i1 false)
+  %s = call i32 @llvm.objectsize.i32(i8* getelementptr inbounds ([60 x i8], [60 x i8]* @a, i32 0, i32 0), i1 false)
   ret i32 %s
 }

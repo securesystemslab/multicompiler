@@ -40,8 +40,11 @@ class TargetSchedModel {
   SmallVector<unsigned, 16> ResourceFactors;
   unsigned MicroOpFactor; // Multiply to normalize microops to resource units.
   unsigned ResourceLCM;   // Resource units per cycle. Latency normalization factor.
+
+  unsigned computeInstrLatency(const MCSchedClassDesc &SCDesc) const;
+
 public:
-  TargetSchedModel(): STI(nullptr), TII(nullptr) {}
+  TargetSchedModel(): SchedModel(MCSchedModel::GetDefaultSchedModel()), STI(nullptr), TII(nullptr) {}
 
   /// \brief Initialize the machine model for instruction scheduling.
   ///
@@ -76,6 +79,12 @@ public:
     if (hasInstrItineraries())
       return &InstrItins;
     return nullptr;
+  }
+
+  /// \brief Return true if this machine model includes an instruction-level
+  /// scheduling model or cycle-to-cycle itinerary data.
+  bool hasInstrSchedModelOrItineraries() const {
+    return hasInstrSchedModel() || hasInstrItineraries();
   }
 
   /// \brief Identify the processor corresponding to the current subtarget.
@@ -167,6 +176,7 @@ public:
   /// if converter after moving it to TargetSchedModel).
   unsigned computeInstrLatency(const MachineInstr *MI,
                                bool UseDefaultDefLatency = true) const;
+  unsigned computeInstrLatency(unsigned Opcode) const;
 
   /// \brief Output dependency latency of a pair of defs of the same register.
   ///

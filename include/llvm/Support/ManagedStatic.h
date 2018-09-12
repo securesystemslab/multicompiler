@@ -11,12 +11,12 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LLVM_SUPPORT_MANAGED_STATIC_H
-#define LLVM_SUPPORT_MANAGED_STATIC_H
+#ifndef LLVM_SUPPORT_MANAGEDSTATIC_H
+#define LLVM_SUPPORT_MANAGEDSTATIC_H
 
 #include "llvm/Support/Atomic.h"
+#include "llvm/Support/Compiler.h"
 #include "llvm/Support/Threading.h"
-#include "llvm/Support/Valgrind.h"
 
 namespace llvm {
 

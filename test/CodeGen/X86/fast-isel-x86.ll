@@ -6,7 +6,7 @@
 ; CHECK: retl
 @G = external global float
 define float @test0() nounwind {
-  %t = load float* @G
+  %t = load float, float* @G
   ret float %t
 }
 
@@ -28,7 +28,7 @@ define void @test1({i32, i32, i32, i32}* sret %p) nounwind {
 ; CHECK: retl
 @HHH = external global i32
 define i32 @test2() nounwind {
-  %t = load i32* @HHH
+  %t = load i32, i32* @HHH
   ret i32 %t
 }
 
@@ -60,3 +60,21 @@ entry:
 ; CHECK: addl $28
 }
 declare fastcc void @test4fastccsret(%struct.a* sret)
+
+
+; Check that fast-isel cleans up when it fails to lower a call instruction.
+define void @test5() {
+entry:
+  %call = call i32 @test5dllimport(i32 42)
+  ret void
+; CHECK-LABEL: test5:
+; Local value area is still there:
+; CHECK: movl $42, {{%[a-z]+}}
+; Fast-ISel's arg push is not here:
+; CHECK-NOT: movl $42, (%esp)
+; SDag-ISel's arg push:
+; CHECK: movl %esp, [[REGISTER:%[a-z]+]]
+; CHECK: movl $42, ([[REGISTER]])
+; CHECK: movl __imp__test5dllimport
+}
+declare dllimport i32 @test5dllimport(i32)

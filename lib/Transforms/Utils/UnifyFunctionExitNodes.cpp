@@ -35,7 +35,6 @@ void UnifyFunctionExitNodes::getAnalysisUsage(AnalysisUsage &AU) const{
   // We preserve the non-critical-edgeness property
   AU.addPreservedID(BreakCriticalEdgesID);
   // This is a cluster of orthogonal Transforms
-  AU.addPreserved("mem2reg");
   AU.addPreservedID(LowerSwitchID);
 }
 
@@ -51,11 +50,11 @@ bool UnifyFunctionExitNodes::runOnFunction(Function &F) {
   //
   std::vector<BasicBlock*> ReturningBlocks;
   std::vector<BasicBlock*> UnreachableBlocks;
-  for(Function::iterator I = F.begin(), E = F.end(); I != E; ++I)
-    if (isa<ReturnInst>(I->getTerminator()))
-      ReturningBlocks.push_back(I);
-    else if (isa<UnreachableInst>(I->getTerminator()))
-      UnreachableBlocks.push_back(I);
+  for (BasicBlock &I : F)
+    if (isa<ReturnInst>(I.getTerminator()))
+      ReturningBlocks.push_back(&I);
+    else if (isa<UnreachableInst>(I.getTerminator()))
+      UnreachableBlocks.push_back(&I);
 
   // Then unreachable blocks.
   if (UnreachableBlocks.empty()) {

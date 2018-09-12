@@ -22,7 +22,9 @@
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Module.h"
 #include "llvm/Transforms/Utils/CtorUtils.h"
+#include "llvm/Transforms/Utils/GlobalStatus.h"
 #include "llvm/Pass.h"
+#include <unordered_map>
 using namespace llvm;
 
 #define DEBUG_TYPE "globaldce"
@@ -46,6 +48,7 @@ namespace {
   private:
     SmallPtrSet<GlobalValue*, 32> AliveGlobals;
     SmallPtrSet<Constant *, 8> SeenConstants;
+    std::unordered_multimap<Comdat *, GlobalValue *> ComdatMembers;
 
     /// GlobalIsNeeded - mark the specific global value as needed, and
     /// recursively mark anything that it uses as also needed.
@@ -77,58 +80,40 @@ bool GlobalDCE::runOnModule(Module &M) {
   // Remove empty functions from the global ctors list.
   Changed |= optimizeGlobalCtorsList(M, isEmptyFunction);
 
-  typedef std::multimap<const Comdat *, GlobalValue *> ComdatGVPairsTy;
-  ComdatGVPairsTy ComdatGVPairs;
+  // Collect the set of members for each comdat.
+  for (Function &F : M)
+    if (Comdat *C = F.getComdat())
+      ComdatMembers.insert(std::make_pair(C, &F));
+  for (GlobalVariable &GV : M.globals())
+    if (Comdat *C = GV.getComdat())
+      ComdatMembers.insert(std::make_pair(C, &GV));
+  for (GlobalAlias &GA : M.aliases())
+    if (Comdat *C = GA.getComdat())
+      ComdatMembers.insert(std::make_pair(C, &GA));
 
   // Loop over the module, adding globals which are obviously necessary.
-  for (Module::iterator I = M.begin(), E = M.end(); I != E; ++I) {
-    Changed |= RemoveUnusedGlobalValue(*I);
+  for (Function &F : M) {
+    Changed |= RemoveUnusedGlobalValue(F);
     // Functions with external linkage are needed if they have a body
-    if (!I->isDeclaration() && !I->hasAvailableExternallyLinkage()) {
-      if (!I->isDiscardableIfUnused())
-        GlobalIsNeeded(I);
-      else if (const Comdat *C = I->getComdat())
-        ComdatGVPairs.insert(std::make_pair(C, I));
-    }
+    if (!F.isDeclaration() && !F.hasAvailableExternallyLinkage())
+      if (!F.isDiscardableIfUnused())
+        GlobalIsNeeded(&F);
   }
 
-  for (Module::global_iterator I = M.global_begin(), E = M.global_end();
-       I != E; ++I) {
-    Changed |= RemoveUnusedGlobalValue(*I);
+  for (GlobalVariable &GV : M.globals()) {
+    Changed |= RemoveUnusedGlobalValue(GV);
     // Externally visible & appending globals are needed, if they have an
     // initializer.
-    if (!I->isDeclaration() && !I->hasAvailableExternallyLinkage()) {
-      if (!I->isDiscardableIfUnused())
-        GlobalIsNeeded(I);
-      else if (const Comdat *C = I->getComdat())
-        ComdatGVPairs.insert(std::make_pair(C, I));
-    }
+    if (!GV.isDeclaration() && !GV.hasAvailableExternallyLinkage())
+      if (!GV.isDiscardableIfUnused())
+        GlobalIsNeeded(&GV);
   }
 
-  for (Module::alias_iterator I = M.alias_begin(), E = M.alias_end();
-       I != E; ++I) {
-    Changed |= RemoveUnusedGlobalValue(*I);
+  for (GlobalAlias &GA : M.aliases()) {
+    Changed |= RemoveUnusedGlobalValue(GA);
     // Externally visible aliases are needed.
-    if (!I->isDiscardableIfUnused()) {
-      GlobalIsNeeded(I);
-    } else if (const Comdat *C = I->getComdat()) {
-      ComdatGVPairs.insert(std::make_pair(C, I));
-    }
-  }
-
-  for (ComdatGVPairsTy::iterator I = ComdatGVPairs.begin(),
-                                 E = ComdatGVPairs.end();
-       I != E;) {
-    ComdatGVPairsTy::iterator UB = ComdatGVPairs.upper_bound(I->first);
-    bool CanDiscard = std::all_of(I, UB, [](ComdatGVPairsTy::value_type Pair) {
-      return Pair.second->isDiscardableIfUnused();
-    });
-    if (!CanDiscard) {
-      std::for_each(I, UB, [this](ComdatGVPairsTy::value_type Pair) {
-        GlobalIsNeeded(Pair.second);
-      });
-    }
-    I = UB;
+    if (!GA.isDiscardableIfUnused())
+      GlobalIsNeeded(&GA);
   }
 
   // Now that all globals which are needed are in the AliveGlobals set, we loop
@@ -136,47 +121,50 @@ bool GlobalDCE::runOnModule(Module &M) {
   //
 
   // The first pass is to drop initializers of global variables which are dead.
-  std::vector<GlobalVariable*> DeadGlobalVars;   // Keep track of dead globals
-  for (Module::global_iterator I = M.global_begin(), E = M.global_end();
-       I != E; ++I)
-    if (!AliveGlobals.count(I)) {
-      DeadGlobalVars.push_back(I);         // Keep track of dead globals
-      I->setInitializer(nullptr);
+  std::vector<GlobalVariable *> DeadGlobalVars; // Keep track of dead globals
+  for (GlobalVariable &GV : M.globals())
+    if (!AliveGlobals.count(&GV)) {
+      DeadGlobalVars.push_back(&GV);         // Keep track of dead globals
+      if (GV.hasInitializer()) {
+        Constant *Init = GV.getInitializer();
+        GV.setInitializer(nullptr);
+        if (isSafeToDestroyConstant(Init))
+          Init->destroyConstant();
+      }
     }
 
   // The second pass drops the bodies of functions which are dead...
-  std::vector<Function*> DeadFunctions;
-  for (Module::iterator I = M.begin(), E = M.end(); I != E; ++I)
-    if (!AliveGlobals.count(I)) {
-      DeadFunctions.push_back(I);         // Keep track of dead globals
-      if (!I->isDeclaration())
-        I->deleteBody();
+  std::vector<Function *> DeadFunctions;
+  for (Function &F : M)
+    if (!AliveGlobals.count(&F)) {
+      DeadFunctions.push_back(&F);         // Keep track of dead globals
+      if (!F.isDeclaration())
+        F.deleteBody();
     }
 
   // The third pass drops targets of aliases which are dead...
   std::vector<GlobalAlias*> DeadAliases;
-  for (Module::alias_iterator I = M.alias_begin(), E = M.alias_end(); I != E;
-       ++I)
-    if (!AliveGlobals.count(I)) {
-      DeadAliases.push_back(I);
-      I->setAliasee(nullptr);
+  for (GlobalAlias &GA : M.aliases())
+    if (!AliveGlobals.count(&GA)) {
+      DeadAliases.push_back(&GA);
+      GA.setAliasee(nullptr);
     }
 
   if (!DeadFunctions.empty()) {
     // Now that all interferences have been dropped, delete the actual objects
     // themselves.
-    for (unsigned i = 0, e = DeadFunctions.size(); i != e; ++i) {
-      RemoveUnusedGlobalValue(*DeadFunctions[i]);
-      M.getFunctionList().erase(DeadFunctions[i]);
+    for (Function *F : DeadFunctions) {
+      RemoveUnusedGlobalValue(*F);
+      M.getFunctionList().erase(F);
     }
     NumFunctions += DeadFunctions.size();
     Changed = true;
   }
 
   if (!DeadGlobalVars.empty()) {
-    for (unsigned i = 0, e = DeadGlobalVars.size(); i != e; ++i) {
-      RemoveUnusedGlobalValue(*DeadGlobalVars[i]);
-      M.getGlobalList().erase(DeadGlobalVars[i]);
+    for (GlobalVariable *GV : DeadGlobalVars) {
+      RemoveUnusedGlobalValue(*GV);
+      M.getGlobalList().erase(GV);
     }
     NumVariables += DeadGlobalVars.size();
     Changed = true;
@@ -184,9 +172,9 @@ bool GlobalDCE::runOnModule(Module &M) {
 
   // Now delete any dead aliases.
   if (!DeadAliases.empty()) {
-    for (unsigned i = 0, e = DeadAliases.size(); i != e; ++i) {
-      RemoveUnusedGlobalValue(*DeadAliases[i]);
-      M.getAliasList().erase(DeadAliases[i]);
+    for (GlobalAlias *GA : DeadAliases) {
+      RemoveUnusedGlobalValue(*GA);
+      M.getAliasList().erase(GA);
     }
     NumAliases += DeadAliases.size();
     Changed = true;
@@ -195,6 +183,7 @@ bool GlobalDCE::runOnModule(Module &M) {
   // Make sure that all memory is released
   AliveGlobals.clear();
   SeenConstants.clear();
+  ComdatMembers.clear();
 
   return Changed;
 }
@@ -203,9 +192,14 @@ bool GlobalDCE::runOnModule(Module &M) {
 /// recursively mark anything that it uses as also needed.
 void GlobalDCE::GlobalIsNeeded(GlobalValue *G) {
   // If the global is already in the set, no need to reprocess it.
-  if (!AliveGlobals.insert(G))
+  if (!AliveGlobals.insert(G).second)
     return;
-  
+
+  if (Comdat *C = G->getComdat()) {
+    for (auto &&CM : make_range(ComdatMembers.equal_range(C)))
+      GlobalIsNeeded(CM.second);
+  }
+
   if (GlobalVariable *GV = dyn_cast<GlobalVariable>(G)) {
     // If this is a global variable, we must make sure to add any global values
     // referenced by the initializer to the alive set.
@@ -221,15 +215,15 @@ void GlobalDCE::GlobalIsNeeded(GlobalValue *G) {
     // any globals used will be marked as needed.
     Function *F = cast<Function>(G);
 
-    if (F->hasPrefixData())
-      MarkUsedGlobalsAsNeeded(F->getPrefixData());
+    for (Use &U : F->operands())
+      MarkUsedGlobalsAsNeeded(cast<Constant>(U.get()));
 
-    for (Function::iterator BB = F->begin(), E = F->end(); BB != E; ++BB)
-      for (BasicBlock::iterator I = BB->begin(), E = BB->end(); I != E; ++I)
-        for (User::op_iterator U = I->op_begin(), E = I->op_end(); U != E; ++U)
-          if (GlobalValue *GV = dyn_cast<GlobalValue>(*U))
+    for (BasicBlock &BB : *F)
+      for (Instruction &I : BB)
+        for (Use &U : I.operands())
+          if (GlobalValue *GV = dyn_cast<GlobalValue>(U))
             GlobalIsNeeded(GV);
-          else if (Constant *C = dyn_cast<Constant>(*U))
+          else if (Constant *C = dyn_cast<Constant>(U))
             MarkUsedGlobalsAsNeeded(C);
   }
 }
@@ -240,10 +234,10 @@ void GlobalDCE::MarkUsedGlobalsAsNeeded(Constant *C) {
 
   // Loop over all of the operands of the constant, adding any globals they
   // use to the list of needed globals.
-  for (User::op_iterator I = C->op_begin(), E = C->op_end(); I != E; ++I) {
+  for (Use &U : C->operands()) {
     // If we've already processed this constant there's no need to do it again.
-    Constant *Op = dyn_cast<Constant>(*I);
-    if (Op && SeenConstants.insert(Op))
+    Constant *Op = dyn_cast<Constant>(U);
+    if (Op && SeenConstants.insert(Op).second)
       MarkUsedGlobalsAsNeeded(Op);
   }
 }
@@ -255,7 +249,8 @@ void GlobalDCE::MarkUsedGlobalsAsNeeded(Constant *C) {
 // might make it deader.
 //
 bool GlobalDCE::RemoveUnusedGlobalValue(GlobalValue &GV) {
-  if (GV.use_empty()) return false;
+  if (GV.use_empty())
+    return false;
   GV.removeDeadConstantUsers();
   return GV.use_empty();
 }

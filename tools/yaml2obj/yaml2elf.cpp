@@ -35,6 +35,8 @@ class ContiguousBlobAccumulator {
 
   /// \returns The new offset.
   uint64_t padToAlignment(unsigned Align) {
+    if (Align == 0)
+      Align = 1;
     uint64_t CurrentOffset = InitialOffset + OS.tell();
     uint64_t AlignedOffset = RoundUpToAlignment(CurrentOffset, Align);
     for (; CurrentOffset != AlignedOffset; ++CurrentOffset)
@@ -46,7 +48,7 @@ public:
   ContiguousBlobAccumulator(uint64_t InitialOffset_)
       : InitialOffset(InitialOffset_), Buf(), OS(Buf) {}
   template <class Integer>
-  raw_ostream &getOSAndAlignedOffset(Integer &Offset, unsigned Align = 16) {
+  raw_ostream &getOSAndAlignedOffset(Integer &Offset, unsigned Align) {
     Offset = padToAlignment(Align);
     return OS;
   }
@@ -62,11 +64,7 @@ class NameToIdxMap {
 public:
   /// \returns true if name is already present in the map.
   bool addName(StringRef Name, unsigned i) {
-    StringMapEntry<int> &Entry = Map.GetOrCreateValue(Name, -1);
-    if (Entry.getValue() != -1)
-      return true;
-    Entry.setValue((int)i);
-    return false;
+    return !Map.insert(std::make_pair(Name, (int)i)).second;
   }
   /// \returns true if name is not present in the map
   bool lookup(StringRef Name, unsigned &Idx) const {
@@ -107,10 +105,10 @@ class ELFState {
   typedef typename object::ELFFile<ELFT>::Elf_Rela Elf_Rela;
 
   /// \brief The future ".strtab" section.
-  StringTableBuilder DotStrtab;
+  StringTableBuilder DotStrtab{StringTableBuilder::ELF};
 
   /// \brief The future ".shstrtab" section.
-  StringTableBuilder DotShStrtab;
+  StringTableBuilder DotShStrtab{StringTableBuilder::ELF};
 
   NameToIdxMap SN2I;
   NameToIdxMap SymN2I;
@@ -134,6 +132,11 @@ class ELFState {
                            ContiguousBlobAccumulator &CBA);
   bool writeSectionContent(Elf_Shdr &SHeader,
                            const ELFYAML::RelocationSection &Section,
+                           ContiguousBlobAccumulator &CBA);
+  bool writeSectionContent(Elf_Shdr &SHeader, const ELFYAML::Group &Group,
+                           ContiguousBlobAccumulator &CBA);
+  bool writeSectionContent(Elf_Shdr &SHeader,
+                           const ELFYAML::MipsABIFlags &Section,
                            ContiguousBlobAccumulator &CBA);
 
   // - SHT_NULL entry (placed first, i.e. 0'th entry)
@@ -219,14 +222,35 @@ bool ELFState<ELFT>::initSectionHeaders(std::vector<Elf_Shdr> &SHeaders,
 
       unsigned Index;
       if (SN2I.lookup(S->Info, Index)) {
-        errs() << "error: Unknown section referenced: '" << S->Info
-               << "' at YAML section '" << S->Name << "'.\n";
-        return false;
+        if (S->Info.getAsInteger(0, Index)) {
+          errs() << "error: Unknown section referenced: '" << S->Info
+                 << "' at YAML section '" << S->Name << "'.\n";
+          return false;
+        }
       }
       SHeader.sh_info = Index;
 
       if (!writeSectionContent(SHeader, *S, CBA))
         return false;
+    } else if (auto S = dyn_cast<ELFYAML::Group>(Sec.get())) {
+      unsigned SymIdx;
+      if (SymN2I.lookup(S->Info, SymIdx)) {
+        errs() << "error: Unknown symbol referenced: '" << S->Info
+               << "' at YAML section '" << S->Name << "'.\n";
+        return false;
+      }
+      SHeader.sh_info = SymIdx;
+      if (!writeSectionContent(SHeader, *S, CBA))
+        return false;
+    } else if (auto S = dyn_cast<ELFYAML::MipsABIFlags>(Sec.get())) {
+      if (!writeSectionContent(SHeader, *S, CBA))
+        return false;
+    } else if (auto S = dyn_cast<ELFYAML::NoBitsSection>(Sec.get())) {
+      SHeader.sh_entsize = 0;
+      SHeader.sh_size = S->Size;
+      // SHT_NOBITS section does not have content
+      // so just to setup the section offset.
+      CBA.getOSAndAlignedOffset(SHeader.sh_offset, SHeader.sh_addralign);
     } else
       llvm_unreachable("Unknown section type");
 
@@ -245,6 +269,7 @@ void ELFState<ELFT>::initSymtabSectionHeader(Elf_Shdr &SHeader,
   // One greater than symbol table index of the last local symbol.
   SHeader.sh_info = Doc.Symbols.Local.size() + 1;
   SHeader.sh_entsize = sizeof(Elf_Sym);
+  SHeader.sh_addralign = 8;
 
   std::vector<Elf_Sym> Syms;
   {
@@ -267,8 +292,9 @@ void ELFState<ELFT>::initSymtabSectionHeader(Elf_Shdr &SHeader,
   addSymbols(Doc.Symbols.Global, Syms, ELF::STB_GLOBAL);
   addSymbols(Doc.Symbols.Weak, Syms, ELF::STB_WEAK);
 
-  writeArrayData(CBA.getOSAndAlignedOffset(SHeader.sh_offset),
-                 makeArrayRef(Syms));
+  writeArrayData(
+      CBA.getOSAndAlignedOffset(SHeader.sh_offset, SHeader.sh_addralign),
+      makeArrayRef(Syms));
   SHeader.sh_size = arrayDataSize(makeArrayRef(Syms));
 }
 
@@ -279,7 +305,8 @@ void ELFState<ELFT>::initStrtabSectionHeader(Elf_Shdr &SHeader, StringRef Name,
   zero(SHeader);
   SHeader.sh_name = DotShStrtab.getOffset(Name);
   SHeader.sh_type = ELF::SHT_STRTAB;
-  CBA.getOSAndAlignedOffset(SHeader.sh_offset) << STB.data();
+  CBA.getOSAndAlignedOffset(SHeader.sh_offset, SHeader.sh_addralign)
+      << STB.data();
   SHeader.sh_size = STB.data().size();
   SHeader.sh_addralign = 1;
 }
@@ -304,7 +331,7 @@ void ELFState<ELFT>::addSymbols(const std::vector<ELFYAML::Symbol> &Symbols,
       Symbol.st_shndx = Index;
     } // else Symbol.st_shndex == SHN_UNDEF (== 0), since it was zero'd earlier.
     Symbol.st_value = Sym.Value;
-    Symbol.st_other = Sym.Visibility;
+    Symbol.st_other = Sym.Other;
     Symbol.st_size = Sym.Size;
     Syms.push_back(Symbol);
   }
@@ -317,7 +344,8 @@ ELFState<ELFT>::writeSectionContent(Elf_Shdr &SHeader,
                                     ContiguousBlobAccumulator &CBA) {
   assert(Section.Size >= Section.Content.binary_size() &&
          "Section size and section content are inconsistent");
-  raw_ostream &OS = CBA.getOSAndAlignedOffset(SHeader.sh_offset);
+  raw_ostream &OS =
+      CBA.getOSAndAlignedOffset(SHeader.sh_offset, SHeader.sh_addralign);
   Section.Content.writeAsBinary(OS);
   for (auto i = Section.Content.binary_size(); i < Section.Size; ++i)
     OS.write(0);
@@ -325,46 +353,108 @@ ELFState<ELFT>::writeSectionContent(Elf_Shdr &SHeader,
   SHeader.sh_size = Section.Size;
 }
 
+static bool isMips64EL(const ELFYAML::Object &Doc) {
+  return Doc.Header.Machine == ELFYAML::ELF_EM(llvm::ELF::EM_MIPS) &&
+         Doc.Header.Class == ELFYAML::ELF_ELFCLASS(ELF::ELFCLASS64) &&
+         Doc.Header.Data == ELFYAML::ELF_ELFDATA(ELF::ELFDATA2LSB);
+}
+
 template <class ELFT>
 bool
 ELFState<ELFT>::writeSectionContent(Elf_Shdr &SHeader,
                                     const ELFYAML::RelocationSection &Section,
                                     ContiguousBlobAccumulator &CBA) {
-  if (Section.Type != llvm::ELF::SHT_REL &&
-      Section.Type != llvm::ELF::SHT_RELA) {
-    errs() << "error: Invalid relocation section type.\n";
-    return false;
-  }
+  assert((Section.Type == llvm::ELF::SHT_REL ||
+          Section.Type == llvm::ELF::SHT_RELA) &&
+         "Section type is not SHT_REL nor SHT_RELA");
 
   bool IsRela = Section.Type == llvm::ELF::SHT_RELA;
   SHeader.sh_entsize = IsRela ? sizeof(Elf_Rela) : sizeof(Elf_Rel);
   SHeader.sh_size = SHeader.sh_entsize * Section.Relocations.size();
 
-  auto &OS = CBA.getOSAndAlignedOffset(SHeader.sh_offset);
+  auto &OS = CBA.getOSAndAlignedOffset(SHeader.sh_offset, SHeader.sh_addralign);
 
   for (const auto &Rel : Section.Relocations) {
-    unsigned SymIdx;
-    if (SymN2I.lookup(Rel.Symbol, SymIdx)) {
-      errs() << "error: Unknown symbol referenced: '" << Rel.Symbol
-             << "' at YAML relocation.\n";
-      return false;
-    }
+    unsigned SymIdx = 0;
+    // Some special relocation, R_ARM_v4BX for instance, does not have
+    // an external reference.  So it ignores the return value of lookup()
+    // here.
+    SymN2I.lookup(Rel.Symbol, SymIdx);
 
     if (IsRela) {
       Elf_Rela REntry;
       zero(REntry);
       REntry.r_offset = Rel.Offset;
       REntry.r_addend = Rel.Addend;
-      REntry.setSymbolAndType(SymIdx, Rel.Type);
+      REntry.setSymbolAndType(SymIdx, Rel.Type, isMips64EL(Doc));
       OS.write((const char *)&REntry, sizeof(REntry));
     } else {
       Elf_Rel REntry;
       zero(REntry);
       REntry.r_offset = Rel.Offset;
-      REntry.setSymbolAndType(SymIdx, Rel.Type);
+      REntry.setSymbolAndType(SymIdx, Rel.Type, isMips64EL(Doc));
       OS.write((const char *)&REntry, sizeof(REntry));
     }
   }
+  return true;
+}
+
+template <class ELFT>
+bool ELFState<ELFT>::writeSectionContent(Elf_Shdr &SHeader,
+                                         const ELFYAML::Group &Section,
+                                         ContiguousBlobAccumulator &CBA) {
+  typedef typename object::ELFFile<ELFT>::Elf_Word Elf_Word;
+  assert(Section.Type == llvm::ELF::SHT_GROUP &&
+         "Section type is not SHT_GROUP");
+
+  SHeader.sh_entsize = sizeof(Elf_Word);
+  SHeader.sh_size = SHeader.sh_entsize * Section.Members.size();
+
+  auto &OS = CBA.getOSAndAlignedOffset(SHeader.sh_offset, SHeader.sh_addralign);
+
+  for (auto member : Section.Members) {
+    Elf_Word SIdx;
+    unsigned int sectionIndex = 0;
+    if (member.sectionNameOrType == "GRP_COMDAT")
+      sectionIndex = llvm::ELF::GRP_COMDAT;
+    else if (SN2I.lookup(member.sectionNameOrType, sectionIndex)) {
+      errs() << "error: Unknown section referenced: '"
+             << member.sectionNameOrType << "' at YAML section' "
+             << Section.Name << "\n";
+      return false;
+    }
+    SIdx = sectionIndex;
+    OS.write((const char *)&SIdx, sizeof(SIdx));
+  }
+  return true;
+}
+
+template <class ELFT>
+bool ELFState<ELFT>::writeSectionContent(Elf_Shdr &SHeader,
+                                         const ELFYAML::MipsABIFlags &Section,
+                                         ContiguousBlobAccumulator &CBA) {
+  assert(Section.Type == llvm::ELF::SHT_MIPS_ABIFLAGS &&
+         "Section type is not SHT_MIPS_ABIFLAGS");
+
+  object::Elf_Mips_ABIFlags<ELFT> Flags;
+  zero(Flags);
+  SHeader.sh_entsize = sizeof(Flags);
+  SHeader.sh_size = SHeader.sh_entsize;
+
+  auto &OS = CBA.getOSAndAlignedOffset(SHeader.sh_offset, SHeader.sh_addralign);
+  Flags.version = Section.Version;
+  Flags.isa_level = Section.ISALevel;
+  Flags.isa_rev = Section.ISARevision;
+  Flags.gpr_size = Section.GPRSize;
+  Flags.cpr1_size = Section.CPR1Size;
+  Flags.cpr2_size = Section.CPR2Size;
+  Flags.fp_abi = Section.FpABI;
+  Flags.isa_ext = Section.ISAExtension;
+  Flags.ases = Section.ASEs;
+  Flags.flags1 = Section.Flags1;
+  Flags.flags2 = Section.Flags2;
+  OS.write((const char *)&Flags, sizeof(Flags));
+
   return true;
 }
 
@@ -476,10 +566,10 @@ int yaml2elf(yaml::Input &YIn, raw_ostream &Out) {
     return 1;
   }
   using object::ELFType;
-  typedef ELFType<support::little, 8, true> LE64;
-  typedef ELFType<support::big, 8, true> BE64;
-  typedef ELFType<support::little, 4, false> LE32;
-  typedef ELFType<support::big, 4, false> BE32;
+  typedef ELFType<support::little, true> LE64;
+  typedef ELFType<support::big, true> BE64;
+  typedef ELFType<support::little, false> LE32;
+  typedef ELFType<support::big, false> BE32;
   if (is64Bit(Doc)) {
     if (isLittleEndian(Doc))
       return ELFState<LE64>::writeELF(Out, Doc);

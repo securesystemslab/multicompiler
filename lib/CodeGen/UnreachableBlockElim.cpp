@@ -64,16 +64,15 @@ bool UnreachableBlockElim::runOnFunction(Function &F) {
   SmallPtrSet<BasicBlock*, 8> Reachable;
 
   // Mark all reachable blocks.
-  for (df_ext_iterator<Function*, SmallPtrSet<BasicBlock*, 8> > I =
-       df_ext_begin(&F, Reachable), E = df_ext_end(&F, Reachable); I != E; ++I)
-    /* Mark all reachable blocks */;
+  for (BasicBlock *BB : depth_first_ext(&F, Reachable))
+    (void)BB/* Mark all reachable blocks */;
 
   // Loop over all dead blocks, remembering them and deleting all instructions
   // in them.
   std::vector<BasicBlock*> DeadBlocks;
   for (Function::iterator I = F.begin(), E = F.end(); I != E; ++I)
-    if (!Reachable.count(I)) {
-      BasicBlock *BB = I;
+    if (!Reachable.count(&*I)) {
+      BasicBlock *BB = &*I;
       DeadBlocks.push_back(BB);
       while (PHINode *PN = dyn_cast<PHINode>(BB->begin())) {
         PN->replaceAllUsesWith(Constant::getNullValue(PN->getType()));
@@ -89,7 +88,7 @@ bool UnreachableBlockElim::runOnFunction(Function &F) {
     DeadBlocks[i]->eraseFromParent();
   }
 
-  return DeadBlocks.size();
+  return !DeadBlocks.empty();
 }
 
 
@@ -125,16 +124,14 @@ bool UnreachableMachineBlockElim::runOnMachineFunction(MachineFunction &F) {
   MachineLoopInfo *MLI = getAnalysisIfAvailable<MachineLoopInfo>();
 
   // Mark all reachable blocks.
-  for (df_ext_iterator<MachineFunction*, SmallPtrSet<MachineBasicBlock*, 8> >
-       I = df_ext_begin(&F, Reachable), E = df_ext_end(&F, Reachable);
-       I != E; ++I)
-    /* Mark all reachable blocks */;
+  for (MachineBasicBlock *BB : depth_first_ext(&F, Reachable))
+    (void)BB/* Mark all reachable blocks */;
 
   // Loop over all dead blocks, remembering them and deleting all instructions
   // in them.
   std::vector<MachineBasicBlock*> DeadBlocks;
   for (MachineFunction::iterator I = F.begin(), E = F.end(); I != E; ++I) {
-    MachineBasicBlock *BB = I;
+    MachineBasicBlock *BB = &*I;
 
     // Test for deadness.
     if (!Reachable.count(BB)) {
@@ -170,7 +167,7 @@ bool UnreachableMachineBlockElim::runOnMachineFunction(MachineFunction &F) {
 
   // Cleanup PHI nodes.
   for (MachineFunction::iterator I = F.begin(), E = F.end(); I != E; ++I) {
-    MachineBasicBlock *BB = I;
+    MachineBasicBlock *BB = &*I;
     // Prune unneeded PHI entries.
     SmallPtrSet<MachineBasicBlock*, 8> preds(BB->pred_begin(),
                                              BB->pred_end());
@@ -207,5 +204,5 @@ bool UnreachableMachineBlockElim::runOnMachineFunction(MachineFunction &F) {
 
   F.RenumberBlocks();
 
-  return (DeadBlocks.size() || ModifiedPHI);
+  return (!DeadBlocks.empty() || ModifiedPHI);
 }

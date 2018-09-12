@@ -8,10 +8,11 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/Support/ConvertUTF.h"
+#include "llvm/Support/Format.h"
 #include "gtest/gtest.h"
 #include <string>
-#include <vector>
 #include <utility>
+#include <vector>
 
 using namespace llvm;
 
@@ -37,32 +38,45 @@ TEST(ConvertUTFTest, ConvertUTF16BigEndianToUTF8String) {
   EXPECT_EQ(Expected, Result);
 }
 
+TEST(ConvertUTFTest, ConvertUTF8ToUTF16String) {
+  // Src is the look of disapproval.
+  static const char Src[] = "\xe0\xb2\xa0_\xe0\xb2\xa0";
+  StringRef Ref(Src, sizeof(Src) - 1);
+  SmallVector<UTF16, 5> Result;
+  bool Success = convertUTF8ToUTF16String(Ref, Result);
+  EXPECT_TRUE(Success);
+  static const UTF16 Expected[] = {0x0CA0, 0x005f, 0x0CA0, 0};
+  ASSERT_EQ(3u, Result.size());
+  for (int I = 0, E = 3; I != E; ++I)
+    EXPECT_EQ(Expected[I], Result[I]);
+}
+
 TEST(ConvertUTFTest, OddLengthInput) {
   std::string Result;
-  bool Success = convertUTF16ToUTF8String(ArrayRef<char>("xxxxx", 5), Result);
+  bool Success = convertUTF16ToUTF8String(makeArrayRef("xxxxx", 5), Result);
   EXPECT_FALSE(Success);
 }
 
 TEST(ConvertUTFTest, Empty) {
   std::string Result;
-  bool Success = convertUTF16ToUTF8String(ArrayRef<char>(), Result);
+  bool Success = convertUTF16ToUTF8String(None, Result);
   EXPECT_TRUE(Success);
   EXPECT_TRUE(Result.empty());
 }
 
 TEST(ConvertUTFTest, HasUTF16BOM) {
-  bool HasBOM = hasUTF16ByteOrderMark(ArrayRef<char>("\xff\xfe", 2));
+  bool HasBOM = hasUTF16ByteOrderMark(makeArrayRef("\xff\xfe", 2));
   EXPECT_TRUE(HasBOM);
-  HasBOM = hasUTF16ByteOrderMark(ArrayRef<char>("\xfe\xff", 2));
+  HasBOM = hasUTF16ByteOrderMark(makeArrayRef("\xfe\xff", 2));
   EXPECT_TRUE(HasBOM);
-  HasBOM = hasUTF16ByteOrderMark(ArrayRef<char>("\xfe\xff ", 3));
+  HasBOM = hasUTF16ByteOrderMark(makeArrayRef("\xfe\xff ", 3));
   EXPECT_TRUE(HasBOM); // Don't care about odd lengths.
-  HasBOM = hasUTF16ByteOrderMark(ArrayRef<char>("\xfe\xff\x00asdf", 6));
+  HasBOM = hasUTF16ByteOrderMark(makeArrayRef("\xfe\xff\x00asdf", 6));
   EXPECT_TRUE(HasBOM);
 
-  HasBOM = hasUTF16ByteOrderMark(ArrayRef<char>());
+  HasBOM = hasUTF16ByteOrderMark(None);
   EXPECT_FALSE(HasBOM);
-  HasBOM = hasUTF16ByteOrderMark(ArrayRef<char>("\xfe", 1));
+  HasBOM = hasUTF16ByteOrderMark(makeArrayRef("\xfe", 1));
   EXPECT_FALSE(HasBOM);
 }
 
@@ -141,8 +155,8 @@ CheckConvertUTF8ToUnicodeScalars(ConvertUTFResultContainer Expected,
   if (!Partial)
     std::tie(ErrorCode, Decoded) = ConvertUTF8ToUnicodeScalarsLenient(S);
   else
-
     std::tie(ErrorCode, Decoded) = ConvertUTF8ToUnicodeScalarsPartialLenient(S);
+
   if (Expected.ErrorCode != ErrorCode)
     return ::testing::AssertionFailure() << "Expected error code "
                                          << Expected.ErrorCode << ", actual "

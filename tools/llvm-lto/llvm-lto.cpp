@@ -13,22 +13,36 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/ADT/StringSet.h"
+#include "llvm/Bitcode/ReaderWriter.h"
 #include "llvm/CodeGen/CommandFlags.h"
+#include "llvm/IR/DiagnosticPrinter.h"
+#include "llvm/IR/LLVMContext.h"
 #include "llvm/LTO/LTOCodeGenerator.h"
 #include "llvm/LTO/LTOModule.h"
+#include "llvm/Object/FunctionIndexObjectFile.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/ManagedStatic.h"
 #include "llvm/Support/PrettyStackTrace.h"
 #include "llvm/Support/Signals.h"
 #include "llvm/Support/TargetSelect.h"
+#include "llvm/Support/ToolOutputFile.h"
 #include "llvm/Support/raw_ostream.h"
+#include <list>
 
 using namespace llvm;
 
-static cl::opt<bool>
-DisableOpt("disable-opt", cl::init(false),
-  cl::desc("Do not run any optimization passes"));
+static cl::opt<char>
+OptLevel("O",
+         cl::desc("Optimization level. [-O0, -O1, -O2, or -O3] "
+                  "(default = '-O2')"),
+         cl::Prefix,
+         cl::ZeroOrMore,
+         cl::init('2'));
+
+static cl::opt<bool> DisableVerify(
+    "disable-verify", cl::init(false),
+    cl::desc("Do not run the verifier during the optimization pipeline"));
 
 static cl::opt<bool>
 DisableInline("disable-inlining", cl::init(false),
@@ -37,6 +51,22 @@ DisableInline("disable-inlining", cl::init(false),
 static cl::opt<bool>
 DisableGVNLoadPRE("disable-gvn-loadpre", cl::init(false),
   cl::desc("Do not run the GVN load PRE pass"));
+
+static cl::opt<bool>
+DisableLTOVectorization("disable-lto-vectorization", cl::init(false),
+  cl::desc("Do not run loop or slp vectorization during LTO"));
+
+static cl::opt<bool>
+UseDiagnosticHandler("use-diagnostic-handler", cl::init(false),
+  cl::desc("Use a diagnostic handler to test the handler interface"));
+
+static cl::opt<bool>
+    ThinLTO("thinlto", cl::init(false),
+            cl::desc("Only write combined global index for ThinLTO backends"));
+
+static cl::opt<bool>
+SaveModuleFile("save-merged-module", cl::init(false),
+               cl::desc("Write merged LTO module to file before CodeGen"));
 
 static cl::list<std::string>
 InputFilenames(cl::Positional, cl::OneOrMore,
@@ -57,10 +87,151 @@ DSOSymbols("dso-symbol",
   cl::desc("Symbol to put in the symtab in the resulting dso"),
   cl::ZeroOrMore);
 
+static cl::opt<bool> ListSymbolsOnly(
+    "list-symbols-only", cl::init(false),
+    cl::desc("Instead of running LTO, list the symbols in each IR file"));
+
+static cl::opt<bool> SetMergedModule(
+    "set-merged-module", cl::init(false),
+    cl::desc("Use the first input module as the merged module"));
+
+static cl::opt<unsigned> Parallelism("j", cl::Prefix, cl::init(1),
+                                     cl::desc("Number of backend threads"));
+
 namespace {
 struct ModuleInfo {
   std::vector<bool> CanBeHidden;
 };
+}
+
+static void handleDiagnostics(lto_codegen_diagnostic_severity_t Severity,
+                              const char *Msg, void *) {
+  errs() << "llvm-lto: ";
+  switch (Severity) {
+  case LTO_DS_NOTE:
+    errs() << "note: ";
+    break;
+  case LTO_DS_REMARK:
+    errs() << "remark: ";
+    break;
+  case LTO_DS_ERROR:
+    errs() << "error: ";
+    break;
+  case LTO_DS_WARNING:
+    errs() << "warning: ";
+    break;
+  }
+  errs() << Msg << "\n";
+}
+
+static std::string CurrentActivity;
+static void diagnosticHandler(const DiagnosticInfo &DI) {
+  raw_ostream &OS = errs();
+  OS << "llvm-lto: ";
+  switch (DI.getSeverity()) {
+  case DS_Error:
+    OS << "error";
+    break;
+  case DS_Warning:
+    OS << "warning";
+    break;
+  case DS_Remark:
+    OS << "remark";
+    break;
+  case DS_Note:
+    OS << "note";
+    break;
+  }
+  if (!CurrentActivity.empty())
+    OS << ' ' << CurrentActivity;
+  OS << ": ";
+
+  DiagnosticPrinterRawOStream DP(OS);
+  DI.print(DP);
+  OS << '\n';
+
+  if (DI.getSeverity() == DS_Error)
+    exit(1);
+}
+
+static void diagnosticHandlerWithContenxt(const DiagnosticInfo &DI,
+                                          void *Context) {
+  diagnosticHandler(DI);
+}
+
+static void error(const Twine &Msg) {
+  errs() << "llvm-lto: " << Msg << '\n';
+  exit(1);
+}
+
+static void error(std::error_code EC, const Twine &Prefix) {
+  if (EC)
+    error(Prefix + ": " + EC.message());
+}
+
+template <typename T>
+static void error(const ErrorOr<T> &V, const Twine &Prefix) {
+  error(V.getError(), Prefix);
+}
+
+static std::unique_ptr<LTOModule>
+getLocalLTOModule(StringRef Path, std::unique_ptr<MemoryBuffer> &Buffer,
+                  const TargetOptions &Options) {
+  ErrorOr<std::unique_ptr<MemoryBuffer>> BufferOrErr =
+      MemoryBuffer::getFile(Path);
+  error(BufferOrErr, "error loading file '" + Path + "'");
+  Buffer = std::move(BufferOrErr.get());
+  CurrentActivity = ("loading file '" + Path + "'").str();
+  ErrorOr<std::unique_ptr<LTOModule>> Ret = LTOModule::createInLocalContext(
+      Buffer->getBufferStart(), Buffer->getBufferSize(), Options, Path);
+  CurrentActivity = "";
+  return std::move(*Ret);
+}
+
+/// \brief List symbols in each IR file.
+///
+/// The main point here is to provide lit-testable coverage for the LTOModule
+/// functionality that's exposed by the C API to list symbols.  Moreover, this
+/// provides testing coverage for modules that have been created in their own
+/// contexts.
+static void listSymbols(const TargetOptions &Options) {
+  for (auto &Filename : InputFilenames) {
+    std::unique_ptr<MemoryBuffer> Buffer;
+    std::unique_ptr<LTOModule> Module =
+        getLocalLTOModule(Filename, Buffer, Options);
+
+    // List the symbols.
+    outs() << Filename << ":\n";
+    for (int I = 0, E = Module->getSymbolCount(); I != E; ++I)
+      outs() << Module->getSymbolName(I) << "\n";
+  }
+}
+
+/// Create a combined index file from the input IR files and write it.
+///
+/// This is meant to enable testing of ThinLTO combined index generation,
+/// currently available via the gold plugin via -thinlto.
+static void createCombinedFunctionIndex() {
+  FunctionInfoIndex CombinedIndex;
+  uint64_t NextModuleId = 0;
+  for (auto &Filename : InputFilenames) {
+    CurrentActivity = "loading file '" + Filename + "'";
+    ErrorOr<std::unique_ptr<FunctionInfoIndex>> IndexOrErr =
+        llvm::getFunctionIndexForFile(Filename, diagnosticHandler);
+    std::unique_ptr<FunctionInfoIndex> Index = std::move(IndexOrErr.get());
+    CurrentActivity = "";
+    // Skip files without a function summary.
+    if (!Index)
+      continue;
+    CombinedIndex.mergeFrom(std::move(Index), ++NextModuleId);
+  }
+  std::error_code EC;
+  assert(!OutputFilename.empty());
+  raw_fd_ostream OS(OutputFilename + ".thinlto.bc", EC,
+                    sys::fs::OpenFlags::F_None);
+  error(EC, "error opening the file '" + OutputFilename + ".thinlto.bc'");
+  WriteFunctionSummaryToFile(CombinedIndex, OS);
+  OS.close();
 }
 
 int main(int argc, char **argv) {
@@ -71,6 +242,9 @@ int main(int argc, char **argv) {
   llvm_shutdown_obj Y; // Call llvm_shutdown() on exit.
   cl::ParseCommandLineOptions(argc, argv, "llvm LTO linker\n");
 
+  if (OptLevel < '0' || OptLevel > '3')
+    error("optimization level must be between 0 and 3");
+
   // Initialize the configured targets.
   InitializeAllTargets();
   InitializeAllTargetMCs();
@@ -80,23 +254,27 @@ int main(int argc, char **argv) {
   // set up the TargetOptions for the machine
   TargetOptions Options = InitTargetOptionsFromCodeGenFlags();
 
+  if (ListSymbolsOnly) {
+    listSymbols(Options);
+    return 0;
+  }
+
+  if (ThinLTO) {
+    createCombinedFunctionIndex();
+    return 0;
+  }
+
   unsigned BaseArg = 0;
 
-  LTOCodeGenerator CodeGen;
+  LLVMContext Context;
+  Context.setDiagnosticHandler(diagnosticHandlerWithContenxt, nullptr, true);
 
-  switch (RelocModel) {
-  case Reloc::Static:
-    CodeGen.setCodePICModel(LTO_CODEGEN_PIC_MODEL_STATIC);
-    break;
-  case Reloc::PIC_:
-    CodeGen.setCodePICModel(LTO_CODEGEN_PIC_MODEL_DYNAMIC);
-    break;
-  case Reloc::DynamicNoPIC:
-    CodeGen.setCodePICModel(LTO_CODEGEN_PIC_MODEL_DYNAMIC_NO_PIC);
-    break;
-  default:
-    CodeGen.setCodePICModel(LTO_CODEGEN_PIC_MODEL_DEFAULT);
-  }
+  LTOCodeGenerator CodeGen(Context);
+
+  if (UseDiagnosticHandler)
+    CodeGen.setDiagnosticHandler(handleDiagnostics, nullptr);
+
+  CodeGen.setCodePICModel(RelocModel);
 
   CodeGen.setDebugInfo(LTO_DEBUG_MODEL_DWARF);
   CodeGen.setTargetOptions(Options);
@@ -108,21 +286,12 @@ int main(int argc, char **argv) {
   std::vector<std::string> KeptDSOSyms;
 
   for (unsigned i = BaseArg; i < InputFilenames.size(); ++i) {
-    std::string error;
-    std::unique_ptr<LTOModule> Module(
-        LTOModule::createFromFile(InputFilenames[i].c_str(), Options, error));
-    if (!error.empty()) {
-      errs() << argv[0] << ": error loading file '" << InputFilenames[i]
-             << "': " << error << "\n";
-      return 1;
-    }
-
-
-    if (!CodeGen.addModule(Module.get(), error)) {
-      errs() << argv[0] << ": error adding file '" << InputFilenames[i]
-             << "': " << error << "\n";
-      return 1;
-    }
+    CurrentActivity = "loading file '" + InputFilenames[i] + "'";
+    ErrorOr<std::unique_ptr<LTOModule>> ModuleOrErr =
+        LTOModule::createFromFile(Context, InputFilenames[i].c_str(), Options);
+    error(ModuleOrErr, "error " + CurrentActivity);
+    std::unique_ptr<LTOModule> &Module = *ModuleOrErr;
+    CurrentActivity = "";
 
     unsigned NumSyms = Module->getSymbolCount();
     for (unsigned I = 0; I < NumSyms; ++I) {
@@ -134,6 +303,17 @@ int main(int argc, char **argv) {
       if (Scope != LTO_SYMBOL_SCOPE_DEFAULT_CAN_BE_HIDDEN)
         KeptDSOSyms.push_back(Name);
     }
+
+    // We use the first input module as the destination module when
+    // SetMergedModule is true.
+    if (SetMergedModule && i == BaseArg) {
+      // Transfer ownership to the code generator.
+      CodeGen.setModule(std::move(Module));
+    } else if (!CodeGen.addModule(Module.get())) {
+      // Print a message here so that we know addModule() did not abort.
+      errs() << argv[0] << ": error adding file '" << InputFilenames[i] << "'\n";
+      return 1;
+    }
   }
 
   // Add all the exported symbols to the table of symbols to preserve.
@@ -143,6 +323,11 @@ int main(int argc, char **argv) {
   // Add all the dso symbols to the table of symbols to expose.
   for (unsigned i = 0; i < KeptDSOSyms.size(); ++i)
     CodeGen.addMustPreserveSymbol(KeptDSOSyms[i].c_str());
+
+  // Set cpu and attrs strings for the default target/subtarget.
+  CodeGen.setCpu(MCPU.c_str());
+
+  CodeGen.setOptLevel(OptLevel - '0');
 
   std::string attrs;
   for (unsigned i = 0; i < MAttrs.size(); ++i) {
@@ -154,34 +339,68 @@ int main(int argc, char **argv) {
   if (!attrs.empty())
     CodeGen.setAttr(attrs.c_str());
 
+  if (FileType.getNumOccurrences())
+    CodeGen.setFileType(FileType);
+
   if (!OutputFilename.empty()) {
-    size_t len = 0;
-    std::string ErrorInfo;
-    const void *Code = CodeGen.compile(&len, DisableOpt, DisableInline,
-                                       DisableGVNLoadPRE, ErrorInfo);
-    if (!Code) {
-      errs() << argv[0]
-             << ": error compiling the code: " << ErrorInfo << "\n";
+    if (!CodeGen.optimize(DisableVerify, DisableInline, DisableGVNLoadPRE,
+                          DisableLTOVectorization)) {
+      // Diagnostic messages should have been printed by the handler.
+      errs() << argv[0] << ": error optimizing the code\n";
       return 1;
     }
 
-    raw_fd_ostream FileStream(OutputFilename.c_str(), ErrorInfo,
-                              sys::fs::F_None);
-    if (!ErrorInfo.empty()) {
-      errs() << argv[0] << ": error opening the file '" << OutputFilename
-             << "': " << ErrorInfo << "\n";
+    if (SaveModuleFile) {
+      std::string ModuleFilename = OutputFilename;
+      ModuleFilename += ".merged.bc";
+      std::string ErrMsg;
+
+      if (!CodeGen.writeMergedModules(ModuleFilename.c_str())) {
+        errs() << argv[0] << ": writing merged module failed.\n";
+        return 1;
+      }
+    }
+
+    std::list<tool_output_file> OSs;
+    std::vector<raw_pwrite_stream *> OSPtrs;
+    for (unsigned I = 0; I != Parallelism; ++I) {
+      std::string PartFilename = OutputFilename;
+      if (Parallelism != 1)
+        PartFilename += "." + utostr(I);
+      std::error_code EC;
+      OSs.emplace_back(PartFilename, EC, sys::fs::F_None);
+      if (EC) {
+        errs() << argv[0] << ": error opening the file '" << PartFilename
+               << "': " << EC.message() << "\n";
+        return 1;
+      }
+      OSPtrs.push_back(&OSs.back().os());
+    }
+
+    if (!CodeGen.compileOptimized(OSPtrs)) {
+      // Diagnostic messages should have been printed by the handler.
+      errs() << argv[0] << ": error compiling the code\n";
       return 1;
     }
 
-    FileStream.write(reinterpret_cast<const char *>(Code), len);
+    for (tool_output_file &OS : OSs)
+      OS.keep();
   } else {
-    std::string ErrorInfo;
+    if (Parallelism != 1) {
+      errs() << argv[0] << ": -j must be specified together with -o\n";
+      return 1;
+    }
+
+    if (SaveModuleFile) {
+      errs() << argv[0] << ": -save-merged-module must be specified with -o\n";
+      return 1;
+    }
+
     const char *OutputName = nullptr;
-    if (!CodeGen.compile_to_file(&OutputName, DisableOpt, DisableInline,
-                                 DisableGVNLoadPRE, ErrorInfo)) {
-      errs() << argv[0]
-             << ": error compiling the code: " << ErrorInfo
-             << "\n";
+    if (!CodeGen.compile_to_file(&OutputName, DisableVerify, DisableInline,
+                                 DisableGVNLoadPRE, DisableLTOVectorization)) {
+      // Diagnostic messages should have been printed by the handler.
+      errs() << argv[0] << ": error compiling the code\n";
       return 1;
     }
 

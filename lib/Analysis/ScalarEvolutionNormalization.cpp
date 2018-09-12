@@ -109,7 +109,7 @@ TransformImpl(const SCEV *S, Instruction *User, Value *OperandValToReplace) {
     SmallVector<const SCEV *, 8> Operands;
     const Loop *L = AR->getLoop();
     // The addrec conceptually uses its operands at loop entry.
-    Instruction *LUser = L->getHeader()->begin();
+    Instruction *LUser = &L->getHeader()->front();
     // Transform each operand.
     for (SCEVNAryExpr::op_iterator I = AR->op_begin(), E = AR->op_end();
          I != E; ++I) {
@@ -126,7 +126,7 @@ TransformImpl(const SCEV *S, Instruction *User, Value *OperandValToReplace) {
       // Normalized form:   {-2,+,1,+,2}
       // Denormalized form: {1,+,3,+,2}
       //
-      // However, denormalization would use the a different step expression than
+      // However, denormalization would use a different step expression than
       // normalization (see getPostIncExpr), generating the wrong final
       // expression: {-2,+,1,+,2} + {1,+,2} => {-1,+,3,+,2}
       if (AR->isAffine() &&

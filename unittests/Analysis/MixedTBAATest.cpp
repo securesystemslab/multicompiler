@@ -7,13 +7,14 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "llvm/Analysis/TypeBasedAliasAnalysis.h"
 #include "llvm/Analysis/Passes.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/MDBuilder.h"
 #include "llvm/IR/Module.h"
-#include "llvm/PassManager.h"
+#include "llvm/IR/LegacyPassManager.h"
 #include "llvm/Support/CommandLine.h"
 #include "gtest/gtest.h"
 
@@ -27,7 +28,7 @@ protected:
   LLVMContext C;
   Module M;
   MDBuilder MD;
-  PassManager PM;
+  legacy::PassManager PM;
 };
 
 TEST_F(MixedTBAATest, MixedTBAA) {
@@ -65,9 +66,9 @@ TEST_F(MixedTBAATest, MixedTBAA) {
   // Run the TBAA eval pass on a mixture of path-aware and non-path-aware TBAA.
   // The order of the metadata (path-aware vs non-path-aware) is important,
   // because the AA eval pass only runs one test per store-pair.
-  const char* args[] = { "MixedTBAATest", "-evaluate-tbaa" };
+  const char* args[] = { "MixedTBAATest", "-evaluate-aa-metadata" };
   cl::ParseCommandLineOptions(sizeof(args) / sizeof(const char*), args);
-  PM.add(createTypeBasedAliasAnalysisPass());
+  PM.add(createTypeBasedAAWrapperPass());
   PM.add(createAAEvalPass());
   PM.run(M);
 }

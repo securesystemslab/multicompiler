@@ -32,11 +32,13 @@ MCAsmInfoCOFF::MCAsmInfoCOFF() {
   ProtectedVisibilityAttr = MCSA_Invalid;
 
   // Set up DWARF directives
-  HasLEB128 = true;  // Target asm supports leb128 directives (little-endian)
   SupportsDebugInformation = true;
   NeedsDwarfSectionOffsetDirective = true;
 
   UseIntegratedAssembler = true;
+
+  // At least MSVC inline-asm does AShr.
+  UseLogicalShr = false;
 }
 
 void MCAsmInfoMicrosoft::anchor() { }

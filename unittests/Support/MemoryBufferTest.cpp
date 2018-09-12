@@ -26,7 +26,7 @@ protected:
   : data("this is some data")
   { }
 
-  virtual void SetUp() { }
+  void SetUp() override {}
 
   /// Common testing for different modes of getOpenFileSlice.
   /// Creates a temporary file with known contents, and uses
@@ -169,4 +169,57 @@ TEST_F(MemoryBufferTest, getOpenFileReopened) {
   testGetOpenFileSlice(true);
 }
 
+TEST_F(MemoryBufferTest, reference) {
+  OwningBuffer MB(MemoryBuffer::getMemBuffer(data));
+  MemoryBufferRef MBR(*MB);
+
+  EXPECT_EQ(MB->getBufferStart(), MBR.getBufferStart());
+  EXPECT_EQ(MB->getBufferIdentifier(), MBR.getBufferIdentifier());
+}
+
+TEST_F(MemoryBufferTest, slice) {
+  // Create a file that is six pages long with different data on each page.
+  int FD;
+  SmallString<64> TestPath;
+  sys::fs::createTemporaryFile("MemoryBufferTest_Slice", "temp", FD, TestPath);
+  raw_fd_ostream OF(FD, true, /*unbuffered=*/true);
+  for (unsigned i = 0; i < 0x2000 / 8; ++i) {
+    OF << "12345678";
+  }
+  for (unsigned i = 0; i < 0x2000 / 8; ++i) {
+    OF << "abcdefgh";
+  }
+  for (unsigned i = 0; i < 0x2000 / 8; ++i) {
+    OF << "ABCDEFGH";
+  }
+  OF.close();
+
+  // Try offset of one page.
+  ErrorOr<OwningBuffer> MB = MemoryBuffer::getFileSlice(TestPath.str(),
+                                                        0x4000, 0x1000);
+  std::error_code EC = MB.getError();
+  ASSERT_FALSE(EC);
+  EXPECT_EQ(0x4000UL, MB.get()->getBufferSize());
+ 
+  StringRef BufData = MB.get()->getBuffer();
+  EXPECT_TRUE(BufData.substr(0x0000,8).equals("12345678"));
+  EXPECT_TRUE(BufData.substr(0x0FF8,8).equals("12345678"));
+  EXPECT_TRUE(BufData.substr(0x1000,8).equals("abcdefgh"));
+  EXPECT_TRUE(BufData.substr(0x2FF8,8).equals("abcdefgh"));
+  EXPECT_TRUE(BufData.substr(0x3000,8).equals("ABCDEFGH"));
+  EXPECT_TRUE(BufData.substr(0x3FF8,8).equals("ABCDEFGH"));
+   
+  // Try non-page aligned.
+  ErrorOr<OwningBuffer> MB2 = MemoryBuffer::getFileSlice(TestPath.str(),
+                                                         0x3000, 0x0800);
+  EC = MB2.getError();
+  ASSERT_FALSE(EC);
+  EXPECT_EQ(0x3000UL, MB2.get()->getBufferSize());
+  
+  StringRef BufData2 = MB2.get()->getBuffer();
+  EXPECT_TRUE(BufData2.substr(0x0000,8).equals("12345678"));
+  EXPECT_TRUE(BufData2.substr(0x17F8,8).equals("12345678"));
+  EXPECT_TRUE(BufData2.substr(0x1800,8).equals("abcdefgh"));
+  EXPECT_TRUE(BufData2.substr(0x2FF8,8).equals("abcdefgh"));
+}
 }

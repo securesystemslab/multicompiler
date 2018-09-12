@@ -449,7 +449,6 @@ ifeq ($(HOST_OS),MingW)
   endif
 endif
 
-CXX.Flags     += -Woverloaded-virtual
 CPP.BaseFlags += $(CPP.Defines)
 AR.Flags      := cru
 
@@ -487,6 +486,8 @@ endif
 ObjRootDir  := $(PROJ_OBJ_DIR)/$(BuildMode)
 ObjDir      := $(ObjRootDir)
 LibDir      := $(PROJ_OBJ_ROOT)/$(BuildMode)/lib
+LibexecDir  := $(PROJ_OBJ_ROOT)/$(BuildMode)/libexec
+ShareDir    := $(PROJ_OBJ_ROOT)/$(BuildMode)/share
 ToolDir     := $(PROJ_OBJ_ROOT)/$(BuildMode)/bin
 ExmplDir    := $(PROJ_OBJ_ROOT)/$(BuildMode)/examples
 LLVMLibDir  := $(LLVM_OBJ_ROOT)/$(BuildMode)/lib
@@ -632,6 +633,9 @@ ifneq ($(HOST_OS), $(filter $(HOST_OS), Cygwin MingW))
 ifneq ($(HOST_OS),Darwin)
 ifneq ($(HOST_ARCH),Mips)
   CXX.Flags += -ffunction-sections -fdata-sections
+  ifeq ($(HOST_OS),SunOS)
+      CXX.Flags += -falign-functions=8
+  endif
 endif
 endif
 endif
@@ -639,8 +643,12 @@ ifndef NO_DEAD_STRIP
   ifeq ($(HOST_OS),Darwin)
     LD.Flags += -Wl,-dead_strip
   else
-    ifneq ($(HOST_OS), $(filter $(HOST_OS), Cygwin MingW))
-      LD.Flags += -Wl,--gc-sections
+    ifeq ($(HOST_OS),SunOS)
+      LD.Flags += -Wl,-z -Wl,discard-unused=sections
+    else
+      ifneq ($(HOST_OS), $(filter $(HOST_OS), Cygwin MingW))
+        LD.Flags += -Wl,--gc-sections
+      endif
     endif
   endif
 endif
@@ -680,7 +688,7 @@ endif
 CompileCommonOpts += -Wall -W -Wno-unused-parameter -Wwrite-strings \
                      $(EXTRA_OPTIONS) $(COVERED_SWITCH_DEFAULT) \
                      $(NO_UNINITIALIZED) $(NO_MAYBE_UNINITIALIZED) \
-                     $(NO_MISSING_FIELD_INITIALIZERS)
+                     $(MISSING_FIELD_INITIALIZERS) $(NO_COMMENT)
 # Enable cast-qual for C++; the workaround is to use const_cast.
 CXX.Flags += -Wcast-qual
 
@@ -726,10 +734,6 @@ endif
 ifeq ($(HOST_OS),SunOS)
 CPP.BaseFlags += -include llvm/Support/Solaris.h
 endif
-
-ifeq ($(HOST_OS),AuroraUX)
-CPP.BaseFlags += -include llvm/Support/Solaris.h
-endif # !HOST_OS - AuroraUX.
 
 # On Windows, SharedLibDir != LibDir. The order is important.
 ifeq ($(HOST_OS), $(filter $(HOST_OS), Cygwin MingW))
@@ -855,6 +859,7 @@ $(DESTDIR)$(PROJ_bindir) $(DESTDIR)$(PROJ_libdir) $(DESTDIR)$(PROJ_includedir) $
 
 .PRECIOUS: $(LibDir)/.dir $(ToolDir)/.dir $(ExmplDir)/.dir
 .PRECIOUS: $(LLVMLibDir)/.dir $(LLVMToolDir)/.dir $(LLVMExmplDir)/.dir
+.PRECIOUS: $(LibexecDir)/.dir $(ShareDir)/.dir
 
 #---------------------------------------------------------
 # Collect the object directories (as there may be more
@@ -1673,17 +1678,12 @@ $(ObjDir)/%GenAsmMatcher.inc.tmp : %.td $(ObjDir)/.dir $(LLVM_TBLGEN)
 $(TARGET:%=$(ObjDir)/%GenMCCodeEmitter.inc.tmp): \
 $(ObjDir)/%GenMCCodeEmitter.inc.tmp: %.td $(ObjDir)/.dir $(LLVM_TBLGEN)
 	$(Echo) "Building $(<F) MC code emitter with tblgen"
-	$(Verb) $(LLVMTableGen) -gen-emitter -mc-emitter -o $(call SYSPATH, $@) $<
+	$(Verb) $(LLVMTableGen) -gen-emitter -o $(call SYSPATH, $@) $<
 
 $(TARGET:%=$(ObjDir)/%GenMCPseudoLowering.inc.tmp): \
 $(ObjDir)/%GenMCPseudoLowering.inc.tmp: %.td $(ObjDir)/.dir $(LLVM_TBLGEN)
 	$(Echo) "Building $(<F) MC Pseudo instruction expander with tblgen"
 	$(Verb) $(LLVMTableGen) -gen-pseudo-lowering -o $(call SYSPATH, $@) $<
-
-$(TARGET:%=$(ObjDir)/%GenCodeEmitter.inc.tmp): \
-$(ObjDir)/%GenCodeEmitter.inc.tmp: %.td $(ObjDir)/.dir $(LLVM_TBLGEN)
-	$(Echo) "Building $(<F) code emitter with tblgen"
-	$(Verb) $(LLVMTableGen) -gen-emitter -o $(call SYSPATH, $@) $<
 
 $(TARGET:%=$(ObjDir)/%GenDAGISel.inc.tmp): \
 $(ObjDir)/%GenDAGISel.inc.tmp : %.td $(ObjDir)/.dir $(LLVM_TBLGEN)
@@ -1790,7 +1790,7 @@ endif
 # CHECK: Running the test suite
 ###############################################################################
 
-check:: all
+check::
 	$(Verb) if test -d "$(PROJ_OBJ_ROOT)/test" ; then \
 	  if test -f "$(PROJ_OBJ_ROOT)/test/Makefile" ; then \
 	    $(EchoCmd) Running test suite ; \
@@ -2147,6 +2147,8 @@ printvars::
 	$(Echo) "SrcMakefiles : " '$(SrcMakefiles)'
 	$(Echo) "ObjDir       : " '$(ObjDir)'
 	$(Echo) "LibDir       : " '$(LibDir)'
+	$(Echo) "LibexecDir   : " '$(LibexecDir)'
+	$(Echo) "ShareDir     : " '$(ShareDir)'
 	$(Echo) "ToolDir      : " '$(ToolDir)'
 	$(Echo) "ExmplDir     : " '$(ExmplDir)'
 	$(Echo) "Sources      : " '$(Sources)'

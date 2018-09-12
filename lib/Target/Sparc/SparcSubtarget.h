@@ -11,16 +11,15 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef SPARC_SUBTARGET_H
-#define SPARC_SUBTARGET_H
+#ifndef LLVM_LIB_TARGET_SPARC_SPARCSUBTARGET_H
+#define LLVM_LIB_TARGET_SPARC_SPARCSUBTARGET_H
 
 #include "SparcFrameLowering.h"
 #include "SparcInstrInfo.h"
 #include "SparcISelLowering.h"
-#include "SparcJITInfo.h"
-#include "SparcSelectionDAGInfo.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/Target/TargetFrameLowering.h"
+#include "llvm/Target/TargetSelectionDAGInfo.h"
 #include "llvm/Target/TargetSubtargetInfo.h"
 #include <string>
 
@@ -38,26 +37,30 @@ class SparcSubtarget : public SparcGenSubtargetInfo {
   bool Is64Bit;
   bool HasHardQuad;
   bool UsePopc;
-  const DataLayout DL;       // Calculates type size & alignment
   SparcInstrInfo InstrInfo;
   SparcTargetLowering TLInfo;
-  SparcSelectionDAGInfo TSInfo;
+  TargetSelectionDAGInfo TSInfo;
   SparcFrameLowering FrameLowering;
-  SparcJITInfo JITInfo;
 
 public:
-  SparcSubtarget(const std::string &TT, const std::string &CPU,
+  SparcSubtarget(const Triple &TT, const std::string &CPU,
                  const std::string &FS, TargetMachine &TM, bool is64bit);
 
-  const SparcInstrInfo *getInstrInfo() const { return &InstrInfo; }
-  const TargetFrameLowering *getFrameLowering() const { return &FrameLowering; }
-  const SparcRegisterInfo *getRegisterInfo() const {
+  const SparcInstrInfo *getInstrInfo() const override { return &InstrInfo; }
+  const TargetFrameLowering *getFrameLowering() const override {
+    return &FrameLowering;
+  }
+  const SparcRegisterInfo *getRegisterInfo() const override {
     return &InstrInfo.getRegisterInfo();
   }
-  const SparcTargetLowering *getTargetLowering() const { return &TLInfo; }
-  const SparcSelectionDAGInfo *getSelectionDAGInfo() const { return &TSInfo; }
-  SparcJITInfo *getJITInfo() { return &JITInfo; }
-  const DataLayout *getDataLayout() const { return &DL; }
+  const SparcTargetLowering *getTargetLowering() const override {
+    return &TLInfo;
+  }
+  const TargetSelectionDAGInfo *getSelectionDAGInfo() const override {
+    return &TSInfo;
+  }
+
+  bool enableMachineScheduler() const override;
 
   bool isV9() const { return IsV9; }
   bool isVIS() const { return IsVIS; }
@@ -84,7 +87,6 @@ public:
   /// returns adjusted framesize which includes space for register window
   /// spills and arguments.
   int getAdjustedFrameSize(int stackSize) const;
-
 };
 
 } // end namespace llvm

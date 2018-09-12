@@ -1,6 +1,7 @@
 ; This test checks to make sure that constant exprs fold in some simple situations
 
 ; RUN: llvm-as < %s | llvm-dis | not grep cast
+; RUN: verify-uselistorder %s
 
 @A = global i32* bitcast (i8* null to i32*)  ; Cast null -> fold
 @B = global i32** bitcast (i32** @A to i32**)   ; Cast to same type -> fold
@@ -14,3 +15,7 @@
 
 ; Address space cast AS0 null-> AS1 null
 @H = global i32 addrspace(1)* addrspacecast(i32* null to i32 addrspace(1)*)
+
+; Bitcast -> GEP
+@I = external global { i32 }
+@J = global i32* bitcast ({ i32 }* @I to i32*)

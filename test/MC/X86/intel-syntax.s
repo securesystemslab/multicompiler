@@ -489,10 +489,12 @@ test [ECX], AL
 // CHECK: fnstsw %ax
 // CHECK: fnstsw %ax
 // CHECK: fnstsw %ax
+// CHECK: fnstsw (%eax)
 fnstsw
 fnstsw AX
 fnstsw EAX
 fnstsw AL
+fnstsw WORD PTR [EAX]
 
 // CHECK: faddp %st(1)
 // CHECK: fmulp %st(1)
@@ -532,6 +534,20 @@ fsubp ST(1)
 fsubrp ST(1)
 fdivp ST(1)
 fdivrp ST(1)
+
+
+// CHECK: faddp %st(1)
+// CHECK: fmulp %st(1)
+// CHECK: fsubrp %st(1)
+// CHECK: fsubp %st(1)
+// CHECK: fdivrp %st(1)
+// CHECK: fdivp %st(1)
+fadd 
+fmul
+fsub
+fsubr
+fdiv
+fdivr
 
 // CHECK: faddp %st(1)
 // CHECK: fmulp %st(1)
@@ -586,8 +602,8 @@ fdiv ST(1)
 fdivr ST(1)
 
 
-// CHECK: fxsaveq (%rax)
-// CHECK: fxrstorq (%rax)
+// CHECK: fxsave64 (%rax)
+// CHECK: fxrstor64 (%rax)
 fxsave64 opaque ptr [rax]
 fxrstor64 opaque ptr [rax]
 
@@ -603,7 +619,135 @@ mov rcx, qword ptr [_g0 + 8]
 "?half@?0??bar@@YAXXZ@4NA":
 	.quad   4602678819172646912
 
-fadd   "?half@?0??bar@@YAXXZ@4NA"
-fadd   "?half@?0??bar@@YAXXZ@4NA"@IMGREL
+fadd   dword ptr "?half@?0??bar@@YAXXZ@4NA"
+fadd   dword ptr "?half@?0??bar@@YAXXZ@4NA"@IMGREL
 // CHECK: fadds   "?half@?0??bar@@YAXXZ@4NA"
-// CHECK: fadds   "?half@?0??bar@@YAXXZ@4NA"@IMGREL32
+// CHECK: fadds   "?half@?0??bar@@YAXXZ@4NA"@IMGREL
+
+inc qword ptr [rax]
+inc dword ptr [rax]
+inc word ptr [rax]
+inc byte ptr [rax]
+// CHECK: incq (%rax)
+// CHECK: incl (%rax)
+// CHECK: incw (%rax)
+// CHECK: incb (%rax)
+
+dec qword ptr [rax]
+dec dword ptr [rax]
+dec word ptr [rax]
+dec byte ptr [rax]
+// CHECK: decq (%rax)
+// CHECK: decl (%rax)
+// CHECK: decw (%rax)
+// CHECK: decb (%rax)
+
+add qword ptr [rax], 1
+add dword ptr [rax], 1
+add word ptr [rax], 1
+add byte ptr [rax], 1
+// CHECK: addq $1, (%rax)
+// CHECK: addl $1, (%rax)
+// CHECK: addw $1, (%rax)
+// CHECK: addb $1, (%rax)
+
+fstp tbyte ptr [rax]
+fstp xword ptr [rax]
+fstp qword ptr [rax]
+fstp dword ptr [rax]
+// CHECK: fstpt (%rax)
+// CHECK: fstpt (%rax)
+// CHECK: fstpl (%rax)
+// CHECK: fstps (%rax)
+
+fxsave [eax]
+fsave [eax]
+fxrstor [eax]
+frstor [eax]
+// CHECK: fxsave (%eax)
+// CHECK: wait
+// CHECK: fnsave (%eax)
+// CHECK: fxrstor (%eax)
+// CHECK: frstor (%eax)
+
+// FIXME: Should we accept this?  Masm accepts it, but gas does not.
+fxsave dword ptr [eax]
+fsave dword ptr [eax]
+fxrstor dword ptr [eax]
+frstor dword ptr [eax]
+// CHECK: fxsave (%eax)
+// CHECK: wait
+// CHECK: fnsave (%eax)
+// CHECK: fxrstor (%eax)
+// CHECK: frstor (%eax)
+
+// CHECK: cmpnless %xmm1, %xmm0
+cmpnless xmm0, xmm1
+
+insb
+insw
+insd
+// CHECK: insb %dx, %es:(%rdi)
+// CHECK: insw %dx, %es:(%rdi)
+// CHECK: insl %dx, %es:(%rdi)
+
+outsb
+outsw
+outsd
+// CHECK: outsb (%rsi), %dx
+// CHECK: outsw (%rsi), %dx
+// CHECK: outsl (%rsi), %dx
+
+imul bx, 123
+imul ebx, 123
+imul rbx, 123
+// CHECK: imulw $123, %bx
+// CHECK: imull $123, %ebx
+// CHECK: imulq $123, %rbx
+
+repe cmpsb
+repz cmpsb
+repne cmpsb
+repnz cmpsb
+// CHECK: rep
+// CHECK: cmpsb	%es:(%rdi), (%rsi)
+// CHECK: rep
+// CHECK: cmpsb	%es:(%rdi), (%rsi)
+// CHECK: repne
+// CHECK: cmpsb	%es:(%rdi), (%rsi)
+// CHECK: repne
+// CHECK: cmpsb	%es:(%rdi), (%rsi)
+
+sal eax, 123
+// CHECK: shll	$123, %eax
+
+psignw    mm0, MMWORD PTR t2
+// CHECK: psignw t2, %mm0
+
+comisd xmm0, QWORD PTR [eax]
+comiss xmm0, DWORD PTR [eax]
+vcomisd xmm0, QWORD PTR [eax]
+vcomiss xmm0, DWORD PTR [eax]
+
+// CHECK: comisd (%eax), %xmm0
+// CHECK: comiss (%eax), %xmm0
+// CHECK: vcomisd (%eax), %xmm0
+// CHECK: vcomiss (%eax), %xmm0
+
+fbld tbyte ptr [eax]
+fbstp tbyte ptr [eax]
+// CHECK: fbld (%eax)
+// CHECK: fbstp (%eax)
+
+fcomip st, st(2)
+fucomip st, st(2)
+// CHECK: fcompi  %st(2)
+// CHECK: fucompi  %st(2)
+
+loopz _foo
+loopnz _foo
+// CHECK: loope _foo
+// CHECK: loopne _foo
+
+sidt fword ptr [eax]
+// CHECK: sidtq (%eax)
