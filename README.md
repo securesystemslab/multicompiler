@@ -37,13 +37,13 @@ Below are all instructions explained above.
 
 #### Checking out LLVM, Clang, compiler-rt, poolalloc, and SVF:
 
-`git clone -b cfar_38 git@github.com:securesystemslab/multicompiler-priv.git llvm`
+`git clone git@github.com:securesystemslab/multicompiler.git llvm`
 
-`git clone -b cfar_38 git@github.com:securesystemslab/multicompiler-clang-priv.git llvm/tools/clang`
+`git clone git@github.com:securesystemslab/multicompiler-clang.git llvm/tools/clang`
 
-`git clone -b cfar_38 git@github.com:securesystemslab/multicompiler-compiler-rt-priv.git llvm/projects/compiler-rt`
+`git clone git@github.com:securesystemslab/multicompiler-compiler-rt.git llvm/projects/compiler-rt`
 
-`git clone -b cfar_38 git@github.com:securesystemslab/poolalloc.git llvm/projects/poolalloc`
+`git clone git@github.com:securesystemslab/poolalloc.git llvm/projects/poolalloc`
 
 ### Link-Time Optimization (LTO)
 
@@ -55,7 +55,11 @@ Function randomization requires link-time optimization, since LTO ensures that f
 
 #### Building binutils with Gold for LLVM LTO support and global shuffling
 
-`git clone -b cfar-2_26 git@github.com:/securesystemslab/binutils.git`
+For Binutils 2.26, clone:
+
+`git clone git@github.com:/securesystemslab/binutils.git`
+
+Binutils 2.24 is also available in the `cfar-2_24` branch
 
 If you want to use Readactor execute-only features, apply the Readactor Gold patch now:
 
@@ -240,7 +244,7 @@ In the current implementation, the promoted stack slots and their pointers are n
 
 TODO: 1) This currently does not promote buffers in safestack if it is used with SafeStack. 2) Promoting DynamicAllocas is currently not supported.
 
-NOTE: This transformation should not be applied to signal handlers because it inserts async-signal-unsafe functions: malloc() and free(). To avoid this issue, we whitelist signal handlers defined in [ATDSigHandlers.def](https://github.com/securesystemslab/multicompiler-priv/blob/cfar_38/lib/CodeGen/ATDSigHandlers.def).
+NOTE: This transformation should not be applied to signal handlers because it inserts async-signal-unsafe functions: malloc() and free(). To avoid this issue, we whitelist signal handlers defined in [ATDSigHandlers.def](https://github.com/securesystemslab/multicompiler/blob/master/lib/CodeGen/ATDSigHandlers.def).
 
 ### Code-pointer protection (LTO req'd)
 
